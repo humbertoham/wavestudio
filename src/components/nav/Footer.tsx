@@ -1,0 +1,124 @@
+// src/components/nav/Footer.tsx
+"use client";
+
+import Link from "next/link";
+import {
+  FiInstagram,
+  FiPhone,
+  FiMail,
+  FiMapPin,
+} from "react-icons/fi";
+
+export default function Footer() {
+  return (
+    <footer className="mt-16 border-t border-border bg-[color:var(--color-background)]">
+      <div className="container-app py-10">
+        <div className="grid gap-8 lg:grid-cols-2">
+          {/* Columna izquierda: info + links */}
+          <div className="space-y-6">
+            {/* Branding */}
+            <div className="flex items-center gap-3">
+              <img src="/logo.svg" alt="WAVE Studio" className="h-8 w-auto" />
+              <div className="font-display text-xl font-extrabold">WAVE Studio</div>
+            </div>
+
+            <p className="max-w-prose text-sm text-muted-foreground">
+              Empoderamiento a través del movimiento consciente al ritmo de la música.
+              Únete a nuestra comunidad y prioriza tu bienestar físico y mental.
+            </p>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {/* Contacto */}
+              <div className="card p-4">
+                <h4 className="font-display text-sm font-extrabold">Contacto</h4>
+                <ul className="mt-3 space-y-2 text-sm">
+                  <li className="flex items-center gap-2 text-muted-foreground">
+                    <FiPhone className="icon" />
+                    <a href="tel:+523337439983" className="hover:underline">
+                      333 743 9983
+                    </a>
+                  </li>
+                  <li className="flex items-center gap-2 text-muted-foreground">
+                    <FiMail className="icon" />
+                    <a href="mailto:hola@wavestudio.mx" className="hover:underline">
+                      hola@wavestudio.mx
+                    </a>
+                  </li>
+                  <li className="flex items-center gap-2 text-muted-foreground">
+                    <FiMapPin className="icon" />
+                    <span>
+                      1a Avenida 1495, Vista Hermosa, 64620 Monterrey, N.L.
+                    </span>
+                  </li>
+                </ul>
+
+                <div className="mt-3 flex items-center gap-3">
+                  <a
+                    href="https://www.instagram.com/wavestudio.mx/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="icon-btn ig"
+                    aria-label="Instagram"
+                    title="Instagram"
+                  >
+                    <FiInstagram className="icon" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Enlaces rápidos */}
+              <div className="card p-4">
+                <h4 className="font-display text-sm font-extrabold">Enlaces</h4>
+                <ul className="mt-3 grid gap-2 text-sm text-muted-foreground">
+                  <li><Link href="/acerca" className="hover:text-foreground">Acerca</Link></li>
+                  <li><Link href="/clases" className="hover:text-foreground">Clases</Link></li>
+                  <li><Link href="/precios" className="hover:text-foreground">Precios</Link></li>
+                  <li><Link href="/contacto" className="hover:text-foreground">Contacto</Link></li>
+                  <li><Link href="/faq" className="hover:text-foreground">Preguntas frecuentes</Link></li>
+                  <li><Link href="/politicas" className="hover:text-foreground">Políticas & Términos</Link></li>
+                </ul>
+                <div className="mt-4">
+                  <Link href="/registro" className="btn-primary">
+                    Reservar clase
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Columna derecha: mapa */}
+          <div>
+            <div className="card overflow-hidden">
+              {/* Contenedor responsive con relación 16:9 */}
+              <div className="relative w-full" style={{ aspectRatio: "16 / 9" }}>
+                <iframe
+                  title="Ubicación WAVE Studio en Google Maps"
+                  src="https://www.google.com/maps/embed?pb=!1m14!1m8!1m3!1d28760.730852351542!2d-100.3710868!3d25.7013991!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x86629746323fb619%3A0x6352c3919595d744!2swavestudio!5e0!3m2!1ses!2smx!4v1756475335440!5m2!1ses!2smx"
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  allowFullScreen
+                  className="absolute inset-0 h-full w-full border-0"
+                />
+              </div>
+            </div>
+
+            <p className="mt-3 text-xs text-muted-foreground">
+              *El mapa es referencial. Confirma horarios y disponibilidad de clases al reservar.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Lower bar */}
+      <div className="border-t border-border">
+        <div className="container-app flex flex-col items-center justify-between gap-3 py-4 text-xs text-muted-foreground md:flex-row">
+          <span>© {new Date().getFullYear()} WAVE Studio — Todos los derechos reservados</span>
+          <div className="flex items-center gap-4">
+            <Link href="/politicas" className="hover:text-foreground">Privacidad</Link>
+            <Link href="/politicas" className="hover:text-foreground">Términos</Link>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+}
