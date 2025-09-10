@@ -34,14 +34,14 @@ export default function Footer() {
                 <ul className="mt-3 space-y-2 text-sm">
                   <li className="flex items-center gap-2 text-muted-foreground">
                     <FiPhone className="icon" />
-                    <a href="tel:+523337439983" className="hover:underline">
-                      333 743 9983
+                    <a href="tel:+528128877484" className="hover:underline">
+                      +52 812 887 7484
                     </a>
                   </li>
                   <li className="flex items-center gap-2 text-muted-foreground">
                     <FiMail className="icon" />
-                    <a href="mailto:hola@wavestudio.mx" className="hover:underline">
-                      hola@wavestudio.mx
+                    <a href="mailto:wwavestudio@outlook.com" className="hover:underline">
+                      wwavestudio@outlook.com
                     </a>
                   </li>
                   <li className="flex items-center gap-2 text-muted-foreground">
@@ -74,8 +74,8 @@ export default function Footer() {
                   <li><Link href="/clases" className="hover:text-foreground">Clases</Link></li>
                   <li><Link href="/precios" className="hover:text-foreground">Precios</Link></li>
                   <li><Link href="/contacto" className="hover:text-foreground">Contacto</Link></li>
-                  <li><Link href="/faq" className="hover:text-foreground">Preguntas frecuentes</Link></li>
-                  <li><Link href="/politicas" className="hover:text-foreground">Políticas & Términos</Link></li>
+                  <li><Link href="/#FAQ" className="hover:text-foreground">Preguntas frecuentes</Link></li>
+                  <li><Link href="/terminos" className="hover:text-foreground">Políticas & Términos</Link></li>
                 </ul>
                 <div className="mt-4">
                   <Link href="/registro" className="btn-primary">
@@ -114,8 +114,8 @@ export default function Footer() {
         <div className="container-app flex flex-col items-center justify-between gap-3 py-4 text-xs text-muted-foreground md:flex-row">
           <span>© {new Date().getFullYear()} WAVE Studio — Todos los derechos reservados</span>
           <div className="flex items-center gap-4">
-            <Link href="/politicas" className="hover:text-foreground">Privacidad</Link>
-            <Link href="/politicas" className="hover:text-foreground">Términos</Link>
+            <Link href="/privacidad" className="hover:text-foreground">Privacidad</Link>
+            <Link href="/terminos" className="hover:text-foreground">Términos</Link>
           </div>
         </div>
       </div>

@@ -20,19 +20,14 @@ export default function AboutPage() {
           </h1>
 
           <p className="mt-4 text-base text-muted-foreground md:text-lg leading-relaxed">
-            WAVE Studio es un espacio que fomenta el empoderamiento de las mujeres
-            a través del movimiento consciente al ritmo de la música.
+            En WaveStudio, nos apasiona ir más allá del ejercicio físico. Nos esforzamos por crear un espacio donde la fuerza, la resistencia, el balance y la conciencia se fusionen en una experiencia de entrenamiento única.
           </p>
 
           <p className="mt-4 text-base text-muted-foreground md:text-lg leading-relaxed">
-            Aquí formamos una comunidad en búsqueda de balance y bienestar, tanto físico como mental.
-            Creemos en la fuerza que surge al elegirte primero, al dedicarte tiempo y
-            energía para crecer en armonía con tu cuerpo y mente.
+            En cada sesión, nos enfocamos en conectar con nuestro cuerpo de manera profunda, explorando sus límites y liberando su potencial oculto.
           </p>
 
-          <p className="mt-4 text-base text-muted-foreground md:text-lg leading-relaxed font-semibold">
-            ¡Te invitamos a descubrir lo poderoso que es priorizarte y elegirte a ti misma!
-          </p>
+          
         </motion.div>
 
         {/* Columna imagen (puedes cambiar la ruta de la imagen en /public/images/about.jpg) */}

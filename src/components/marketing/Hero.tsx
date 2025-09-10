@@ -59,11 +59,20 @@ export default function Hero() {
             custom={2}
             className="mt-4 max-w-prose text-base text-muted-foreground md:text-lg"
           >
-            Un espacio que fomenta el empoderamiento de las mujeres a través del
-            movimiento consciente al ritmo de la música. Formamos una comunidad
-            que busca balance y salud física y mental.
-          </motion.p>
+            Entrenamientos dirigidos a potenciar tu fuerza, incrementar tu resistencia, desarrollar tu movilidad y mejorar tu acondicionamiento físico. 
 
+          </motion.p>
+<motion.p
+            initial="hidden"
+            whileInView="show"
+            viewport={{ once: true, margin: "-80px" }}
+            variants={fadeUp}
+            custom={2}
+            className="mt-4 max-w-prose text-base text-muted-foreground md:text-lg"
+          >
+Durante cada sesión, nos enfocaremos en conectar mente y cuerpo para maximizar los resultados.
+
+          </motion.p>
           <motion.div
             initial="hidden"
             whileInView="show"

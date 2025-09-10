@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { motion, AnimatePresence, cubicBezier } from "framer-motion";
 import { FiChevronDown } from "react-icons/fi";
 
@@ -17,33 +17,40 @@ const FAQS = [
   },
   {
     q: "¿Los paquetes tienen vigencia?",
-    a: "Sí. Los paquetes de 1 y 4 clases tienen vigencia de 14 días, mientras que los de 10, 15 y Unlimited son válidos por 30 días.",
+    a: "Sí, cada paquete tiene un período de vigencia específico. Consulta en cada paquete cuántos días tienes para usar tus clases.",
   },
   {
     q: "¿Qué necesito llevar a clase?",
-    a: "Ropa cómoda, tenis o calcetas antideslizantes según la clase, y tu botella de agua. El resto del material lo ponemos nosotras.",
+    a: "Ropa cómoda, calcetas o calcetines antiderrapantes, y tu botella de agua. El resto del material lo ponemos nosotros.",
   },
   {
     q: "¿Puedo cancelar o reagendar una clase?",
-    a: "Sí, siempre que lo hagas con al menos 12 horas de anticipación. Así liberamos tu lugar para otra persona de la comunidad.",
+    a: "Sí, siempre que lo hagas con al menos 4 horas de anticipación, así liberamos tu lugar para alguien más de la comunidad.\n\nSi necesitas cancelar con menos de 4 horas, te pedimos por favor que nos avises por Instagram. Y si eres usuario de Wellhub o TotalPass, es muy importante que también canceles o nos contactes en caso de no poder asistir.",
   },
 ];
 
 function FAQItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false);
+  const contentId = useId();
 
   return (
-    <div className="card overflow-hidden">
+    <motion.div
+      layout
+      transition={{ ease: EASE, duration: 0.35 }}
+      className="card overflow-hidden rounded-2xl border bg-background/60 backdrop-blur"
+    >
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between px-4 py-3 text-left font-medium"
         aria-expanded={open}
+        aria-controls={contentId}
       >
-        <span>{q}</span>
+        <span className="pr-4">{q}</span>
         <FiChevronDown
-          className={`icon transition-transform duration-300 ${
+          className={`shrink-0 transition-transform duration-300 ${
             open ? "rotate-180 text-primary" : "rotate-0"
           }`}
+          aria-hidden="true"
         />
       </button>
 
@@ -51,23 +58,36 @@ function FAQItem({ q, a }: { q: string; a: string }) {
         {open && (
           <motion.div
             key="content"
+            id={contentId}
+            layout
             initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1, transition: { ease: EASE, duration: 0.4 } }}
-            exit={{ height: 0, opacity: 0, transition: { ease: EASE, duration: 0.3 } }}
-            className="px-4 pb-4 text-sm text-muted-foreground"
+            animate={{
+              height: "auto",
+              opacity: 1,
+              transition: { ease: EASE, duration: 0.35 },
+            }}
+            exit={{
+              height: 0,
+              opacity: 0,
+              transition: { ease: EASE, duration: 0.28 },
+            }}
+            style={{ willChange: "height, opacity" }}
+            className="overflow-hidden"
           >
-            {a}
+            <div className="px-4 pb-4 text-sm leading-relaxed text-muted-foreground whitespace-pre-line">
+              {a}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }
 
 export default function FAQ() {
   return (
-    <section className="section">
-      <div className="container-app max-w-3xl">
+    <motion.section layout className="section">
+      <div className="container-app max-w-3xl" id="FAQ">
         <h2 className="font-display text-3xl font-extrabold text-center md:text-4xl">
           Preguntas frecuentes
         </h2>
@@ -75,12 +95,16 @@ export default function FAQ() {
           Resolvemos las dudas más comunes sobre WAVE Studio.
         </p>
 
-        <div className="mt-8 grid gap-3">
+        <motion.div
+          layout
+          className="mt-8 grid gap-3"
+          transition={{ ease: EASE, duration: 0.35 }}
+        >
           {FAQS.map((faq) => (
             <FAQItem key={faq.q} q={faq.q} a={faq.a} />
           ))}
-        </div>
+        </motion.div>
       </div>
-    </section>
+    </motion.section>
   );
 }

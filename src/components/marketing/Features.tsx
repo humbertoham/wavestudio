@@ -29,8 +29,8 @@ const item: Variants = {
 const FEATURES = [
   {
     icon: FiActivity,
-    title: "Clases variadas",
-    desc: "Yoga flow, dance energy y más, para todos los niveles.",
+    title: "2 Tipos de Clases",
+    desc: "Bootcamp & Hatha Yoga",
   },
   {
     icon: FiCalendar,
@@ -74,7 +74,8 @@ export default function Features() {
             Diseñado para tu bienestar
           </motion.h2>
           <motion.p variants={item} className="mt-3 text-muted-foreground">
-            Empodérate con movimiento consciente, comunidad y una experiencia clara de reserva y compra.
+            FORTALECE TU CUERPO CON INTENCIÓN, comunidad y una experiencia clara de reserva y compra.
+
           </motion.p>
         </motion.div>
 

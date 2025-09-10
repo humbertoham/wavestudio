@@ -18,43 +18,67 @@ const EASE = cubicBezier(0.22, 1, 0.36, 1);
 
 const PACKS: Pack[] = [
   {
+    name: "Clase 2x1",
+    classesLabel: "2 clases",
+    price: 180,
+    validity: "Vigencia de 7 días",
+    description: [
+      "Primera vez en WAVE, compra una clase y te regalamos otra",
+      "Precio por clase $90",
+    ],
+  },
+  {
     name: "1 Clase",
     classesLabel: "1 clase",
     price: 180,
-    validity: "Vigencia de 14 días",
-    description: ["Ideal para probar WAVE", "Acceso a cualquier clase"],
+    validity: "Vigencia de 7 días",
+    description: ["Ideal para probar WAVE a tu ritmo"],
   },
   {
-    name: "4 Clases",
-    classesLabel: "4 clases",
-    price: 720, // 4 x 180
+    name: "4 Clases + 1",
+    classesLabel: "5 clases",
+    price: 750,
     validity: "Vigencia de 14 días",
+    description: [
+      "Perfecto para empezar a entrenar más de una vez por semana",
+      "Incluye 1 clase de regalo",
+    ],
     highlight: "popular",
-    description: ["Flexibilidad en tu semana", "Reserva fácil desde tu cuenta"],
   },
   {
-    name: "10 Clases",
-    classesLabel: "10 clases",
-    price: 1600,
+    name: "10 Clases + 2",
+    classesLabel: "12 clases",
+    price: 1650,
     validity: "Vigencia de 30 días",
-    description: ["Mejor costo por clase", "Perfecto para constancia"],
+    description: [
+      "Entrena con constancia y ve resultados",
+      "Incluye 2 clases de regalo",
+    ],
   },
   {
-    name: "15 Clases",
-    classesLabel: "15 clases",
-    price: 2100,
+    name: "15 Clases + 3",
+    classesLabel: "18 clases",
+    price: 2165,
     validity: "Vigencia de 30 días",
-    description: ["Entrena 3–4 veces por semana", "Ahorro adicional"],
+    description: [
+      "Diseñado para quienes entrenan 3 veces por semana",
+      "Más ahorro y mejor costo por clase",
+      "Incluye 3 clases de regalo",
+    ],
   },
   {
-    name: "UNLIMITED",
-    classesLabel: "Acceso ilimitado",
+    name: "30 Clases",
+    classesLabel: "30 clases",
     price: 2900,
-    validity: "Vigencia de 30 días",
+    validity: "Vigencia de 45 días",
     highlight: "best",
-    description: ["Todas las clases del mes", "Prioridad en reservaciones"],
+    description: [
+      "La opción más completa: entrena hasta 5 veces por semana",
+      "¡El mejor costo por clase, menos de $100 por sesión!",
+    ],
   },
 ];
+
 
 const formatMXN = (n: number) =>
   n.toLocaleString("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 });
