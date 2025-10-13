@@ -1,0 +1,324 @@
+// prisma/schema.prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/**
+ * =========================
+ * Enums
+ * =========================
+ */
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Affiliation {
+  NONE
+  WELLHUB
+  TOTALPASS
+}
+
+enum BookingStatus {
+  ACTIVE
+  CANCELED
+}
+
+enum TokenReason {
+  PURCHASE_CREDIT // alta inicial al comprar paquete
+  BOOKING_DEBIT // consumo por reserva
+  CANCEL_REFUND // reembolso por cancelación válida
+  ADMIN_ADJUST // ajustes manuales
+}
+
+enum PackHighlight {
+  POPULAR
+  BEST
+}
+
+enum PaymentProvider {
+  MERCADOPAGO
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REFUNDED
+  CANCELED
+}
+
+enum CheckoutStatus {
+  CREATED
+  OPEN
+  EXPIRED
+  COMPLETED
+  CANCELED
+}
+
+/**
+ * =========================
+ * Modelos base
+ * =========================
+ */
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  passwordHash  String
+  emailVerified DateTime?
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // relaciones
+  bookings      Booking[]
+  packs         PackPurchase[]
+  tokenLedger   TokenLedger[]
+  waitlists     Waitlist[]
+  payments      Payment[]
+  checkoutLinks CheckoutLink[]
+
+  // perfil
+  dateOfBirth    DateTime?
+  phone          String?     @db.VarChar(20)
+  emergencyPhone String?     @db.VarChar(20)
+  affiliation    Affiliation @default(NONE)
+}
+
+model Instructor {
+  id        String   @id @default(cuid())
+  name      String
+  bio       String?
+  createdAt DateTime @default(now())
+  classes   Class[]
+}
+
+/**
+ * =========================
+ * Clases y Reservas
+ * =========================
+ */
+model Class {
+  id           String     @id @default(cuid())
+  title        String
+  focus        String
+  date         DateTime
+  durationMin  Int
+  capacity     Int
+  creditCost   Int        @default(1) // costo en tokens por reservar
+  instructor   Instructor @relation(fields: [instructorId], references: [id])
+  instructorId String
+  bookings     Booking[]
+
+  // extras opcionales útiles
+  location        String?
+  isCanceled      Boolean    @default(false)
+  cancelBeforeMin Int? // minutos antes del inicio para permitir reembolso de token
+  waitlist        Waitlist[]
+
+  @@index([date])
+}
+
+model Booking {
+  id        String        @id @default(cuid())
+  user      User          @relation(fields: [userId], references: [id])
+  userId    String
+  class     Class         @relation(fields: [classId], references: [id])
+  classId   String
+  status    BookingStatus @default(ACTIVE)
+  createdAt DateTime      @default(now())
+
+  // Permite varias plazas de un mismo usuario en la misma clase
+  quantity Int @default(1)
+
+  packPurchase   PackPurchase? @relation(fields: [packPurchaseId], references: [id])
+  packPurchaseId String?
+
+  canceledAt  DateTime?
+  refundToken Boolean?
+
+  // lado opuesto de TokenLedger.booking
+  ledgerEntries TokenLedger[]
+
+  // Nota: NO hay @@unique([userId, classId]) para permitir varias plazas
+  @@index([classId])
+  @@index([userId])
+}
+
+/**
+ * =========================
+ * Paquetes y Compras
+ * =========================
+ */
+model Pack {
+  id           String         @id @default(cuid())
+  name         String
+  classes      Int
+  price        Int // MXN
+  validityDays Int
+  isActive     Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  purchases    PackPurchase[]
+
+  // marketing/UI
+  classesLabel String? // ej. "5 clases"
+  highlight    PackHighlight?
+  description  Json? // ej. string[] (bullets) o estructura rica
+  CheckoutLink CheckoutLink[]
+}
+
+model PackPurchase {
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+  pack   Pack   @relation(fields: [packId], references: [id])
+  packId String
+
+  classesLeft Int
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // relaciones derivadas
+  bookings      Booking[]
+  ledgerEntries TokenLedger[]
+
+  // Relación con Payment (1–1, opcional)
+  payment   Payment? @relation("PaymentToPackPurchase", fields: [paymentId], references: [id])
+  paymentId String?  @unique // <- necesario para 1–1
+
+  @@index([userId, expiresAt])
+}
+
+/**
+ * =========================
+ * Ledger de tokens
+ * =========================
+ */
+model TokenLedger {
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id])
+  userId String
+
+  packPurchase   PackPurchase? @relation(fields: [packPurchaseId], references: [id])
+  packPurchaseId String?
+
+  booking   Booking? @relation(fields: [bookingId], references: [id])
+  bookingId String?
+
+  delta     Int
+  reason    TokenReason
+  createdAt DateTime    @default(now())
+
+  @@index([userId, packPurchaseId])
+  @@index([bookingId])
+}
+
+/**
+ * =========================
+ * Lista de espera
+ * =========================
+ */
+model Waitlist {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  class     Class    @relation(fields: [classId], references: [id])
+  classId   String
+  position  Int
+  createdAt DateTime @default(now())
+
+  @@unique([userId, classId])
+  @@index([classId, position])
+}
+
+/**
+ * =========================
+ * Pagos / Enlaces / Webhooks
+ * =========================
+ */
+model Payment {
+  id       String          @id @default(cuid())
+  provider PaymentProvider
+  status   PaymentStatus   @default(PENDING)
+  amount   Int // en MXN
+  currency String          @default("MXN")
+
+  user   User?   @relation(fields: [userId], references: [id])
+  userId String?
+
+  // Mercadopago specifics
+  mpPreferenceId String? // preference_id
+  mpPaymentId    String? // payment.id (cuando exista)
+  mpInitPoint    String? // init_point para redirigir
+  mpExternalRef  String? // external_reference
+  mpPayerEmail   String?
+  mpRaw          Json? // snapshot del payload (preference/payment)
+
+  // Relación 1–1 con PackPurchase (opcional)
+  packPurchase PackPurchase? @relation("PaymentToPackPurchase")
+
+  // Relación 1–1 con CheckoutLink (opcional)
+  checkoutLink CheckoutLink? @relation("PaymentToCheckout")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([provider, status])
+  @@index([mpPreferenceId])
+  @@index([mpPaymentId])
+}
+
+model CheckoutLink {
+  id     String         @id @default(cuid())
+  code   String         @unique // slug/código corto para URL personalizada
+  status CheckoutStatus @default(CREATED)
+
+  // Qué se va a comprar
+  pack   Pack   @relation(fields: [packId], references: [id])
+  packId String
+
+  // Quién (opcional si es link público)
+  user   User?   @relation(fields: [userId], references: [id])
+  userId String?
+
+  // Preferencia/Payment asociado
+  payment   Payment? @relation("PaymentToCheckout", fields: [paymentId], references: [id])
+  paymentId String?  @unique // <- necesario para 1–1
+
+  // Expiración opcional
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  // Redirecciones
+  successUrl String?
+  failureUrl String?
+  pendingUrl String?
+
+  // Tracking
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+
+  @@index([status, expiresAt])
+}
+
+model WebhookLog {
+  id          String          @id @default(cuid())
+  provider    PaymentProvider
+  eventType   String?
+  deliveryId  String? // para idempotencia si el proveedor reintenta
+  payload     Json
+  receivedAt  DateTime        @default(now())
+  processedOk Boolean         @default(false)
+  error       String?
+
+  @@index([provider, deliveryId])
+}

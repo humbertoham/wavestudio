@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import {
   FiMenu,
   FiX,
@@ -13,8 +13,12 @@ import {
   FiPhone,
   FiMail,
   FiMapPin,
+  FiLogOut,
+  FiUserCheck,
+  FiCalendar,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
+import { useSession } from "@/lib/useSession";
 
 const NAV_LINKS = [
   { href: "/", label: "Inicio" },
@@ -29,10 +33,22 @@ const SECONDARY_LINKS = [
   { href: "/politicas", label: "Políticas & Términos" },
 ];
 
+function getInitials(name?: string) {
+  if (!name) return "U";
+  const parts = name.trim().split(/\s+/);
+  const first = parts[0]?.[0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : "";
+  return (first + last).toUpperCase();
+}
+
 export function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isDark, setIsDark] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+
+  const { user, isAuthenticated, isLoading, refresh } = useSession();
 
   // Persistencia de tema
   useEffect(() => {
@@ -54,7 +70,29 @@ export function Navbar() {
   // Cierra el menú al navegar
   useEffect(() => {
     setOpen(false);
+    setUserMenuOpen(false);
   }, [pathname]);
+
+  const initials = useMemo(() => getInitials(user?.name), [user]);
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch {
+      // ignora
+    } finally {
+      await refresh();
+      router.refresh?.();
+      setUserMenuOpen(false);
+      // Opcional: redirige al home si estabas en rutas privadas
+      if (pathname.startsWith("/cuenta") || pathname.startsWith("/admin")) {
+        router.push("/");
+      }
+    }
+  }
 
   return (
     <header className="sticky top-0 z-50 bg-[color:var(--color-background)/0.8] backdrop-blur border-b border-border">
@@ -90,7 +128,7 @@ export function Navbar() {
             })}
           </ul>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 relative">
             <button
               onClick={toggleTheme}
               aria-label="Cambiar tema"
@@ -99,23 +137,88 @@ export function Navbar() {
             >
               {isDark ? <FiSun className="icon" /> : <FiMoon className="icon" />}
             </button>
-            <Link href="/login" className="btn-outline h-10">
-              <FiUser className="icon" />
-              <span className="ml-1.5">Iniciar sesión</span>
-            </Link>
-            <Link href="/registro" className="btn-primary h-10">
-              Reservar clase
-            </Link>
+
+            {/* Acciones: depende de sesión */}
+            {!isLoading && !isAuthenticated && (
+              <>
+                <Link href="/login" className="btn-outline h-10">
+                  <FiUser className="icon" />
+                  <span className="ml-1.5">Iniciar sesión</span>
+                </Link>
+                <Link href="/registro" className="btn-primary h-10">
+                  Reservar clase
+                </Link>
+              </>
+            )}
+
+            {!isLoading && isAuthenticated && (
+              <>
+                <Link href="/mis-clases" className="btn-primary h-10">
+                  <FiCalendar className="icon" />
+                  <span className="ml-1.5">Mis clases</span>
+                </Link>
+
+                {/* Botón de usuario */}
+                <button
+                  onClick={() => setUserMenuOpen((v) => !v)}
+                  className="h-10 px-3 rounded-full border border-border flex items-center gap-2 hover:bg-muted"
+                  aria-haspopup="menu"
+                  aria-expanded={userMenuOpen}
+                  aria-label="Menú de usuario"
+                >
+                  <div className="h-7 w-7 rounded-full bg-primary/10 text-primary grid place-items-center text-xs font-bold">
+                    {initials}
+                  </div>
+                  <span className="text-sm font-medium max-w-[12ch] truncate">
+                    {user?.name ?? user?.email}
+                  </span>
+                </button>
+
+                {/* Menú desplegable */}
+                <AnimatePresence>
+                  {userMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 6 }}
+                      className="absolute right-0 top-12 w-56 rounded-xl border border-border bg-background shadow-xl overflow-hidden"
+                      role="menu"
+                    >
+                      <div className="px-3 py-2 text-xs text-muted-foreground">
+                        Sesión iniciada como
+                        <div className="font-medium text-foreground truncate">
+                          {user?.email}
+                        </div>
+                      </div>
+                      <div className="h-px bg-border" />
+                      <Link
+                        href="/cuenta"
+                        className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-muted"
+                        role="menuitem"
+                        onClick={() => setUserMenuOpen(false)}
+                      >
+                        <FiUserCheck className="icon" />
+                        Mi cuenta
+                      </Link>
+                      <button
+                        onClick={handleLogout}
+                        className="w-full flex items-center gap-2 px-4 py-2 text-left text-sm hover:bg-muted"
+                        role="menuitem"
+                      >
+                        <FiLogOut className="icon" />
+                        Cerrar sesión
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </>
+            )}
           </div>
         </div>
 
         {/* Mobile actions */}
         <div className="md:hidden flex items-center gap-2">
-          <button
-            onClick={toggleTheme}
-            aria-label="Cambiar tema"
-            className="icon-btn"
-          >
+          <button onClick={toggleTheme} aria-label="Cambiar tema" className="icon-btn">
             {isDark ? <FiSun className="icon" /> : <FiMoon className="icon" />}
           </button>
           <button
@@ -158,14 +261,25 @@ export function Navbar() {
                   <img src="/logo.svg" alt="WAVE Studio" className="h-7 w-auto" />
                   <span className="font-display font-extrabold">WAVE Studio</span>
                 </div>
-                <button
-                  onClick={() => setOpen(false)}
-                  className="icon-btn"
-                  aria-label="Cerrar menú"
-                >
+                <button onClick={() => setOpen(false)} className="icon-btn" aria-label="Cerrar menú">
                   <FiX className="icon" />
                 </button>
               </div>
+
+              {/* Si hay sesión, muestra tarjeta del usuario */}
+              {!isLoading && isAuthenticated && (
+                <div className="px-4 pt-3">
+                  <div className="card p-4 flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-primary/10 text-primary grid place-items-center font-bold">
+                      {initials}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{user?.name ?? "Usuario"}</div>
+                      <div className="text-xs text-muted-foreground truncate">{user?.email}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Primary nav */}
               <ul className="px-3 py-3">
@@ -186,25 +300,52 @@ export function Navbar() {
                     </li>
                   );
                 })}
+                {/* Acciones extra según sesión */}
+                {!isLoading && isAuthenticated ? (
+                  <>
+                    <li>
+                      <Link href="/mis-clases" className="block rounded-xl px-3 py-2 text-base font-medium hover:bg-muted">
+                        Mis clases
+                      </Link>
+                    </li>
+                    <li>
+                      <Link href="/cuenta" className="block rounded-xl px-3 py-2 text-base font-medium hover:bg-muted">
+                        Mi cuenta
+                      </Link>
+                    </li>
+                  </>
+                ) : null}
               </ul>
 
               {/* Quick actions */}
               <div className="px-4 pt-2 grid grid-cols-2 gap-3">
-                <Link href="/registro" className="btn-primary h-10 justify-center">
-                  Reservar
-                </Link>
-                <Link href="/login" className="btn-outline h-10 justify-center">
-                  <FiUser className="icon" />
-                  <span className="ml-1">Entrar</span>
-                </Link>
+                {!isLoading && isAuthenticated ? (
+                  <>
+                    <Link href="/mis-clases" className="btn-primary h-10 justify-center">
+                      Mis clases
+                    </Link>
+                    <button onClick={handleLogout} className="btn-outline h-10 justify-center">
+                      <FiLogOut className="icon" />
+                      <span className="ml-1">Salir</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Link href="/registro" className="btn-primary h-10 justify-center">
+                      Reservar
+                    </Link>
+                    <Link href="/login" className="btn-outline h-10 justify-center">
+                      <FiUser className="icon" />
+                      <span className="ml-1">Entrar</span>
+                    </Link>
+                  </>
+                )}
               </div>
 
               {/* Contacto + Instagram */}
               <div className="px-4 mt-4">
                 <div className="card p-4">
-                  <h4 className="font-display font-extrabold text-base">
-                    Contáctanos
-                  </h4>
+                  <h4 className="font-display font-extrabold text-base">Contáctanos</h4>
                   <div className="mt-2 space-y-2 text-sm text-muted-foreground">
                     <p className="flex items-center gap-2">
                       <FiPhone className="icon" /> 333 743 9983
@@ -237,10 +378,7 @@ export function Navbar() {
                 <ul className="grid gap-2">
                   {SECONDARY_LINKS.map(({ href, label }) => (
                     <li key={href}>
-                      <Link
-                        href={href}
-                        className="block text-sm text-muted-foreground hover:text-foreground"
-                      >
+                      <Link href={href} className="block text-sm text-muted-foreground hover:text-foreground">
                         {label}
                       </Link>
                     </li>
