@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdmin } from "../../_utils";
 import { z } from "zod";
-import { Prisma, PackHighlight } from "@prisma/client"; // 👈 importa PackHighlight
+import { Prisma, PackHighlight } from "@prisma/client";
 
 export const runtime = "nodejs";
 
@@ -14,7 +14,7 @@ function normalizeDescription(input: unknown): string[] | undefined {
 
 const highlightSchema = z.preprocess(
   (v) => (typeof v === "string" ? v.toUpperCase() : v),
-  z.nativeEnum(PackHighlight).nullable().optional() // 👈 usa PackHighlight
+  z.nativeEnum(PackHighlight).nullable().optional()
 );
 
 const packUpdateSchema = z.object({
@@ -27,19 +27,21 @@ const packUpdateSchema = z.object({
   classesLabel: z.string().trim().min(1).nullable().optional(),
   highlight: highlightSchema,
   description: z.any().optional(),
-})
-.transform(v => ({
+}).transform(v => ({
   ...v,
   classes: typeof v.classes === "number" ? v.classes : (v.classesCount as number | undefined),
   description: normalizeDescription(v.description),
 }));
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+// 👇 Contexto esperado por tu Next: params es Promise
+type Ctx = { params: Promise<{ id: string }> };
+
+export async function PATCH(req: NextRequest, ctx: Ctx) {
   const auth = await requireAdmin(req);
   if (auth) return auth;
 
   try {
-    const id = params.id;
+    const { id } = await ctx.params;           // 👈 await
     const raw = await req.json();
     const parsed = packUpdateSchema.safeParse(raw);
     if (!parsed.success) {
@@ -68,12 +70,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, ctx: Ctx) {
   const auth = await requireAdmin(req);
   if (auth) return auth;
 
   try {
-    const id = params.id;
+    const { id } = await ctx.params;           // 👈 await
     await prisma.pack.delete({ where: { id } });
     return NextResponse.json({ ok: true });
   } catch (e: any) {
