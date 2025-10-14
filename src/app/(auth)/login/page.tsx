@@ -1,15 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useSession } from "@/lib/useSession"; // ⬅️ clave: invalida /api/auth/me
+import { useSession } from "@/lib/useSession";
 
-export default function LoginPage() {
+// 🚀 Evita prerender y fuerza render dinámico (opcional pero recomendado)
+export const dynamic = "force-dynamic";
+
+// -------------------------------------------------------------
+// Componente interno que usa useSearchParams
+// -------------------------------------------------------------
+function LoginInner() {
   const router = useRouter();
   const search = useSearchParams();
-  const next = search.get("next") || "/clases"; // cambia el default si quieres
-  const { refresh } = useSession(); // ⬅️ para revalidar la sesión sin recargar
+  const next = search.get("next") || "/clases";
+  const { refresh } = useSession();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -32,7 +38,7 @@ export default function LoginPage() {
         body: JSON.stringify({
           email: email.trim(),
           password,
-          remember, // si tu backend soporta "recuérdame"
+          remember,
         }),
       });
 
@@ -47,10 +53,7 @@ export default function LoginPage() {
         throw new Error("No se pudo iniciar sesión. Inténtalo de nuevo.");
       }
 
-      // ⚡️ Invalida el cache de /api/auth/me para que el Navbar re-renderice ya
-      await refresh();
-
-      // Navega a "next" y refresca el árbol RSC (por si tienes layouts server)
+      await refresh(); // Revalida sesión
       router.replace(next);
       router.refresh();
     } catch (err: any) {
@@ -171,5 +174,16 @@ export default function LoginPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+// -------------------------------------------------------------
+// Página principal: envuelve LoginInner en Suspense
+// -------------------------------------------------------------
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-center">Cargando…</div>}>
+      <LoginInner />
+    </Suspense>
   );
 }
