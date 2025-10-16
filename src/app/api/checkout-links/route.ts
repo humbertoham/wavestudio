@@ -24,7 +24,7 @@ export async function POST(req: Request) {
       return j(400, { error: "INVALID_PACK_PRICE", detail: pack.price });
     }
 
-    // ── Base URL robusta (env > header > origin de la request > fallback)
+    // ── Base URL (obligamos a prod: https y no localhost)
     const reqOrigin = (() => {
       try { return new URL(req.url).origin; } catch { return undefined; }
     })();
@@ -32,21 +32,21 @@ export async function POST(req: Request) {
       process.env.APP_BASE_URL?.trim() ||
       req.headers.get("x-forwarded-origin")?.trim() ||
       reqOrigin ||
-      "http://localhost:3000";
+      "";
 
-    const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)/i.test(baseUrl);
+    if (!/^https:\/\//i.test(baseUrl) || /(localhost|127\.0\.0\.1)/i.test(baseUrl)) {
+      return j(400, {
+        error: "INVALID_BASE_URL_FOR_PRODUCTION",
+        detail: "Configura APP_BASE_URL con tu dominio HTTPS público.",
+        got: baseUrl || null,
+      });
+    }
 
-    // ── Siempre definimos back_urls válidas
     const backUrls = {
       success: `${baseUrl}/pago/success`,
       failure: `${baseUrl}/pago/failure`,
       pending: `${baseUrl}/pago/pending`,
     };
-    for (const [k, v] of Object.entries(backUrls)) {
-      if (!v || !/^https?:\/\//i.test(v)) {
-        return j(400, { error: "INVALID_BACK_URL", key: k, value: v, baseUrl });
-      }
-    }
 
     // ── Registros locales
     const link = await prisma.checkoutLink.create({
@@ -72,7 +72,7 @@ export async function POST(req: Request) {
       },
     });
 
-    // ── Mercado Pago: crear Preference real (sin auto_return para evitar error)
+    // ── Mercado Pago (siempre producción)
     const client = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN! });
     const preference = new Preference(client);
     const externalRef = `${userId ?? "anon"}|${packId}|${payment.id}|${crypto.randomUUID()}`;
@@ -96,8 +96,9 @@ export async function POST(req: Request) {
         paymentId: payment.id,
         checkoutLinkId: link.id,
       },
-      // Evitar webhook en localhost (MP suele rechazar localhost en sandbox)
-      ...(isLocal ? {} : { notification_url: `${baseUrl}/api/webhooks/mercadopago` }),
+      // Siempre webhook en prod
+      notification_url: `${baseUrl}/api/webhooks/mercadopago`,
+      auto_return: "approved", // opcional en prod
     };
 
     console.log("Creating MP Preference with:", {
@@ -106,7 +107,7 @@ export async function POST(req: Request) {
       baseUrl,
     });
 
-    let pref;
+    let pref: any;
     try {
       pref = await preference.create({ body: prefBody });
     } catch (mpErr: any) {
@@ -120,9 +121,20 @@ export async function POST(req: Request) {
       return j(502, { error: "MP_PREFERENCE_CREATE_FAILED", detail, sent: { back_urls: prefBody.back_urls } });
     }
 
-    const initPoint = (pref as any).init_point || (pref as any).sandbox_init_point;
+    // ── Forzar producción: live_mode debe ser true y usamos init_point
+    const liveMode = Boolean(pref?.live_mode);
+    if (!liveMode) {
+      console.error("Preference returned in SANDBOX while forcing PROD:", { prefId: pref?.id, liveMode });
+      return j(409, {
+        error: "PREFERENCE_NOT_LIVE",
+        detail: "La preferencia no está en modo productivo. Verifica que el access token sea de producción.",
+        prefId: pref?.id ?? null,
+      });
+    }
+
+    const initPoint: string | undefined = pref?.init_point;
     if (!initPoint) {
-      console.error("Preference sin init_point:", pref);
+      console.error("Preference sin init_point (prod):", pref);
       return j(500, { error: "PREFERENCE_WITHOUT_INIT_POINT" });
     }
 
@@ -130,7 +142,7 @@ export async function POST(req: Request) {
     await prisma.payment.update({
       where: { id: payment.id },
       data: {
-        mpPreferenceId: (pref as any).id ?? null,
+        mpPreferenceId: pref?.id ?? null,
         mpInitPoint: initPoint,
         mpExternalRef: externalRef,
         mpRaw: pref as any,
