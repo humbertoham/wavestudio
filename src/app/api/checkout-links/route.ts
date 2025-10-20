@@ -10,13 +10,39 @@ function j(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
+// ───────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ───────────────────────────────────────────────────────────────────────────────
+function isProdAccessToken(token: string | undefined): token is string {
+  return !!token && /^APP_USR-/.test(token);
+}
+
+function redactToken(token?: string) {
+  if (!token) return null;
+  return token.slice(0, 10) + "...redacted";
+}
+
+function getBaseUrl(req: Request) {
+  const env = process.env.APP_BASE_URL?.trim();
+  const hdr = req.headers.get("x-forwarded-origin")?.trim() || req.headers.get("origin")?.trim() || "";
+  let fromReq: string | undefined;
+  try { fromReq = new URL(req.url).origin; } catch {}
+  return env || hdr || fromReq || "";
+}
+
+function isHttpsPublic(url: string) {
+  return /^https:\/\//i.test(url) && !/(localhost|127\.0\.0\.1)/i.test(url);
+}
+
 export async function POST(req: Request) {
   try {
     const { packId, userId } = await req.json();
 
     // ── Validaciones básicas
     if (!packId) return j(400, { error: "PACK_ID_REQUIRED" });
-    if (!process.env.MP_ACCESS_TOKEN) return j(500, { error: "MP_ACCESS_TOKEN_MISSING" });
+
+    const token = process.env.MP_ACCESS_TOKEN;
+    if (!token) return j(500, { error: "MP_ACCESS_TOKEN_MISSING" });
 
     const pack = await prisma.pack.findUnique({ where: { id: packId } });
     if (!pack) return j(404, { error: "PACK_NOT_FOUND" });
@@ -24,21 +50,24 @@ export async function POST(req: Request) {
       return j(400, { error: "INVALID_PACK_PRICE", detail: pack.price });
     }
 
-    // ── Base URL (obligamos a prod: https y no localhost)
-    const reqOrigin = (() => {
-      try { return new URL(req.url).origin; } catch { return undefined; }
-    })();
-    const baseUrl =
-      process.env.APP_BASE_URL?.trim() ||
-      req.headers.get("x-forwarded-origin")?.trim() ||
-      reqOrigin ||
-      "";
-
-    if (!/^https:\/\//i.test(baseUrl) || /(localhost|127\.0\.0\.1)/i.test(baseUrl)) {
+    // ── Base URL (forzamos dominio público HTTPS en prod)
+    const baseUrl = getBaseUrl(req);
+    if (!isHttpsPublic(baseUrl)) {
       return j(400, {
         error: "INVALID_BASE_URL_FOR_PRODUCTION",
         detail: "Configura APP_BASE_URL con tu dominio HTTPS público.",
         got: baseUrl || null,
+      });
+    }
+
+    // ── Chequeos de credenciales/entorno
+    const allowSandbox = process.env.ALLOW_SANDBOX === "1";
+    if (!allowSandbox && !isProdAccessToken(token)) {
+      return j(409, {
+        error: "NON_PROD_TOKEN",
+        detail: "El access token no es de producción (debe comenzar con APP_USR-).",
+        hint: "Coloca el access token de producción en MP_ACCESS_TOKEN (no la public key).",
+        observed: redactToken(token),
       });
     }
 
@@ -72,8 +101,8 @@ export async function POST(req: Request) {
       },
     });
 
-    // ── Mercado Pago (siempre producción)
-    const client = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN! });
+    // ── Mercado Pago
+    const client = new MercadoPagoConfig({ accessToken: token });
     const preference = new Preference(client);
     const externalRef = `${userId ?? "anon"}|${packId}|${payment.id}|${crypto.randomUUID()}`;
 
@@ -96,12 +125,12 @@ export async function POST(req: Request) {
         paymentId: payment.id,
         checkoutLinkId: link.id,
       },
-      // Siempre webhook en prod
       notification_url: `${baseUrl}/api/webhooks/mercadopago`,
-      auto_return: "approved", // opcional en prod
+      auto_return: "approved",
     };
 
-    console.log("Creating MP Preference with:", {
+    // Log “inocuo” de lo que envías
+    console.log("MP Preference.create →", {
       back_urls: prefBody.back_urls,
       notification_url: prefBody.notification_url,
       baseUrl,
@@ -117,33 +146,81 @@ export async function POST(req: Request) {
         cause: mpErr?.cause,
         error: mpErr?.error,
       };
+
+      // Clasificación de errores comunes
+      const isInvalidToken =
+        detail?.error === "bad_request" &&
+        (detail?.cause?.some?.((c: any) => /invalid_token/i.test(c?.code || c?.description || "")) ||
+         /invalid_token/i.test(String(detail?.message)));
+
+      const code = isInvalidToken ? 401 : 502;
+      const error =
+        isInvalidToken ? "MP_INVALID_ACCESS_TOKEN" : "MP_PREFERENCE_CREATE_FAILED";
+
       console.error("MP preference.create error:", detail);
-      return j(502, { error: "MP_PREFERENCE_CREATE_FAILED", detail, sent: { back_urls: prefBody.back_urls } });
+      return j(code, {
+        error,
+        detail,
+        sent: { back_urls: prefBody.back_urls },
+        hints: isInvalidToken
+          ? [
+              "Verifica que MP_ACCESS_TOKEN sea el de producción (APP_USR-...) y no esté expirado/revocado.",
+              "En el panel de Mercado Pago, regenera credenciales si es necesario.",
+            ]
+          : [
+              "Revisa si tu cuenta está habilitada para cobrar en producción (verificación/KYC y datos de cobro).",
+              "Valida que los montos/moneda sean válidos para tu país.",
+            ],
+      });
     }
 
-    // ── Forzar producción: live_mode debe ser true y usamos init_point
+    // ── Validaciones de respuesta MP
     const liveMode = Boolean(pref?.live_mode);
-    if (!liveMode) {
-      console.error("Preference returned in SANDBOX while forcing PROD:", { prefId: pref?.id, liveMode });
+    const hasInitPoint = typeof pref?.init_point === "string" && pref.init_point.length > 0;
+    const hasSandboxInit = typeof pref?.sandbox_init_point === "string" && pref.sandbox_init_point.length > 0;
+
+    // Si no permitimos sandbox, exigimos live_mode true
+    if (!allowSandbox && !liveMode) {
+      console.error("Preference SANDBOX estando en modo estricto:", {
+        prefId: pref?.id,
+        liveMode,
+        init_point: hasInitPoint,
+        sandbox_init_point: hasSandboxInit,
+      });
       return j(409, {
         error: "PREFERENCE_NOT_LIVE",
-        detail: "La preferencia no está en modo productivo. Verifica que el access token sea de producción.",
+        detail:
+          "Mercado Pago devolvió la preferencia en modo PRUEBA. Usa un access token APP_USR- y asegúrate de que tu cuenta esté habilitada en producción.",
+        prefId: pref?.id ?? null,
+        observed: { live_mode: pref?.live_mode, has_init_point: hasInitPoint, has_sandbox_init_point: hasSandboxInit },
+        hints: [
+          "En MP → Credenciales: habilita Modo Producción y completa verificación.",
+          "Asegúrate de no estar usando un usuario de prueba como cobrador.",
+        ],
+      });
+    }
+
+    if (!hasInitPoint) {
+      // En sandbox suele venir sandbox_init_point; en prod debe venir init_point
+      console.error("Preference sin init_point utilizable:", {
+        prefId: pref?.id,
+        liveMode,
+        hasSandboxInit,
+        prefKeys: Object.keys(pref || {}),
+      });
+      return j(500, {
+        error: "PREFERENCE_WITHOUT_INIT_POINT",
+        detail: "La preferencia no trajo init_point en la respuesta.",
         prefId: pref?.id ?? null,
       });
     }
 
-    const initPoint: string | undefined = pref?.init_point;
-    if (!initPoint) {
-      console.error("Preference sin init_point (prod):", pref);
-      return j(500, { error: "PREFERENCE_WITHOUT_INIT_POINT" });
-    }
-
-    // ── Persistir datos de MP y abrir link
+    // ── Persistencia
     await prisma.payment.update({
       where: { id: payment.id },
       data: {
         mpPreferenceId: pref?.id ?? null,
-        mpInitPoint: initPoint,
+        mpInitPoint: pref.init_point,
         mpExternalRef: externalRef,
         mpRaw: pref as any,
       },
@@ -154,7 +231,7 @@ export async function POST(req: Request) {
       data: { paymentId: payment.id, status: "OPEN" },
     });
 
-    return j(200, { checkoutUrl: initPoint, code: link.code });
+    return j(200, { checkoutUrl: pref.init_point, code: link.code });
   } catch (e: any) {
     console.error("CHECKOUT_LINKS_POST_FATAL:", e);
     return j(500, { error: "INTERNAL_ERROR", detail: e?.message ?? String(e) });
