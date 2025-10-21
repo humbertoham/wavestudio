@@ -24,7 +24,10 @@ function redactToken(token?: string) {
 
 function getBaseUrl(req: Request) {
   const env = process.env.APP_BASE_URL?.trim();
-  const hdr = req.headers.get("x-forwarded-origin")?.trim() || req.headers.get("origin")?.trim() || "";
+  const hdr =
+    req.headers.get("x-forwarded-origin")?.trim() ||
+    req.headers.get("origin")?.trim() ||
+    "";
   let fromReq: string | undefined;
   try { fromReq = new URL(req.url).origin; } catch {}
   return env || hdr || fromReq || "";
@@ -32,6 +35,12 @@ function getBaseUrl(req: Request) {
 
 function isHttpsPublic(url: string) {
   return /^https:\/\//i.test(url) && !/(localhost|127\.0\.0\.1)/i.test(url);
+}
+
+// detecta dominios productivos de MP (mx, ar, br, etc.)
+function isProdInitPoint(url: string | undefined) {
+  if (!url) return false;
+  return /^https:\/\/www\.mercadopago\.com([a-z\.]*)?\/checkout\//i.test(url);
 }
 
 export async function POST(req: Request) {
@@ -104,7 +113,14 @@ export async function POST(req: Request) {
     // ── Mercado Pago
     const client = new MercadoPagoConfig({ accessToken: token });
     const preference = new Preference(client);
-    const externalRef = `${userId ?? "anon"}|${packId}|${payment.id}|${crypto.randomUUID()}`;
+
+    // external_reference ÚNICO y no vacío (requisito de MP)
+    const externalRef = [
+      userId ?? "anon",
+      packId,
+      payment.id,
+      crypto.randomUUID(),
+    ].join("|");
 
     const prefBody: any = {
       items: [
@@ -118,7 +134,7 @@ export async function POST(req: Request) {
         },
       ],
       back_urls: backUrls,
-      external_reference: externalRef,
+      external_reference: externalRef, // ✅ obligatorio
       metadata: {
         userId: userId ?? null,
         packId,
@@ -127,13 +143,16 @@ export async function POST(req: Request) {
       },
       notification_url: `${baseUrl}/api/webhooks/mercadopago`,
       auto_return: "approved",
+      // ⚠️ NO incluir payment_methods con { id: "" } ni arrays vacíos si no necesitas exclusiones
     };
 
-    // Log “inocuo” de lo que envías
+    // Log inocuo
     console.log("MP Preference.create →", {
+      token: redactToken(token),
+      baseUrl,
       back_urls: prefBody.back_urls,
       notification_url: prefBody.notification_url,
-      baseUrl,
+      has_external_reference: !!prefBody.external_reference,
     });
 
     let pref: any;
@@ -161,7 +180,7 @@ export async function POST(req: Request) {
       return j(code, {
         error,
         detail,
-        sent: { back_urls: prefBody.back_urls },
+        sent: { back_urls: prefBody.back_urls, external_reference: !!prefBody.external_reference },
         hints: isInvalidToken
           ? [
               "Verifica que MP_ACCESS_TOKEN sea el de producción (APP_USR-...) y no esté expirado/revocado.",
@@ -176,32 +195,39 @@ export async function POST(req: Request) {
 
     // ── Validaciones de respuesta MP
     const liveMode = Boolean(pref?.live_mode);
-    const hasInitPoint = typeof pref?.init_point === "string" && pref.init_point.length > 0;
-    const hasSandboxInit = typeof pref?.sandbox_init_point === "string" && pref.sandbox_init_point.length > 0;
+    const initPoint: string | undefined = pref?.init_point;
+    const sandboxInit: string | undefined = pref?.sandbox_init_point;
 
-    // Si no permitimos sandbox, exigimos live_mode true
-    if (!allowSandbox && !liveMode) {
-      console.error("Preference SANDBOX estando en modo estricto:", {
+    const hasInitPoint = typeof initPoint === "string" && initPoint.length > 0;
+    const hasSandboxInit = typeof sandboxInit === "string" && sandboxInit.length > 0;
+    const initPointIsProd = isProdInitPoint(initPoint);
+
+    // Modo estricto: solo bloqueo si NO es live y además NO hay init_point productivo
+    if (!allowSandbox && !liveMode && !initPointIsProd) {
+      console.error("Preference no productiva en modo estricto:", {
         prefId: pref?.id,
         liveMode,
-        init_point: hasInitPoint,
-        sandbox_init_point: hasSandboxInit,
+        init_point: initPoint,
+        sandbox_init_point: sandboxInit,
       });
       return j(409, {
         error: "PREFERENCE_NOT_LIVE",
         detail:
-          "Mercado Pago devolvió la preferencia en modo PRUEBA. Usa un access token APP_USR- y asegúrate de que tu cuenta esté habilitada en producción.",
+          "Mercado Pago devolvió la preferencia en modo prueba y sin link productivo. Verifica token/cuenta.",
         prefId: pref?.id ?? null,
-        observed: { live_mode: pref?.live_mode, has_init_point: hasInitPoint, has_sandbox_init_point: hasSandboxInit },
+        observed: {
+          live_mode: pref?.live_mode,
+          has_init_point: hasInitPoint,
+          has_sandbox_init_point: hasSandboxInit,
+        },
         hints: [
-          "En MP → Credenciales: habilita Modo Producción y completa verificación.",
-          "Asegúrate de no estar usando un usuario de prueba como cobrador.",
+          "Usa access token APP_USR- de la cuenta cobradora.",
+          "Completa verificación/KYC y datos de cobro si faltan.",
         ],
       });
     }
 
     if (!hasInitPoint) {
-      // En sandbox suele venir sandbox_init_point; en prod debe venir init_point
       console.error("Preference sin init_point utilizable:", {
         prefId: pref?.id,
         liveMode,
@@ -220,7 +246,7 @@ export async function POST(req: Request) {
       where: { id: payment.id },
       data: {
         mpPreferenceId: pref?.id ?? null,
-        mpInitPoint: pref.init_point,
+        mpInitPoint: initPoint!,
         mpExternalRef: externalRef,
         mpRaw: pref as any,
       },
@@ -231,7 +257,7 @@ export async function POST(req: Request) {
       data: { paymentId: payment.id, status: "OPEN" },
     });
 
-    return j(200, { checkoutUrl: pref.init_point, code: link.code });
+    return j(200, { checkoutUrl: initPoint!, code: link.code });
   } catch (e: any) {
     console.error("CHECKOUT_LINKS_POST_FATAL:", e);
     return j(500, { error: "INTERNAL_ERROR", detail: e?.message ?? String(e) });
