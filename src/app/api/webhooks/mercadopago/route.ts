@@ -63,15 +63,7 @@ export async function POST(req: Request) {
     null;
 
   // Dedupe rápido si ya fue procesado ok
-  if (deliveryId) {
-    const exists = await prisma.webhookLog.findFirst({
-      where: { provider: "MERCADOPAGO", deliveryId, processedOk: true },
-      select: { id: true },
-    });
-    if (exists) {
-      return j(200, { ok: true, deduped: true });
-    }
-  }
+  
 
   // === 2) Crear log INICIAL (antes de validar firma) ===
   let log = await prisma.webhookLog.create({
