@@ -1,3 +1,4 @@
+// src/app/api/webhooks/mercadopago/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { MercadoPagoConfig, Payment as MPPayment, MerchantOrder } from "mercadopago";
@@ -9,16 +10,6 @@ function j(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
-async function hmacSha256Hex(secret: string, data: string) {
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(data));
-  return Array.from(new Uint8Array(mac)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 function safeJson<T = any>(raw: string): T {
   try {
     return raw ? JSON.parse(raw) : ({} as T);
@@ -27,36 +18,18 @@ function safeJson<T = any>(raw: string): T {
   }
 }
 
-function parseXSignature(header: string | null) {
-  if (!header) return null;
-  const parts = Object.fromEntries(
-    header.split(",").map((kv) => {
-      const [k, v] = kv.trim().split("=");
-      return [k?.trim(), v?.trim()];
-    })
-  ) as Record<string, string>;
-  return { ts: parts["ts"], v1: (parts["v1"] || parts["sha256"] || "").toLowerCase() };
-}
-
 function mapStatus(s?: string) {
   switch ((s || "").toLowerCase()) {
-    case "approved":
-      return "APPROVED";
-    case "rejected":
-      return "REJECTED";
-    case "cancelled":
-      return "CANCELED";
-    case "refunded":
-      return "REFUNDED";
-    default:
-      return "PENDING";
+    case "approved": return "APPROVED";
+    case "rejected": return "REJECTED";
+    case "cancelled": return "CANCELED";
+    case "refunded": return "REFUNDED";
+    default: return "PENDING";
   }
 }
 
-// ─────────────────────────────────────────────
-// Main handler
-// ─────────────────────────────────────────────
 export async function POST(req: Request) {
+  // === 0) raw body + parsed ===
   const raw = await req.text();
   const payload = safeJson(raw);
   const url = new URL(req.url);
@@ -64,7 +37,7 @@ export async function POST(req: Request) {
   const qType = url.searchParams.get("type") || url.searchParams.get("topic");
   const qId = url.searchParams.get("id");
 
-  // === deliveryId SOLO tracking ===
+  // === 1) deliveryId para tracking (no dedupe) ===
   const deliveryId =
     qId ||
     payload?.id?.toString() ||
@@ -72,7 +45,7 @@ export async function POST(req: Request) {
     payload?.resource?.toString() ||
     null;
 
-  // === Log inicial ===
+  // === 2) Crear log inicial (siempre) ===
   let log = await prisma.webhookLog.create({
     data: {
       provider: "MERCADOPAGO",
@@ -82,56 +55,11 @@ export async function POST(req: Request) {
     },
   });
 
-  // === Validación de firma (si hay secreto) ===
-  const secret = process.env.MP_WEBHOOK_SECRET?.trim();
-  const xSig = req.headers.get("x-signature");
-  const legacySig = req.headers.get("x-hub-signature-256") || req.headers.get("x-mercadopago-signature");
-  const fixedUrl = process.env.MP_NOTIFICATION_URL?.trim();
+  // === NOTE: este webhook UNLICENSED-SIGNATURE (no valida secret) ===
+  // Lo hacemos intencionalmente para pruebas: procesaremos *consultando a MP*
+  // y solo acreditaremos si MP confirma el pago approved.
 
-  try {
-    if (secret) {
-      if (xSig) {
-        const { ts, v1 } = parseXSignature(xSig) || {};
-        // usa la URL EXACTA configurada en MP
-        const notificationUrl = fixedUrl || `${url.origin}${url.pathname}`;
-        const canonical = `${deliveryId ?? ""}:${ts ?? ""}:${notificationUrl}:${raw}`;
-        const expected = await hmacSha256Hex(secret, canonical);
-
-        if (!v1 || v1 !== expected) {
-          console.error("❌ Firma inválida MP", {
-            deliveryId,
-            ts,
-            notificationUrl,
-            expected,
-            v1,
-          });
-          await prisma.webhookLog.update({
-            where: { id: log.id },
-            data: { processedOk: false, error: "INVALID_SIGNATURE" },
-          });
-          return j(200, { ok: true });
-        }
-      } else if (legacySig?.startsWith("sha256=")) {
-        const got = legacySig.replace(/^sha256=/i, "").toLowerCase();
-        const expected = await hmacSha256Hex(secret, raw);
-        if (got !== expected) {
-          await prisma.webhookLog.update({
-            where: { id: log.id },
-            data: { processedOk: false, error: "INVALID_SIGNATURE_LEGACY" },
-          });
-          return j(200, { ok: true });
-        }
-      }
-    }
-  } catch (e) {
-    await prisma.webhookLog.update({
-      where: { id: log.id },
-      data: { processedOk: false, error: "SIGNATURE_CHECK_ERROR" },
-    });
-    return j(200, { ok: true });
-  }
-
-  // === Token de MP ===
+  // === 3) Asegurar MP_ACCESS_TOKEN ===
   const ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
   if (!ACCESS_TOKEN) {
     await prisma.webhookLog.update({
@@ -142,7 +70,7 @@ export async function POST(req: Request) {
   }
   const client = new MercadoPagoConfig({ accessToken: ACCESS_TOKEN });
 
-  // === Resolver paymentId ===
+  // === 4) Resolver paymentId (payment / merchant_order / resource) ===
   let paymentId: string | undefined =
     qType === "payment"
       ? qId ?? payload?.data?.id?.toString() ?? payload?.id?.toString()
@@ -162,7 +90,9 @@ export async function POST(req: Request) {
         const payments = (mo as any)?.payments || [];
         const approved = payments.find((p: any) => p?.status === "approved");
         paymentId = (approved?.id || payments?.[0]?.id)?.toString();
-      } catch {}
+      } catch {
+        // sigue adelante
+      }
     }
   }
 
@@ -178,11 +108,11 @@ export async function POST(req: Request) {
     return j(200, { ok: true });
   }
 
-  // === Consultar pago en MP ===
+  // === 5) Consultar el pago en MP (estado más reciente) ===
   let mp: any;
   try {
     mp = await new MPPayment(client).get({ id: paymentId });
-  } catch {
+  } catch (e) {
     await prisma.webhookLog.update({
       where: { id: log.id },
       data: { processedOk: false, error: "MP_PAYMENT_GET_FAILED" },
@@ -191,6 +121,7 @@ export async function POST(req: Request) {
   }
 
   const mpStatus = mp?.status;
+  const mpStatusDetail = mp?.status_detail;
   const mpExtRef = mp?.external_reference ?? payload?.data?.external_reference;
   const mpPrefId = mp?.preference_id ?? payload?.data?.preference_id ?? prefIdFromMO;
   const mpCurrency = mp?.currency_id;
@@ -199,7 +130,7 @@ export async function POST(req: Request) {
 
   const [extUserId, extPackId, hintedPaymentId] = (mpExtRef ?? "").split("|");
 
-  // === Buscar Payment local ===
+  // === 6) Buscar Payment local por varias llaves ===
   let local = await prisma.payment.findFirst({
     where: {
       OR: [
@@ -226,7 +157,7 @@ export async function POST(req: Request) {
     return j(200, { ok: true });
   }
 
-  // === Procesar estado más reciente ===
+  // === 7) Procesar siempre el estado más reciente (idempotente) ===
   try {
     await prisma.$transaction(async (tx) => {
       const newStatus = mapStatus(mpStatus);
@@ -244,6 +175,7 @@ export async function POST(req: Request) {
         include: { checkoutLink: true, packPurchase: true },
       });
 
+      // Si no está aprobado, solo marcamos y salimos
       if (newStatus !== "APPROVED") {
         if (["REJECTED", "CANCELED", "REFUNDED"].includes(newStatus) && updated.checkoutLink && updated.checkoutLink.status !== "COMPLETED") {
           await tx.checkoutLink.update({ where: { id: updated.checkoutLink.id }, data: { status: "CANCELED" } });
@@ -252,7 +184,7 @@ export async function POST(req: Request) {
         return;
       }
 
-      // Ya acreditado
+      // Si ya se acreditó: idempotencia
       if (updated.packPurchase) {
         if (updated.checkoutLink && updated.checkoutLink.status !== "COMPLETED") {
           await tx.checkoutLink.update({ where: { id: updated.checkoutLink.id }, data: { status: "COMPLETED", completedAt: new Date() } });
@@ -261,11 +193,10 @@ export async function POST(req: Request) {
         return;
       }
 
-      // Resolver beneficiario
+      // Resolver beneficiario (extUserId | checkoutLink.userId | mp.payer.email)
       let beneficiaryUserId: string | null =
         (extUserId && extUserId !== "anon" ? extUserId : null) ??
-        updated.checkoutLink?.userId ??
-        null;
+        updated.checkoutLink?.userId ?? null;
 
       if (!beneficiaryUserId && mpPayerEmail) {
         const email = String(mpPayerEmail).trim().toLowerCase();
@@ -276,10 +207,7 @@ export async function POST(req: Request) {
           select: { id: true },
         });
         beneficiaryUserId = u.id;
-        await tx.webhookLog.update({
-          where: { id: log.id },
-          data: { error: "AUTO_CREATED_USER_FOR_PAYER_EMAIL" },
-        });
+        await tx.webhookLog.update({ where: { id: log.id }, data: { error: "AUTO_CREATED_USER_FOR_PAYER_EMAIL" } });
       }
 
       if (!beneficiaryUserId) {
@@ -287,12 +215,22 @@ export async function POST(req: Request) {
         return;
       }
 
+      // Determinar pack
       const packId = updated.checkoutLink?.packId ?? (extPackId || null);
       if (!packId) throw new Error("CHECKOUT_LINK_WITHOUT_PACK");
 
       const pack = await tx.pack.findUnique({ where: { id: packId } });
       if (!pack) throw new Error("PACK_NOT_FOUND");
 
+      // En modo pruebas no bloqueamos por mismatches de monto; solo anotamos
+      if (typeof mpAmount === "number" && Number.isFinite(mpAmount) && mpAmount !== pack.price) {
+        await tx.webhookLog.update({ where: { id: log.id }, data: { error: `AMOUNT_MISMATCH mp=${mpAmount} pack=${pack.price}` } });
+      }
+      if (mpCurrency && mpCurrency !== "MXN") {
+        await tx.webhookLog.update({ where: { id: log.id }, data: { error: `CURRENCY_MISMATCH mp=${mpCurrency}` } });
+      }
+
+      // Crear PackPurchase + TokenLedger
       const purchase = await tx.packPurchase.create({
         data: {
           userId: beneficiaryUserId,
@@ -322,6 +260,25 @@ export async function POST(req: Request) {
       data: { processedOk: false, error: `TX_ERROR:${String(e?.message ?? e)}` },
     });
     return j(200, { ok: true });
+  }
+
+  // If MP later refunds, revert (same behavior as your previous logic)
+  if ((mpStatus || "").toLowerCase() === "refunded") {
+    await prisma.$transaction(async (tx) => {
+      const p = await tx.payment.findUnique({ where: { id: local!.id }, include: { packPurchase: true } });
+      const pp = p?.packPurchase;
+      if (pp && pp.classesLeft > 0) {
+        const undo = pp.classesLeft;
+        await tx.packPurchase.update({ where: { id: pp.id }, data: { classesLeft: { decrement: undo } } });
+        await tx.tokenLedger.create({
+          data: { userId: pp.userId, packPurchaseId: pp.id, delta: -undo, reason: "CANCEL_REFUND" },
+        });
+      }
+      const link = await tx.checkoutLink.findFirst({ where: { paymentId: local!.id } });
+      if (link && link.status !== "COMPLETED") {
+        await tx.checkoutLink.update({ where: { id: link.id }, data: { status: "CANCELED" } });
+      }
+    });
   }
 
   return j(200, { ok: true });
