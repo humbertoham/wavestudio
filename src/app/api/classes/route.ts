@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
 import { classCreateSchema } from "@/lib/zod";
+import { BookingStatus } from "@prisma/client";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,7 @@ export const runtime = "nodejs";
  *   startsAt: string;      // ISO
  *   durationMin: number;   // default 60 si no existe
  *   capacity?: number | null;
- *   booked?: number | null;
+ *   booked?: number | null; // SUM(quantity) de bookings ACTIVE
  *   isFull?: boolean | null;
  * }
  */
@@ -32,27 +33,38 @@ export async function GET(req: Request) {
   if (from || to) {
     where.date = {
       gte: from ? new Date(from) : undefined,
-      lt:  to   ? new Date(to)   : undefined, // usamos lt para que el to sea exclusivo
+      lt: to ? new Date(to) : undefined, // to exclusivo
     };
   }
   if (focus) where.focus = focus;
 
-  // Ajusta los nombres de campos a tu esquema real de Prisma
   const classes = await prisma.class.findMany({
     where,
     include: {
-      instructor: true,   // se asume instructor.name
-      bookings: true,     // se asume para contar lugares tomados
+      instructor: true, // instructor.name
+      bookings: {
+        where: { status: BookingStatus.ACTIVE },
+        select: { quantity: true },
+      },
     },
     orderBy: { date: "asc" },
   });
 
   const payload = classes.map((c) => {
-    const capacity = (c as any).capacity ?? null;
-    const booked = Array.isArray((c as any).bookings) ? (c as any).bookings.length : null;
+    const capacity: number | null = (c as any).capacity ?? null;
+
+    // SUMA quantity (no length)
+    const booked: number | null = Array.isArray((c as any).bookings)
+      ? (c as any).bookings.reduce(
+          (sum: number, b: { quantity: number | null }) => sum + (b.quantity ?? 0),
+          0
+        )
+      : null;
+
     const isFull =
-      (c as any).isFull ??
-      (typeof capacity === "number" && typeof booked === "number" ? booked >= capacity : null);
+      typeof capacity === "number" && typeof booked === "number"
+        ? booked >= capacity
+        : false;
 
     return {
       id: c.id,
@@ -68,10 +80,7 @@ export async function GET(req: Request) {
   });
 
   return NextResponse.json(payload, {
-    // Evita cachear en el edge/navegador si lo deseas
-    headers: {
-      "Cache-Control": "no-store",
-    },
+    headers: { "Cache-Control": "no-store" },
   });
 }
 
@@ -88,7 +97,9 @@ export async function POST(req: Request) {
     });
     return NextResponse.json(cls, { status: 201 });
   } catch (e: any) {
-    const code = e.message === "UNAUTHORIZED" ? 401 : e.message === "FORBIDDEN" ? 403 : 500;
+    const code =
+      e.message === "UNAUTHORIZED" ? 401 :
+      e.message === "FORBIDDEN"   ? 403 : 500;
     return NextResponse.json({ error: e.message }, { status: code });
   }
 }

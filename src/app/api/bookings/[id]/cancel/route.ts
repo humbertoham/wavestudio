@@ -14,19 +14,24 @@ function j(status: number, body: any) {
 
 export async function PATCH(
   _req: NextRequest,
-  ctx: { params: Promise<{ id: string }> } // 👈 params ahora es una Promise
+  ctx: { params: Promise<{ id: string }> }
 ) {
   try {
     const auth = await getAuth();
     if (!auth) return j(401, { code: "UNAUTHENTICATED" });
 
-    const { id } = await ctx.params; // 👈 await aquí
+    const { id } = await ctx.params;
 
-    // Trae booking con lo necesario
     const booking = await prisma.booking.findUnique({
       where: { id },
       include: {
-        class: { select: { id: true, date: true, durationMin: true, creditCost: true, title: true, focus: true, instructor: { select: { id: true, name: true } } } },
+        class: {
+          select: {
+            id: true, title: true, focus: true, date: true, durationMin: true, creditCost: true,
+            capacity: true,
+            instructor: { select: { id: true, name: true } },
+          },
+        },
         packPurchase: { select: { id: true } },
       },
     });
@@ -36,29 +41,24 @@ export async function PATCH(
     if (booking.status !== "ACTIVE") return j(409, { code: "ALREADY_CANCELED" });
 
     // Regla de 4h
-    const start = booking.class.date;
-    const minutesUntilStart = Math.floor((start.getTime() - Date.now()) / 60000);
+    const minutesUntilStart = Math.floor((booking.class.date.getTime() - Date.now()) / 60000);
     if (minutesUntilStart < CANCEL_WINDOW_MIN) {
       return j(409, { code: "WINDOW_CLOSED", message: "La ventana de cancelación ya cerró (4 horas antes)." });
     }
 
-    const cost = booking.class.creditCost ?? 1;
-    const refundTokens = (booking.quantity ?? 1) * cost;
+    const costPerSeat = booking.class.creditCost ?? 1;
+    const seatsReleased = booking.quantity ?? 1;       // 👈 lugares que se liberan
+    const refundTokens = seatsReleased * costPerSeat;  // tokens a devolver
 
     const result = await prisma.$transaction(async (tx) => {
-      // 1) Marcar booking cancelado (idempotencia simple)
+      // 1) Marcar booking cancelado
       const updated = await tx.booking.update({
         where: { id: booking.id },
         data: { status: "CANCELED", canceledAt: new Date(), refundToken: true },
         include: {
           class: {
             select: {
-              id: true,
-              title: true,
-              focus: true,
-              date: true,
-              durationMin: true,
-              creditCost: true,
+              id: true, title: true, focus: true, date: true, durationMin: true, creditCost: true,
               instructor: { select: { id: true, name: true } },
             },
           },
@@ -76,7 +76,7 @@ export async function PATCH(
         },
       });
 
-      // 3) (Opcional) si llevas classesLeft en PackPurchase
+      // 3) (Opcional) si mantienes classesLeft en PackPurchase
       if (booking.packPurchase?.id) {
         await tx.packPurchase.update({
           where: { id: booking.packPurchase.id },
@@ -84,8 +84,32 @@ export async function PATCH(
         });
       }
 
+      // 4) (Opcional) Promover waitlist por cada seat liberado
+      //    Si prefieres solo notificar, reemplaza por una inserción en tu cola de notificaciones.
+      for (let i = 0; i < seatsReleased; i++) {
+        const next = await tx.waitlist.findFirst({
+          where: { classId: booking.classId },
+          orderBy: { position: "asc" },
+        });
+        if (!next) break;
+
+        // Crea un booking provisional o directamente activo (según tu UX)
+        await tx.booking.create({
+          data: {
+            userId: next.userId,
+            classId: booking.classId,
+            quantity: 1,
+            // si usas tokens automáticos para waitlist, debítalos aquí;
+            // si no, deja pendiente de confirmación por el usuario.
+          },
+        });
+
+        // Elimina o avanza la waitlist
+        await tx.waitlist.delete({ where: { id: next.id } });
+      }
+
       return updated;
-    });
+    }, { isolationLevel: "Serializable" });
 
     // Respuesta
     return j(200, {
