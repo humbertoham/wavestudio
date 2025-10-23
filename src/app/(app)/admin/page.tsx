@@ -34,8 +34,9 @@ type Pack = {
 };
 type User = { id: string; name: string | null; email: string; dateOfBirth?: string | null };
 
+// ...
 export default function AdminPage() {
-  const [tab, setTab] = useState<"classes"|"instructors"|"packs"|"enroll"|"birthdays">("classes");
+  const [tab, setTab] = useState<"classes"|"instructors"|"packs"|"enroll"|"birthdays"|"revenue"|"manual">("classes");
   return (
     <main className="container-app py-8 space-y-6">
       <h1 className="text-2xl font-bold">Panel de administrador</h1>
@@ -47,6 +48,8 @@ export default function AdminPage() {
           ["packs","Paquetes"],
           ["enroll","Inscribir a clase"],
           ["birthdays","Cumpleaños"],
+          ["revenue","Ingresos"],
+          ["manual","Venta manual"],           // ← NUEVA
         ].map(([value,label])=>(
           <button
             key={value}
@@ -61,9 +64,12 @@ export default function AdminPage() {
       {tab==="packs" && <PacksSection/>}
       {tab==="enroll" && <EnrollSection/>}
       {tab==="birthdays" && <BirthdaysSection/>}
+      {tab==="revenue" && <RevenueSection/>}
+      {tab==="manual" && <ManualSaleSection/>}   {/* ← NUEVO */}
     </main>
   );
 }
+
 
 /* ---------------------------------------------------
    CLASES — listar / crear / editar por fila / eliminar
@@ -73,7 +79,11 @@ function ClassesSection() {
   const { data: instructors } = useSWR<{items: Instructor[]}>("/api/admin/instructors", fetcher);
 
   const [search, setSearch] = useState("");
-  const [creating, setCreating] = useState<Partial<ClassItem>>({ durationMin: 60, capacity: 12 });
+  const [creating, setCreating] = useState<Partial<ClassItem> & { repeatNextMonth?: boolean }>({
+    durationMin: 60,
+    capacity: 12,
+    repeatNextMonth: false,
+  });
 
   const filtered = useMemo(()=> {
     if (!data?.items) return [];
@@ -89,20 +99,18 @@ function ClassesSection() {
   async function createClass(e: React.FormEvent) {
     e.preventDefault();
     await fetch("/api/admin/classes", {
-      method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify(creating),
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify(creating), // ← incluye repeatNextMonth
     });
-    setCreating({ durationMin: 60, capacity: 12 });
+    setCreating({ durationMin: 60, capacity: 12, repeatNextMonth: false });
     mutate();
   }
 
   async function deleteClass(id: string) {
     if (!confirm("¿Eliminar clase?")) return;
-    // optimista
     const prev = data;
-    mutate({
-      items: data?.items.filter(i => i.id !== id) ?? []
-    }, { revalidate: false });
+    mutate({ items: data?.items.filter(i => i.id !== id) ?? [] }, { revalidate: false });
     const res = await fetch(`/api/admin/classes/${id}`, { method:"DELETE" });
     if (!res.ok) mutate(prev); else mutate();
   }
@@ -122,20 +130,37 @@ function ClassesSection() {
       {/* Crear */}
       <form onSubmit={createClass} className="grid md:grid-cols-3 gap-3 mb-6">
         <input className="input" placeholder="Título" required
-          value={creating.title ?? ""} onChange={e=>setCreating(f=>({...f, title:e.target.value}))}/>
+          value={creating.title ?? ""}
+          onChange={e=>setCreating(f=>({...f, title:e.target.value}))}/>
         <input className="input" placeholder="Enfoque (Yoga, HIIT...)"
-          value={creating.focus ?? ""} onChange={e=>setCreating(f=>({...f, focus:e.target.value}))}/>
+          value={creating.focus ?? ""}
+          onChange={e=>setCreating(f=>({...f, focus:e.target.value}))}/>
         <input className="input" type="datetime-local" required
-          value={creating.date ?? ""} onChange={e=>setCreating(f=>({...f, date:e.target.value}))}/>
+          value={creating.date ?? ""}
+          onChange={e=>setCreating(f=>({...f, date:e.target.value}))}/>
         <input className="input" type="number" min={15} placeholder="Duración (min)" required
-          value={creating.durationMin ?? 60} onChange={e=>setCreating(f=>({...f, durationMin:Number(e.target.value)}))}/>
+          value={creating.durationMin ?? 60}
+          onChange={e=>setCreating(f=>({...f, durationMin:Number(e.target.value)}))}/>
         <input className="input" type="number" min={1} placeholder="Cupo" required
-          value={creating.capacity ?? 12} onChange={e=>setCreating(f=>({...f, capacity:Number(e.target.value)}))}/>
+          value={creating.capacity ?? 12}
+          onChange={e=>setCreating(f=>({...f, capacity:Number(e.target.value)}))}/>
         <select className="input" required
-          value={creating.instructorId ?? ""} onChange={e=>setCreating(f=>({...f, instructorId:e.target.value}))}>
+          value={creating.instructorId ?? ""}
+          onChange={e=>setCreating(f=>({...f, instructorId:e.target.value}))}>
           <option value="">-- Instructor --</option>
           {instructors?.items.map(i=> <option key={i.id} value={i.id}>{i.name}</option>)}
         </select>
+
+        {/* ← NUEVO: check para replicar en el mes siguiente */}
+        <label className="md:col-span-2 inline-flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={!!creating.repeatNextMonth}
+            onChange={e=>setCreating(f=>({...f, repeatNextMonth: e.target.checked}))}
+          />
+          Repetir todo el mes siguiente (mismo día de la semana y hora)
+        </label>
+
         <button className="btn-primary md:col-span-3">Agregar clase</button>
       </form>
 
@@ -150,7 +175,13 @@ function ClassesSection() {
           </thead>
           <tbody>
             {filtered.map(c=>(
-              <EditableClassRow key={c.id} item={c} instructors={instructors?.items ?? []} onDeleted={()=>deleteClass(c.id)} onSaved={()=>mutate()} />
+              <EditableClassRow
+                key={c.id}
+                item={c}
+                instructors={instructors?.items ?? []}
+                onDeleted={()=>deleteClass(c.id)}
+                onSaved={()=>mutate()}
+              />
             ))}
             {!isLoading && filtered.length===0 && (
               <tr><td colSpan={7} className="py-3 text-center text-gray-500">Sin resultados</td></tr>
@@ -161,6 +192,7 @@ function ClassesSection() {
     </Section>
   );
 }
+
 
 function EditableClassRow({
   item, instructors, onDeleted, onSaved
@@ -902,41 +934,168 @@ function EditablePackRow({
 
 
 /* ---------------------------------------------------
-   ENROLL — igual que antes (inscribir usuario a clase)
+   ENROLL — con filtros y reseteo tras inscripción
 ---------------------------------------------------- */
 function EnrollSection() {
-  const { data: classes } = useSWR<{items: ClassItem[]}>("/api/admin/classes", fetcher);
-  const { data: users } = useSWR<{items: User[]}>("/api/admin/users", fetcher);
-  const [userId,setUserId] = useState("");
-  const [classId,setClassId] = useState("");
-  const [msg,setMsg] = useState<string | null>(null);
+  const { data: classes } = useSWR<{ items: ClassItem[] }>("/api/admin/classes", fetcher);
+  const { data: users } = useSWR<{ items: User[] }>("/api/admin/users", fetcher);
 
-  async function enroll(e: React.FormEvent){
+  const [userId, setUserId] = useState("");
+  const [classId, setClassId] = useState("");
+
+  const [userQuery, setUserQuery] = useState("");
+  const [classQuery, setClassQuery] = useState("");
+
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const filteredUsers = useMemo(() => {
+    const q = userQuery.trim().toLowerCase();
+    if (!users?.items) return [];
+    if (!q) return users.items;
+    return users.items.filter(u =>
+      (u.name ?? "").toLowerCase().includes(q) ||
+      (u.email ?? "").toLowerCase().includes(q)
+    );
+  }, [users, userQuery]);
+
+  const filteredClasses = useMemo(() => {
+    const q = classQuery.trim().toLowerCase();
+    if (!classes?.items) return [];
+    if (!q) return classes.items;
+    return classes.items.filter(c => {
+      const dateStr = new Date(c.date).toLocaleString();
+      const instructor = c.instructor?.name ?? "";
+      return (
+        c.title.toLowerCase().includes(q) ||
+        (c.focus ?? "").toLowerCase().includes(q) ||
+        instructor.toLowerCase().includes(q) ||
+        dateStr.toLowerCase().includes(q)
+      );
+    });
+  }, [classes, classQuery]);
+
+  async function enroll(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
-    const r = await fetch("/api/admin/booking",{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ userId, classId })});
-    if (r.ok) setMsg("Usuario inscrito a la clase.");
-    else setMsg("No se pudo inscribir (quizá ya estaba o no hay cupo).");
+    const r = await fetch("/api/admin/booking", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId, classId }),
+    });
+    if (r.ok) {
+      // ✅ limpiar todo al inscribir correctamente
+      setUserId("");
+      setClassId("");
+      setUserQuery("");
+      setClassQuery("");
+      setMsg("Usuario inscrito a la clase.");
+
+      // (Opcional) limpiar mensaje después de unos segundos
+      setTimeout(() => setMsg(null), 4000);
+    } else {
+      setMsg("No se pudo inscribir (quizá ya estaba o no hay cupo).");
+    }
   }
 
   return (
     <Section>
       <h2 className="text-xl font-semibold mb-4">Inscribir usuario a clase</h2>
-      <form onSubmit={enroll} className="grid md:grid-cols-3 gap-3">
-        <select className="input" required value={userId} onChange={e=>setUserId(e.target.value)}>
-          <option value="">-- Usuario --</option>
-          {users?.items.map(u=> <option key={u.id} value={u.id}>{u.name ?? u.email} — {u.email}</option>)}
-        </select>
-        <select className="input" required value={classId} onChange={e=>setClassId(e.target.value)}>
-          <option value="">-- Clase --</option>
-          {classes?.items.map(c=> <option key={c.id} value={c.id}>{c.title} — {new Date(c.date).toLocaleString()}</option>)}
-        </select>
-        <button className="btn-primary">Inscribir</button>
+
+      <form onSubmit={enroll} className="grid gap-4">
+        {/* Buscador + select de usuarios */}
+        <div className="grid md:grid-cols-3 gap-3 items-start">
+          <div className="md:col-span-1">
+            <label className="block text-sm font-medium mb-1">Buscar usuario</label>
+            <input
+              className="input w-full"
+              placeholder="Nombre o email…"
+              value={userQuery}
+              onChange={e => setUserQuery(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              {filteredUsers.length} resultado{filteredUsers.length === 1 ? "" : "s"}
+            </p>
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium mb-1">Selecciona usuario</label>
+            <select
+              className="input w-full"
+              required
+              value={userId}
+              onChange={e => setUserId(e.target.value)}
+            >
+              <option value="">-- Usuario --</option>
+              {filteredUsers.map(u => (
+                <option key={u.id} value={u.id}>
+                  {(u.name ?? u.email) + " — " + u.email}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Buscador + select de clases */}
+        <div className="grid md:grid-cols-3 gap-3 items-start">
+          <div className="md:col-span-1">
+            <label className="block text-sm font-medium mb-1">Buscar clase</label>
+            <input
+              className="input w-full"
+              placeholder="Título, enfoque, instructor o fecha…"
+              value={classQuery}
+              onChange={e => setClassQuery(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              {filteredClasses.length} resultado{filteredClasses.length === 1 ? "" : "s"}
+            </p>
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium mb-1">Selecciona clase</label>
+            <select
+              className="input w-full"
+              required
+              value={classId}
+              onChange={e => setClassId(e.target.value)}
+            >
+              <option value="">-- Clase --</option>
+              {filteredClasses.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.title} — {new Date(c.date).toLocaleString()}{" "}
+                  {c.instructor?.name ? `— ${c.instructor.name}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Acción */}
+        <div className="flex items-center gap-3">
+          <button className="btn-primary" disabled={!userId || !classId}>
+            Inscribir
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              setUserId("");
+              setClassId("");
+              setUserQuery("");
+              setClassQuery("");
+              setMsg(null);
+            }}
+          >
+            Limpiar
+          </button>
+        </div>
+
+        {msg && <p className="mt-2 text-sm">{msg}</p>}
       </form>
-      {msg && <p className="mt-3 text-sm">{msg}</p>}
     </Section>
   );
 }
+
+
 
 /* ---------------------------------------------------
    CUMPLEAÑOS — igual que antes
@@ -973,10 +1132,210 @@ function BirthdaysSection() {
   );
 }
 
-/* --- utilidades de estilo rápidas (mapea a tus clases Tailwind/shadcn) ---
-.input       => rounded-xl border px-3 py-2 bg-white
-.btn-primary => inline-flex items-center justify-center rounded-xl px-3 py-2 bg-black text-white
-.btn-outline => inline-flex items-center justify-center rounded-xl px-3 py-2 border
-.btn-danger  => inline-flex items-center justify-center rounded-xl px-3 py-2 border border-red-500 text-red-600
-.btn-ghost   => inline-flex items-center justify-center rounded-xl px-3 py-2 text-gray-700
+/* GANANCIAS DEL MES
 */
+function RevenueSection() {
+  // rango por defecto: últimos 30 días
+  const toISO = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  const [to, setTo] = useState<string>(() => toISO(new Date()));
+  const [from, setFrom] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return toISO(d);
+  });
+
+  const params = new URLSearchParams({ from: new Date(from).toISOString(), to: new Date(to).toISOString() });
+  const { data, error, isLoading, mutate } = useSWR<{
+    total: number;
+    count: number;
+    average: number;
+    daily: { date: string; total: number }[];
+  }>(`/api/admin/revenue?${params.toString()}`, fetcher);
+
+  const fmtMoney = (n?: number) =>
+    typeof n === "number" ? n.toLocaleString("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 }) : "—";
+
+  return (
+    <Section>
+      <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
+        <h2 className="text-xl font-semibold">Ingresos</h2>
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600">De</label>
+          <input className="input" type="datetime-local" value={from} onChange={e=>setFrom(e.target.value)} />
+          <label className="text-sm text-gray-600">a</label>
+          <input className="input" type="datetime-local" value={to} onChange={e=>setTo(e.target.value)} />
+          <button className="btn-outline" onClick={()=>mutate()}>Actualizar</button>
+          <button className="btn-ghost" onClick={()=>{
+            const now = new Date();
+            const d = new Date(); d.setDate(d.getDate()-30);
+            setFrom(toISO(d)); setTo(toISO(now));
+            // mutate después de setState para que el SWR re-evalúe con la nueva URL
+            setTimeout(()=>mutate(), 0);
+          }}>Últimos 30 días</button>
+        </div>
+      </div>
+
+      {isLoading && <p className="text-sm text-gray-500">Calculando…</p>}
+      {error && <p className="text-sm text-red-600">Error cargando ingresos</p>}
+
+      {data && (
+        <>
+          {/* KPIs */}
+          <div className="grid md:grid-cols-3 gap-3 mb-6">
+            <div className="rounded-xl border p-4">
+              <div className="text-sm text-gray-600">Total aprobado</div>
+              <div className="text-2xl font-semibold">{fmtMoney(data.total)}</div>
+            </div>
+            <div className="rounded-xl border p-4">
+              <div className="text-sm text-gray-600"># Pagos</div>
+              <div className="text-2xl font-semibold">{data.count}</div>
+            </div>
+            <div className="rounded-xl border p-4">
+              <div className="text-sm text-gray-600">Ticket promedio</div>
+              <div className="text-2xl font-semibold">{fmtMoney(data.average)}</div>
+            </div>
+          </div>
+
+          {/* Mini serie (día a día) */}
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="text-left border-b">
+                <tr><th>Fecha</th><th className="text-right">Total del día</th></tr>
+              </thead>
+              <tbody>
+                {data.daily.map((d)=>(
+                  <tr key={d.date} className="border-b">
+                    <td className="py-2">{new Date(d.date).toLocaleDateString()}</td>
+                    <td className="py-2 text-right">{fmtMoney(d.total)}</td>
+                  </tr>
+                ))}
+                {data.daily.length===0 && (
+                  <tr><td colSpan={2} className="py-3 text-center text-gray-500">Sin pagos aprobados en el rango</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Section>
+  );
+}
+
+/* 
+COMPRA DE PAQUETES MANUALMENTE
+*/
+function ManualSaleSection() {
+  const { data: users } = useSWR<{ items: User[] }>("/api/admin/users", fetcher);
+  const { data: packs } = useSWR<{ items: Pack[] }>("/api/admin/packs", fetcher);
+
+  const [userQuery, setUserQuery] = useState("");
+  const [packQuery, setPackQuery] = useState("");
+
+  const [userId, setUserId] = useState("");
+  const [packId, setPackId] = useState("");
+  const [note, setNote] = useState("");
+
+  const [msg, setMsg] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const filteredUsers = useMemo(() => {
+    const q = userQuery.trim().toLowerCase();
+    return (users?.items ?? []).filter(u =>
+      (u.name ?? "").toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+    );
+  }, [users, userQuery]);
+
+  const filteredPacks = useMemo(() => {
+    const q = packQuery.trim().toLowerCase();
+    return (packs?.items ?? []).filter(p =>
+      p.isActive && (
+        p.name.toLowerCase().includes(q) ||
+        String(p.price).includes(q) ||
+        String(p.classes).includes(q)
+      )
+    );
+  }, [packs, packQuery]);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    setSaving(true);
+    const r = await fetch("/api/admin/manual-purchases", {
+      method: "POST",
+      headers: { "Content-Type":"application/json" },
+      body: JSON.stringify({ userId, packId, note }),
+    });
+    setSaving(false);
+    if (r.ok) {
+      setUserId(""); setPackId(""); setNote(""); setUserQuery(""); setPackQuery("");
+      const d = await r.json();
+      setMsg(`✅ Venta registrada. Payment ${d.paymentId}. Ticket: $${d.amount}. Expira: ${new Date(d.expiresAt).toLocaleDateString()}`);
+    } else {
+      const err = await r.json().catch(()=> ({}));
+      setMsg(`❌ Error: ${err.error ?? r.status}`);
+    }
+  }
+
+  return (
+    <Section>
+      <h2 className="text-xl font-semibold mb-4">Venta manual de paquete</h2>
+
+      <form onSubmit={submit} className="grid gap-4">
+        {/* Usuario */}
+        <div className="grid md:grid-cols-3 gap-3 items-start">
+          <div>
+            <label className="block text-sm font-medium mb-1">Buscar usuario</label>
+            <input className="input w-full" placeholder="Nombre o email…" value={userQuery} onChange={e=>setUserQuery(e.target.value)} />
+            <p className="text-xs text-muted-foreground mt-1">{filteredUsers.length} resultado{filteredUsers.length===1?"":"s"}</p>
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium mb-1">Selecciona usuario</label>
+            <select className="input w-full" required value={userId} onChange={e=>setUserId(e.target.value)}>
+              <option value="">-- Usuario --</option>
+              {filteredUsers.map(u=>(
+                <option key={u.id} value={u.id}>{(u.name ?? u.email)} — {u.email}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Paquete */}
+        <div className="grid md:grid-cols-3 gap-3 items-start">
+          <div>
+            <label className="block text-sm font-medium mb-1">Buscar paquete</label>
+            <input className="input w-full" placeholder="Nombre, precio o #clases…" value={packQuery} onChange={e=>setPackQuery(e.target.value)} />
+            <p className="text-xs text-muted-foreground mt-1">{filteredPacks.length} resultado{filteredPacks.length===1?"":"s"}</p>
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium mb-1">Selecciona paquete</label>
+            <select className="input w-full" required value={packId} onChange={e=>setPackId(e.target.value)}>
+              <option value="">-- Paquete --</option>
+              {filteredPacks.map(p=>(
+                <option key={p.id} value={p.id}>
+                  {p.name} — {p.classes} clases — ${p.price} — {p.validityDays} días
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Nota opcional */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Nota (opcional)</label>
+          <input className="input w-full" placeholder="Ej. Venta en recepción / efectivo / ajuste" value={note} onChange={e=>setNote(e.target.value)} />
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button className="btn-primary" disabled={!userId || !packId || saving}>
+            {saving ? "Guardando…" : "Acreditar paquete"}
+          </button>
+          <button type="button" className="btn-secondary" onClick={()=>{
+            setUserId(""); setPackId(""); setUserQuery(""); setPackQuery(""); setNote(""); setMsg(null);
+          }}>Limpiar</button>
+        </div>
+
+        {msg && <p className="mt-2 text-sm">{msg}</p>}
+      </form>
+    </Section>
+  );
+}

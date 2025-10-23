@@ -18,7 +18,16 @@ export default function Footer() {
           <div className="space-y-6">
             {/* Branding */}
             <div className="flex items-center gap-3">
-              <img src="/logo.svg" alt="WAVE Studio" className="h-8 w-auto" />
+               <img
+    src="/logo-light.svg"
+    alt="WAVE Studio"
+    className="h-8 w-auto block dark:hidden"
+  />
+  <img
+    src="/logo-dark.svg"
+    alt="WAVE Studio"
+    className="h-8 w-auto hidden dark:block"
+  />
               <div className="font-display text-xl font-extrabold">WAVE Studio</div>
             </div>
 
@@ -78,7 +87,7 @@ export default function Footer() {
                   <li><Link href="/terminos" className="hover:text-foreground">Políticas & Términos</Link></li>
                 </ul>
                 <div className="mt-4">
-                  <Link href="/registro" className="btn-primary">
+                  <Link href="/login" className="btn-primary">
                     Reservar clase
                   </Link>
                 </div>

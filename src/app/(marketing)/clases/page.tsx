@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, cubicBezier, type Variants } from "framer-motion";
 import { FiClock, FiUser } from "react-icons/fi";
 
@@ -30,6 +31,9 @@ type Session = {
   duration: string;
   status?: "BOOK" | "FULL";
   startsAtISO: string;
+  capacity?: number | null;
+  booked?: number | null;
+  spots: number; // calculado
 };
 
 type Day = {
@@ -103,7 +107,6 @@ function startOfTodayInMX(): Date {
   const offset = `${sign}${hh}:00`;
 
   // 3) ISO local de MX a medianoche con offset correcto
-  //    Ej: "2025-09-27T00:00:00-06:00"
   const isoLocal = `${y}-${m}-${d}T00:00:00${offset}`;
   return new Date(isoLocal);
 }
@@ -172,6 +175,10 @@ function buildEmptyDays(from: Date, count: number): Day[] {
 function toSession(api: ApiSession): Session {
   const full =
     !!api.isFull || (!!api.capacity && typeof api.booked === "number" && api.booked >= api.capacity);
+  const capacity = typeof api.capacity === "number" ? api.capacity : null;
+  const booked = typeof api.booked === "number" ? api.booked : 0;
+  const spots = capacity != null ? Math.max(0, capacity - booked) : 0;
+
   return {
     id: api.id,
     title: api.title,
@@ -181,13 +188,188 @@ function toSession(api: ApiSession): Session {
     duration: `${api.durationMin}MIN`,
     status: full ? "FULL" : undefined,
     startsAtISO: api.startsAt,
+    capacity,
+    booked,
+    spots,
   };
 }
 
+// ---------- Reserva: Modal sencillo ----------
+function useIsomorphicLayoutEffect(effect: any, deps: any[]) {
+  const useEff = typeof window !== "undefined" ? useEffect : () => {};
+  // @ts-ignore
+  return useEff(effect, deps);
+}
+
+type ReserveMenuProps = {
+  open: boolean;
+  onClose: () => void;
+  session: Session | null;
+  tokens: number;
+  onBooked: (qty: number) => void; // para actualizar tokens localmente
+};
+
+function ReserveMenu({ open, onClose, session, tokens, onBooked }: ReserveMenuProps) {
+  const [qty, setQty] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  const maxBySpots = session?.spots ?? 0;
+  const max = Math.max(0, Math.min(maxBySpots, tokens));
+
+  useIsomorphicLayoutEffect(() => {
+    if (open) {
+      setQty(Math.min(1, max));
+      setErr(null);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!open || !mounted) return null;
+
+  const canConfirm = session && qty >= 1 && qty <= max && !busy;
+
+  async function confirm() {
+    if (!session) return;
+    if (!canConfirm) return;
+    try {
+      setBusy(true);
+      setErr(null);
+
+      const res = await fetch("/api/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classId: session.id, quantity: qty }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `No se pudo confirmar (HTTP ${res.status})`);
+      }
+      const data = await res.json().catch(() => ({}));
+      // Optimista: descuenta local; si el API manda saldo, úsalo.
+      onBooked(qty);
+      if (typeof data.tokens === "number") {
+        // onBooked ya descontó; si viene saldo exacto, podrías sincronizarlo en el padre.
+      }
+      onClose();
+    } catch (e: any) {
+      setErr(e?.message || "Error al reservar.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+      {/* backdrop */}
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+
+      {/* panel */}
+      <motion.div
+        initial={{ y: 30, opacity: 0 }}
+        animate={{ y: 0, opacity: 1, transition: { duration: 0.25, ease: EASE } }}
+        className="relative w-full md:w-[520px] rounded-t-2xl md:rounded-2xl bg-[color:var(--color-card)] p-4 md:p-5 shadow-xl"
+      >
+        <div className="flex items-center gap-2">
+          <h3 className="font-display text-lg font-bold">Reservar</h3>
+          <button className="ml-auto btn-outline h-8 px-3" onClick={onClose}>
+            Cerrar
+          </button>
+        </div>
+
+        {session && (
+          <>
+            <div className="mt-3 space-y-1">
+              <div className="font-semibold">{session.title}</div>
+              <div className="text-sm text-muted-foreground">
+                {session.time} • {session.duration} • {session.coach}
+              </div>
+              <div className="text-sm">
+                <span className="font-semibold">Spots disponibles:</span>{" "}
+                {session.spots}
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="card p-3">
+                <div className="text-xs text-muted-foreground">Tus clases</div>
+                <div className="mt-1 text-2xl font-extrabold">{tokens}</div>
+              </div>
+
+              <div className="card p-3">
+                <div className="text-xs text-muted-foreground">Cantidad a reservar</div>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    className="btn-outline h-9 px-3"
+                    onClick={() => setQty((q) => Math.max(1, q - 1))}
+                    disabled={qty <= 1 || busy}
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={max || 1}
+                    value={qty}
+                    onChange={(e) =>
+                      setQty(() => {
+                        const v = Number(e.target.value || 1);
+                        return Math.max(1, Math.min(max || 1, v));
+                      })
+                    }
+                    className="input h-9 w-20 text-center"
+                  />
+                  <button
+                    className="btn-outline h-9 px-3"
+                    onClick={() => setQty((q) => Math.min((max || 1), q + 1))}
+                    disabled={qty >= (max || 1) || busy}
+                  >
+                    +
+                  </button>
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  Máx. permitido por disponibilidad y saldo: <b>{max}</b>
+                </div>
+              </div>
+            </div>
+
+            {err && <div className="mt-3 text-sm text-red-600">{err}</div>}
+
+            <div className="mt-5 flex gap-2">
+              <button className="btn-outline h-10 px-4" onClick={onClose} disabled={busy}>
+                Cancelar
+              </button>
+              <button
+                className="btn-primary h-10 px-4"
+                onClick={confirm}
+                disabled={!canConfirm}
+              >
+                {busy ? "Reservando..." : `Confirmar ${qty} reservación${qty > 1 ? "es" : ""}`}
+              </button>
+            </div>
+          </>
+        )}
+      </motion.div>
+    </div>,
+    document.body
+  );
+}
+
 // ---------- UI ----------
-function SessionCard({ s }: { s: Session }) {
+function SessionCard({
+  s,
+  onOpenReserve,
+}: {
+  s: Session;
+  onOpenReserve: (s: Session) => void;
+}) {
   const statusEl = useMemo(() => {
-    if (s.status === "FULL") {
+    if (s.status === "FULL" || s.spots <= 0) {
       return (
         <span className="ml-auto rounded-full bg-[color:var(--color-muted)] px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
           FULL
@@ -202,12 +384,12 @@ function SessionCard({ s }: { s: Session }) {
       );
     }
     return null;
-  }, [s.status]);
+  }, [s.status, s.spots]);
 
-  const canBook = s.status !== "FULL" && s.time !== "—";
+  const canBook = s.spots > 0 && s.time !== "—";
 
   return (
-    <motion.div variants={cardVariants} className="card p-3 h-36 md:h-40 flex flex-col">
+    <motion.div variants={cardVariants} className="card p-3 h-40 md:h-44 flex flex-col">
       <div className="flex items-center gap-2">
         <h4 className="font-display text-sm font-bold truncate">{s.title}</h4>
         {statusEl}
@@ -225,11 +407,24 @@ function SessionCard({ s }: { s: Session }) {
         </div>
       </div>
 
-      <div className="mt-1 text-[11px] text-muted-foreground">{s.duration}</div>
+      <div className="mt-1 text-[11px] text-muted-foreground flex items-center justify-between">
+        <span>{s.duration}</span>
+        <span className="font-semibold">
+          Spots disponibles:{" "}
+          <span className={s.spots <= 3 ? "text-[color:hsl(4_74%_45%)]" : ""}>
+            {s.spots}
+          </span>
+        </span>
+      </div>
 
       <div className="mt-auto pt-2">
         {canBook ? (
-          <button className="btn-primary h-9 w-full justify-center text-sm">Reservar</button>
+          <button
+            className="btn-primary h-9 w-full justify-center text-sm"
+            onClick={() => onOpenReserve(s)}
+          >
+            Reservar
+          </button>
         ) : (
           <button className="btn-outline h-9 w-full justify-center text-sm" disabled>
             No disponible
@@ -240,14 +435,22 @@ function SessionCard({ s }: { s: Session }) {
   );
 }
 
-function DayColumn({ day, index }: { day: Day; index: number }) {
+function DayColumn({
+  day,
+  index,
+  onOpenReserve,
+}: {
+  day: Day;
+  index: number;
+  onOpenReserve: (s: Session) => void;
+}) {
   return (
     <motion.div
       custom={index}
       initial="hidden"
-      animate="show" // ← anima al montar (no depende de whileInView)
+      animate="show"
       variants={colVariants}
-      className="card overflow-hidden flex flex-col h-[540px] md:h-[560px] snap-start"
+      className="card overflow-hidden flex flex-col h-[560px] md:h-[580px] snap-start"
       style={{ minWidth: "17rem" }}
     >
       <div className="px-3 py-2 bg-[color:var(--color-primary-50)] text-center font-display text-sm font-bold text-[color:hsl(201_44%_36%)]">
@@ -257,7 +460,9 @@ function DayColumn({ day, index }: { day: Day; index: number }) {
 
       <div className="flex-1 overflow-auto p-3 space-y-3">
         {day.sessions.length ? (
-          day.sessions.map((s) => <SessionCard key={s.id} s={s} />)
+          day.sessions.map((s) => (
+            <SessionCard key={s.id} s={s} onOpenReserve={onOpenReserve} />
+          ))
         ) : (
           <div className="grid h-full place-items-center text-sm text-muted-foreground">Sin clases</div>
         )}
@@ -269,6 +474,16 @@ function DayColumn({ day, index }: { day: Day; index: number }) {
 export default function ClassesPage() {
   const [days, setDays] = useState<Day[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tokens, setTokens] = useState<number>(0);
+
+  // estado del modal
+  const [reserveOpen, setReserveOpen] = useState(false);
+  const [reserveSession, setReserveSession] = useState<Session | null>(null);
+
+  function openReserve(s: Session) {
+    setReserveSession(s);
+    setReserveOpen(true);
+  }
 
   useEffect(() => {
     // Rango de 14 días comenzando en HOY (medianoche MX real)
@@ -283,13 +498,16 @@ export default function ClassesPage() {
       setDays(empty);
 
       try {
-        const res = await fetch(`/api/classes?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`, {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data: ApiSession[] = await res.json();
+        const [classesRes, tokensRes] = await Promise.all([
+          fetch(
+            `/api/classes?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`,
+            { method: "GET", headers: { "Content-Type": "application/json" }, cache: "no-store" }
+          ),
+          fetch(`/api/users/me/tokens`, { method: "GET", headers: { "Content-Type": "application/json" }, cache: "no-store", credentials: "include" }),
+        ]);
+
+        if (!classesRes.ok) throw new Error(`HTTP ${classesRes.status}`);
+        const data: ApiSession[] = await classesRes.json();
 
         const grouped = new Map<string, Session[]>();
         for (const s of data) {
@@ -302,9 +520,13 @@ export default function ClassesPage() {
           arr.sort((a, b) => new Date(a.startsAtISO).getTime() - new Date(b.startsAtISO).getTime());
           grouped.set(k, arr);
         }
-
         const hydrated = empty.map((d) => ({ ...d, sessions: grouped.get(d.dateKey) ?? [] }));
         setDays(hydrated);
+
+        if (tokensRes.ok) {
+          const tk = await tokensRes.json().catch(() => ({}));
+          if (typeof tk.tokens === "number") setTokens(tk.tokens);
+        }
       } catch (e) {
         console.error(e);
         setError("No se pudieron cargar las clases.");
@@ -313,6 +535,31 @@ export default function ClassesPage() {
 
     load();
   }, []);
+
+  function handleBooked(qty: number) {
+    // Descuento optimista de tokens
+    setTokens((t) => Math.max(0, t - qty));
+    // También descuenta spots en el calendario para la sesión afectada
+    if (!days || !reserveSession) return;
+    setDays((prev) => {
+      if (!prev) return prev;
+      return prev.map((day) => ({
+        ...day,
+        sessions: day.sessions.map((s) => {
+          if (s.id !== reserveSession.id) return s;
+          const newBooked = (s.booked ?? 0) + qty;
+          const cap = s.capacity ?? 0;
+          const newSpots = cap ? Math.max(0, cap - newBooked) : 0;
+          return {
+            ...s,
+            booked: newBooked,
+            spots: newSpots,
+            status: newSpots <= 0 ? "FULL" : s.status,
+          };
+        }),
+      }));
+    });
+  }
 
   return (
     <section className="section">
@@ -324,23 +571,31 @@ export default function ClassesPage() {
         >
           <h1 className="font-display text-3xl font-extrabold md:text-4xl">Calendario de clases</h1>
           <p className="mt-2 text-muted-foreground">Elige tu sesión y reserva tu lugar.</p>
+
+          {/* Resumen de tokens en el header */}
+          <div className="mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm">
+            <span className="opacity-70">Tus clases:</span>
+            <span className="font-bold">{tokens}</span>
+          </div>
         </motion.div>
 
         {error && <div className="mt-6 text-center text-sm text-red-600">{error} Inténtalo de nuevo más tarde.</div>}
 
         <div className="mt-8 grid grid-flow-col auto-cols-[minmax(17rem,1fr)] gap-4 overflow-x-auto pb-2 snap-x snap-mandatory">
           {days
-            ? days.map((day, i) => <DayColumn key={day.id} day={day} index={i} />)
+            ? days.map((day, i) => (
+                <DayColumn key={day.id} day={day} index={i} onOpenReserve={openReserve} />
+              ))
             : Array.from({ length: 7 }).map((_, i) => (
                 <div
                   key={`sk-${i}`}
-                  className="card overflow-hidden flex flex-col h-[540px] md:h-[560px] snap-start animate-pulse"
+                  className="card overflow-hidden flex flex-col h-[560px] md:h-[580px] snap-start animate-pulse"
                   style={{ minWidth: "17rem" }}
                 >
                   <div className="px-3 py-2 bg-[color:var(--color-primary-50)]" />
                   <div className="flex-1 overflow-auto p-3 space-y-3">
                     {Array.from({ length: 3 }).map((__, j) => (
-                      <div key={j} className="card h-36 md:h-40 p-3">
+                      <div key={j} className="card h-40 md:h-44 p-3">
                         <div className="h-4 w-2/3 bg-muted rounded mb-2" />
                         <div className="h-3 w-1/2 bg-muted rounded mb-3" />
                         <div className="grid grid-cols-2 gap-2">
@@ -359,6 +614,14 @@ export default function ClassesPage() {
           Horarios sujetos a cambios. Reserva con anticipación para asegurar tu lugar.
         </p>
       </div>
+
+      <ReserveMenu
+        open={reserveOpen}
+        onClose={() => setReserveOpen(false)}
+        session={reserveSession}
+        tokens={tokens}
+        onBooked={handleBooked}
+      />
     </section>
   );
 }

@@ -44,6 +44,7 @@ function getInitials(name?: string) {
 export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
+  
   const [open, setOpen] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -99,7 +100,16 @@ export function Navbar() {
       <nav className="container-app flex h-16 items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2">
-          <img src="/logo.svg" alt="WAVE Studio" className="h-7 w-auto" />
+           <img
+    src="/logo-light.svg"
+    alt="WAVE Studio"
+    className="h-8 w-auto block dark:hidden"
+  />
+  <img
+    src="/logo-dark.svg"
+    alt="WAVE Studio"
+    className="h-8 w-auto hidden dark:block"
+  />
           <span className="sr-only">WAVE Studio</span>
         </Link>
 
@@ -258,7 +268,16 @@ export function Navbar() {
               {/* Header */}
               <div className="flex items-center justify-between px-4 py-4 border-b border-border">
                 <div className="flex items-center gap-2">
-                  <img src="/logo.svg" alt="WAVE Studio" className="h-7 w-auto" />
+                   <img
+    src="/logo-light.svg"
+    alt="WAVE Studio"
+    className="h-8 w-auto block dark:hidden"
+  />
+  <img
+    src="/logo-dark.svg"
+    alt="WAVE Studio"
+    className="h-8 w-auto hidden dark:block"
+  />
                   <span className="font-display font-extrabold">WAVE Studio</span>
                 </div>
                 <button onClick={() => setOpen(false)} className="icon-btn" aria-label="Cerrar menú">

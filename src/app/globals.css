@@ -5,10 +5,10 @@
    Design Tokens v4
    ================= */
 @theme {
-  /* Paleta (igual que ya tienes) */
-  --color-primary: hsl(201 44% 52%);
-  --color-primary-600: hsl(201 44% 43%);
-  --color-primary-700: hsl(201 44% 36%);
+  /* Paleta principal actualizada */
+  --color-primary: #4a100c;       /* Base */
+  --color-primary-600: #3c0d0a;   /* Un poco más oscuro */
+  --color-primary-700: #2f0a08;   /* Aún más oscuro */
   --color-primary-100: hsl(201 45% 95%);
   --color-primary-50:  hsl(201 45% 98%);
 
@@ -23,9 +23,7 @@
 
   --radius: 0.8rem;
 
-  /* ====== FUENTES ======
-     Estas variables son sobreescritas por next/font en <html>:
-     --font-sans y --font-display */
+  /* ====== FUENTES ====== */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji",
     "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
@@ -45,13 +43,14 @@
   --color-card-foreground: hsl(0 0% 96%);
   --color-border: hsl(220 8% 18%);
   --color-input: hsl(220 8% 18%);
-  --color-primary: hsl(201 44% 54%);
-  --color-primary-600: hsl(201 44% 46%);
-  --color-primary-700: hsl(201 44% 38%);
+
+  /* Primary adaptado al dark mode */
+  --color-primary: #b54a42;       /* Más luminoso para contraste */
+  --color-primary-600: #993b35;   /* Medio */
+  --color-primary-700: #7a2f2b;   /* Oscuro pero legible */
   --color-primary-100: hsl(201 45% 14%);
   --color-primary-50:  hsl(201 45% 10%);
 }
-
 /* ===== Base ===== */
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -84,7 +83,6 @@ h4 { font-size: 1.25rem; line-height: 1.25; }
 
 /* Links y foco accesible (como ya tenías) */
 a {
-  color: inherit;
   text-decoration-thickness: 2px;
   text-underline-offset: 4px;
   text-decoration-color: transparent;

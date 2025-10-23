@@ -56,7 +56,7 @@ export default function CallToAction() {
           custom={2}
           className="mt-8 flex flex-wrap justify-center gap-4"
         >
-          <Link href="/registro" className="btn-primary h-11 px-6">
+          <Link href="/login" className="btn-primary h-11 px-6">
             Reservar clase
           </Link>
           <Link href="/clases" className="btn-outline h-11 px-6">
