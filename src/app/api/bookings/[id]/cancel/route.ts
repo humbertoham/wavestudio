@@ -1,5 +1,5 @@
 // src/app/api/bookings/[id]/cancel/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
 
@@ -13,21 +13,20 @@ function j(status: number, body: any) {
 }
 
 export async function PATCH(
-  _req: Request,
-  { params }: { params: { id: string } }
+  _req: NextRequest,
+  ctx: { params: Promise<{ id: string }> } // 👈 params ahora es una Promise
 ) {
   try {
     const auth = await getAuth();
     if (!auth) return j(401, { code: "UNAUTHENTICATED" });
 
-    const id = params.id;
+    const { id } = await ctx.params; // 👈 await aquí
 
     // Trae booking con lo necesario
     const booking = await prisma.booking.findUnique({
       where: { id },
       include: {
-        class: { select: { id: true, date: true, durationMin: true, creditCost: true } },
-        // packPurchase para poder devolver clasesLeft si lo llevas en columna
+        class: { select: { id: true, date: true, durationMin: true, creditCost: true, title: true, focus: true, instructor: { select: { id: true, name: true } } } },
         packPurchase: { select: { id: true } },
       },
     });
@@ -50,33 +49,34 @@ export async function PATCH(
       // 1) Marcar booking cancelado (idempotencia simple)
       const updated = await tx.booking.update({
         where: { id: booking.id },
-        data: {
-          status: "CANCELED",
-          canceledAt: new Date(),
-          refundToken: true,
-        },
+        data: { status: "CANCELED", canceledAt: new Date(), refundToken: true },
         include: {
           class: {
             select: {
-              id: true, title: true, focus: true, date: true, durationMin: true, creditCost: true,
+              id: true,
+              title: true,
+              focus: true,
+              date: true,
+              durationMin: true,
+              creditCost: true,
               instructor: { select: { id: true, name: true } },
             },
           },
         },
       });
 
-      // 2) Crear asiento en el ledger (devolución)
+      // 2) Ledger (+tokens por reembolso)
       await tx.tokenLedger.create({
         data: {
           userId: booking.userId,
           packPurchaseId: booking.packPurchase?.id ?? null,
           bookingId: booking.id,
-          delta: refundTokens,          // suma tokens
+          delta: refundTokens,
           reason: "CANCEL_REFUND",
         },
       });
 
-      // 3) (Opcional) si mantienes clasesLeft en PackPurchase, refléjalo
+      // 3) (Opcional) si llevas classesLeft en PackPurchase
       if (booking.packPurchase?.id) {
         await tx.packPurchase.update({
           where: { id: booking.packPurchase.id },
@@ -87,7 +87,7 @@ export async function PATCH(
       return updated;
     });
 
-    // Devuelve el booking actualizado (page.tsx lo refresca en el array)
+    // Respuesta
     return j(200, {
       id: result.id,
       status: result.status,
