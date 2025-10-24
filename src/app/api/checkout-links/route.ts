@@ -81,9 +81,9 @@ export async function POST(req: Request) {
     }
 
     const backUrls = {
-      success: `${baseUrl}/pago/success`,
-      failure: `${baseUrl}/pago/failure`,
-      pending: `${baseUrl}/pago/pending`,
+      success: `${baseUrl}/clases`,
+      failure: `${baseUrl}/precios`,
+      pending: `${baseUrl}/`,
     };
 
     // ── Registros locales

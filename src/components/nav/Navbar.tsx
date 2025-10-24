@@ -340,7 +340,7 @@ export function Navbar() {
                       <FiPhone className="icon" /> 333 743 9983
                     </p>
                     <p className="flex items-center gap-2">
-                      <FiMail className="icon" /> hola@wavestudio.mx
+                      <FiMail className="icon" /> wwavestudio@outlook.com
                     </p>
                     <p className="flex items-center gap-2">
                       <FiMapPin className="icon" /> 1a Avenida 1495, Vista Hermosa,
