@@ -1,15 +1,55 @@
 // src/components/nav/Footer.tsx
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import {
-  FiInstagram,
-  FiPhone,
-  FiMail,
-  FiMapPin,
-} from "react-icons/fi";
+import { useEffect, useMemo, useState } from "react";
+import { FiInstagram, FiPhone, FiMail, FiMapPin } from "react-icons/fi";
+
+/** Hook: detecta si el sitio está en dark
+ * - Prioriza la clase en <html>. Si hay 'dark', usa dark.
+ * - Si NO hay override manual, cae al prefers-color-scheme del SO.
+ */
+function useIsDark() {
+  const [isDark, setIsDark] = useState<boolean>(false);
+
+  useEffect(() => {
+    const root = document.documentElement;
+
+    const compute = () => {
+      const hasDark = root.classList.contains("dark");
+      const hasLight = root.classList.contains("light"); // por si alguien usa esta clase
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      // Si hay override en clases, gana la clase. Si no, usa prefers.
+      return hasDark ? true : hasLight ? false : prefersDark;
+    };
+
+    setIsDark(compute());
+
+    // Observa cambios en la clase del <html>
+    const obs = new MutationObserver(() => setIsDark(compute()));
+    obs.observe(root, { attributes: true, attributeFilter: ["class"] });
+
+    // Escucha cambios del sistema
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => setIsDark(compute());
+    mql.addEventListener?.("change", onChange);
+
+    return () => {
+      obs.disconnect();
+      mql.removeEventListener?.("change", onChange);
+    };
+  }, []);
+
+  return isDark;
+}
 
 export default function Footer() {
+  const isDark = useIsDark();
+
+  // Un solo <Image> que respeta width/height (sin h-8/w-auto)
+  const logoSrc = useMemo(() => (isDark ? "/logo-dark.png" : "/logo-light.png"), [isDark]);
+
   return (
     <footer className="mt-16 border-t border-border bg-[color:var(--color-background)]">
       <div className="container-app py-10">
@@ -18,17 +58,9 @@ export default function Footer() {
           <div className="space-y-6">
             {/* Branding */}
             <div className="flex items-center gap-3">
-               <img
-    src="/logo-light.svg"
-    alt="WAVE Studio"
-    className="h-8 w-auto block dark:hidden"
-  />
-  <img
-    src="/logo-dark.svg"
-    alt="WAVE Studio"
-    className="h-8 w-auto hidden dark:block"
-  />
-              <div className="font-display text-xl font-extrabold">WAVE Studio</div>
+          <Link href="/" className="flex items-center gap-2">
+  <span className="logo" aria-label="WAVE Studio"></span>
+</Link>
             </div>
 
             <p className="max-w-prose text-sm text-muted-foreground">
@@ -55,9 +87,7 @@ export default function Footer() {
                   </li>
                   <li className="flex items-center gap-2 text-muted-foreground">
                     <FiMapPin className="icon" />
-                    <span>
-                      1a Avenida 1495, Vista Hermosa, 64620 Monterrey, N.L.
-                    </span>
+                    <span>1a Avenida 1495, Vista Hermosa, 64620 Monterrey, N.L.</span>
                   </li>
                 </ul>
 
@@ -87,9 +117,7 @@ export default function Footer() {
                   <li><Link href="/terminos" className="hover:text-foreground">Políticas & Términos</Link></li>
                 </ul>
                 <div className="mt-4">
-                  <Link href="/login" className="btn-primary">
-                    Reservar clase
-                  </Link>
+                  <Link href="/login" className="btn-primary">Reservar clase</Link>
                 </div>
               </div>
             </div>
@@ -98,8 +126,7 @@ export default function Footer() {
           {/* Columna derecha: mapa */}
           <div>
             <div className="card overflow-hidden">
-              {/* Contenedor responsive con relación 16:9 */}
-              <div className="relative w-full" style={{ aspectRatio: "16 / 9" }}>
+              <div className="relative w-full aspect-[16/9]">
                 <iframe
                   title="Ubicación WAVE Studio en Google Maps"
                   src="https://www.google.com/maps/embed?pb=!1m14!1m8!1m3!1d28760.730852351542!2d-100.3710868!3d25.7013991!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x86629746323fb619%3A0x6352c3919595d744!2swavestudio!5e0!3m2!1ses!2smx!4v1756475335440!5m2!1ses!2smx"

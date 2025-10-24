@@ -30,16 +30,15 @@ export default function AboutPage() {
           
         </motion.div>
 
-        {/* Columna imagen (puedes cambiar la ruta de la imagen en /public/images/about.jpg) */}
         <motion.div
           initial={{ opacity: 0, scale: 0.96 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.7, ease: EASE }}
-          className="order-first md:order-none"
+          className=" md:order-none"
         >
           <div className="card overflow-hidden">
             <img
-              src="/images/about.jpg"
+              src="/39.png"
               alt="Mujeres entrenando en WAVE Studio"
               className="h-full w-full object-cover"
             />

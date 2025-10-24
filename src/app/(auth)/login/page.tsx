@@ -5,12 +5,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/useSession";
 
-// 🚀 Evita prerender y fuerza render dinámico (opcional pero recomendado)
 export const dynamic = "force-dynamic";
 
-// -------------------------------------------------------------
-// Componente interno que usa useSearchParams
-// -------------------------------------------------------------
 function LoginInner() {
   const router = useRouter();
   const search = useSearchParams();
@@ -34,12 +30,8 @@ function LoginInner() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include", // usa cookies si tu API las setea
-        body: JSON.stringify({
-          email: email.trim(),
-          password,
-          remember,
-        }),
+        credentials: "include",
+        body: JSON.stringify({ email: email.trim(), password, remember }),
       });
 
       if (!res.ok) {
@@ -53,7 +45,7 @@ function LoginInner() {
         throw new Error("No se pudo iniciar sesión. Inténtalo de nuevo.");
       }
 
-      await refresh(); // Revalida sesión
+      await refresh();
       router.replace(next);
       router.refresh();
     } catch (err: any) {
@@ -64,28 +56,37 @@ function LoginInner() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4">
+    <div className="min-h-screen bg-[color:var(--color-background)] px-4 text-[color:var(--color-foreground)] transition-colors">
       <main className="mx-auto max-w-md py-12">
-        <div className="bg-white shadow-lg rounded-2xl p-8">
+        <div className="rounded-2xl border border-[color:var(--color-border)] bg-[color:var(--color-card)] p-8 shadow-lg transition-colors">
           <div className="mb-6">
-            <h1 className="text-2xl font-semibold text-gray-900">Iniciar sesión</h1>
-            <p className="mt-1 text-sm text-gray-600">
+            <h1 className="text-2xl font-semibold text-[color:var(--color-card-foreground)]">
+              Iniciar sesión
+            </h1>
+            <p className="mt-1 text-sm text-[color:var(--color-muted-foreground)]">
               ¿No tienes cuenta?{" "}
-              <Link href="/register" className="font-medium underline underline-offset-4">
-                <span className="text-[var(--color-primary)]">Crear cuenta</span>
+              <Link
+                href="/register"
+                className="font-medium underline underline-offset-4 text-[var(--color-primary)]"
+              >
+                Crear cuenta
               </Link>
             </p>
           </div>
 
           {errorMsg && (
-            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="mb-4 rounded-xl border border-red-400 bg-red-50 dark:bg-red-900/30 dark:border-red-700 px-4 py-3 text-sm text-red-700 dark:text-red-300">
               {errorMsg}
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Email */}
             <div className="space-y-2">
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-[color:var(--color-card-foreground)]"
+              >
                 Correo electrónico
               </label>
               <input
@@ -94,13 +95,17 @@ function LoginInner() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                className="w-full rounded-xl border border-[color:var(--color-input)] bg-[color:var(--color-card)] px-4 py-2.5 text-[color:var(--color-foreground)] placeholder:text-[color:var(--color-muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
                 autoComplete="email"
               />
             </div>
 
+            {/* Password */}
             <div className="space-y-2">
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              <label
+                htmlFor="password"
+                className="block text-sm font-medium text-[color:var(--color-card-foreground)]"
+              >
                 Contraseña
               </label>
               <div className="relative">
@@ -110,13 +115,13 @@ function LoginInner() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-xl border border-gray-300 px-4 py-2.5 pr-12 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                  className="w-full rounded-xl border border-[color:var(--color-input)] bg-[color:var(--color-card)] px-4 py-2.5 pr-12 text-[color:var(--color-foreground)] placeholder:text-[color:var(--color-muted-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
                   autoComplete="current-password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPwd((v) => !v)}
-                  className="absolute inset-y-0 right-2 my-1 rounded-lg px-3 text-sm text-gray-600 hover:bg-gray-100"
+                  className="absolute inset-y-0 right-2 my-1 rounded-lg px-3 text-sm text-[color:var(--color-muted-foreground)] hover:bg-[color:var(--color-muted)]"
                   aria-label={showPwd ? "Ocultar contraseña" : "Mostrar contraseña"}
                 >
                   {showPwd ? "Ocultar" : "Ver"}
@@ -124,24 +129,28 @@ function LoginInner() {
               </div>
             </div>
 
+            {/* Recordarme / Olvidé */}
             <div className="flex items-center justify-between">
-              <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+              <label className="inline-flex items-center gap-2 text-sm text-[color:var(--color-muted-foreground)]">
                 <input
                   type="checkbox"
-                  className="h-4 w-4 rounded border-gray-300"
+                  className="h-4 w-4 rounded border-[color:var(--color-input)] bg-[color:var(--color-card)]"
                   checked={remember}
                   onChange={(e) => setRemember(e.target.checked)}
                 />
                 Recordarme
               </label>
-
-              <Link href="/forgot-password" className="text-sm">
-                <span className="text-[var(--color-primary)] hover:underline underline-offset-4">
-                  ¿Olvidaste tu contraseña?
-                </span>
+{/*
+              <Link
+                href="/forgot-password"
+                className="text-sm text-[var(--color-primary)] hover:underline underline-offset-4"
+              >
+                ¿Olvidaste tu contraseña?
               </Link>
+              */}
             </div>
 
+            {/* Botones */}
             <button
               type="submit"
               disabled={loading}
@@ -153,21 +162,24 @@ function LoginInner() {
 
             <Link
               href="/register"
-              className="block w-full text-center rounded-xl border px-4 py-2.5 font-medium transition hover:bg-gray-50"
-              style={{ borderColor: "var(--color-primary)", color: "var(--color-primary)" }}
+              className="block w-full text-center rounded-xl border px-4 py-2.5 font-medium transition hover:bg-[color:var(--color-muted)]"
+              style={{
+                borderColor: "var(--color-primary)",
+                color: "var(--color-primary)",
+              }}
             >
               Crear cuenta
             </Link>
           </form>
 
-          <p className="mt-6 text-center text-xs text-gray-500">
+          <p className="mt-6 text-center text-xs text-[color:var(--color-muted-foreground)]">
             Al continuar, aceptas nuestros{" "}
-            <Link href="/terminos" className="underline underline-offset-4">
-              <span className="text-[var(--color-primary)]">Términos</span>
+            <Link href="/terminos" className="underline underline-offset-4 text-[var(--color-primary)]">
+              Términos
             </Link>{" "}
             y{" "}
-            <Link href="/privacidad" className="underline underline-offset-4">
-              <span className="text-[var(--color-primary)]">Privacidad</span>
+            <Link href="/privacidad" className="underline underline-offset-4 text-[var(--color-primary)]">
+              Privacidad
             </Link>
             .
           </p>
@@ -177,9 +189,6 @@ function LoginInner() {
   );
 }
 
-// -------------------------------------------------------------
-// Página principal: envuelve LoginInner en Suspense
-// -------------------------------------------------------------
 export default function LoginPage() {
   return (
     <Suspense fallback={<div className="p-6 text-center">Cargando…</div>}>

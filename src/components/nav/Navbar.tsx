@@ -99,19 +99,9 @@ export function Navbar() {
     <header className="sticky top-0 z-50 bg-[color:var(--color-background)/0.8] backdrop-blur border-b border-border">
       <nav className="container-app flex h-16 items-center justify-between">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2">
-           <img
-    src="/logo-light.svg"
-    alt="WAVE Studio"
-    className="h-8 w-auto block dark:hidden"
-  />
-  <img
-    src="/logo-dark.svg"
-    alt="WAVE Studio"
-    className="h-8 w-auto hidden dark:block"
-  />
-          <span className="sr-only">WAVE Studio</span>
-        </Link>
+       <Link href="/" className="flex items-center gap-2">
+  <span className="logo" aria-label="WAVE Studio"></span>
+</Link>
 
         {/* Desktop nav */}
         <div className="hidden md:flex items-center gap-8">
@@ -155,7 +145,7 @@ export function Navbar() {
                   <FiUser className="icon" />
                   <span className="ml-1.5">Iniciar sesión</span>
                 </Link>
-                <Link href="/registro" className="btn-primary h-10">
+                <Link href="/register" className="btn-primary h-10">
                   Reservar clase
                 </Link>
               </>
@@ -201,15 +191,7 @@ export function Navbar() {
                         </div>
                       </div>
                       <div className="h-px bg-border" />
-                      <Link
-                        href="/cuenta"
-                        className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-muted"
-                        role="menuitem"
-                        onClick={() => setUserMenuOpen(false)}
-                      >
-                        <FiUserCheck className="icon" />
-                        Mi cuenta
-                      </Link>
+                  
                       <button
                         onClick={handleLogout}
                         className="w-full flex items-center gap-2 px-4 py-2 text-left text-sm hover:bg-muted"
@@ -268,17 +250,9 @@ export function Navbar() {
               {/* Header */}
               <div className="flex items-center justify-between px-4 py-4 border-b border-border">
                 <div className="flex items-center gap-2">
-                   <img
-    src="/logo-light.svg"
-    alt="WAVE Studio"
-    className="h-8 w-auto block dark:hidden"
-  />
-  <img
-    src="/logo-dark.svg"
-    alt="WAVE Studio"
-    className="h-8 w-auto hidden dark:block"
-  />
-                  <span className="font-display font-extrabold">WAVE Studio</span>
+                <Link href="/" className="flex items-center gap-2">
+  <span className="logo" aria-label="WAVE Studio"></span>
+</Link>
                 </div>
                 <button onClick={() => setOpen(false)} className="icon-btn" aria-label="Cerrar menú">
                   <FiX className="icon" />
@@ -310,7 +284,7 @@ export function Navbar() {
                         href={href}
                         className={`block rounded-xl px-3 py-2 text-base font-medium ${
                           active
-                            ? "bg-[color:var(--color-primary-50)] text-[color:hsl(201_44%_36%)]"
+                            ? "bg-[color:var(--color-primary-50)] text-[color:#4a100c]"
                             : "hover:bg-muted"
                         }`}
                       >
@@ -327,11 +301,7 @@ export function Navbar() {
                         Mis clases
                       </Link>
                     </li>
-                    <li>
-                      <Link href="/cuenta" className="block rounded-xl px-3 py-2 text-base font-medium hover:bg-muted">
-                        Mi cuenta
-                      </Link>
-                    </li>
+                   
                   </>
                 ) : null}
               </ul>
@@ -350,7 +320,7 @@ export function Navbar() {
                   </>
                 ) : (
                   <>
-                    <Link href="/registro" className="btn-primary h-10 justify-center">
+                    <Link href="/register" className="btn-primary h-10 justify-center">
                       Reservar
                     </Link>
                     <Link href="/login" className="btn-outline h-10 justify-center">

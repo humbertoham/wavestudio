@@ -112,7 +112,7 @@ export default function MyClassesPage() {
         const { code, message } = await res.json().catch(() => ({}));
         const msg =
           code === "WINDOW_CLOSED"
-            ? "La ventana de cancelación ya cerró (4 horas antes)."
+            ? "La ventana de cancelación ya cerró (2 horas antes)."
             : message || "No se pudo cancelar la clase.";
         throw new Error(msg);
       }
@@ -291,10 +291,10 @@ export default function MyClassesPage() {
                 onClick={onCancel}
                 disabled={busy}
                 className="btn-outline h-10 inline-flex items-center justify-center gap-2"
-                title={`Se reembolsarán ${refundTokens} token${refundTokens === 1 ? "" : "s"}.`}
+                title={`Se reembolsarán ${refundTokens} clase${refundTokens === 1 ? "" : "s"}.`}
               >
                 <FiXCircle />
-                {busy ? "Cancelando..." : `Cancelar (${refundTokens} tokens)`}
+                {busy ? "Cancelando..." : `Cancelar (${refundTokens} clases)`}
               </button>
             ) : (
               <span className="text-xs text-muted-foreground">

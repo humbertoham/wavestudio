@@ -35,7 +35,7 @@ export default function Hero() {
             viewport={{ once: true, margin: "-80px" }}
             variants={fadeUp}
             custom={0}
-            className="inline-flex items-center gap-2 rounded-full bg-[color:var(--color-primary-50)] px-3 py-1 text-xs font-semibold text-[color:hsl(201_44%_36%)]"
+            className="inline-flex items-center gap-2 rounded-full bg-[color:var(--color-primary-50)] px-3 py-1 text-xs font-semibold text-[color:hsl(201 45% 95%)]"
           >
             Bienestar • Comunidad • Movimiento
           </motion.p>
@@ -89,28 +89,17 @@ Durante cada sesión, nos enfocaremos en conectar mente y cuerpo para maximizar 
             </Link>
           </motion.div>
 
-          <motion.ul
-            initial="hidden"
-            whileInView="show"
-            viewport={{ once: true, margin: "-80px" }}
-            variants={fadeUp}
-            custom={4}
-            className="mt-6 grid gap-2 text-sm text-muted-foreground"
-          >
-            <li>• Calendario semanal con cupo limitado</li>
-            <li>• Reservas y compras desde tu cuenta</li>
-            <li>• Comunidad segura y empática</li>
-          </motion.ul>
+         
         </div>
 
         <motion.div
           initial={{ opacity: 0, scale: 0.96 }}
           whileInView={{ opacity: 1, scale: 1, transition: { duration: 0.8, ease: EASE } }}
           viewport={{ once: true, margin: "-80px" }}
-          className="relative order-first aspect-[4/3] w-full overflow-hidden rounded-2xl border border-border shadow-soft md:order-none"
+          className="relative w-full order-first overflow-hidden rounded-2xl border border-border shadow-soft md:order-none"
         >
           <img
-            src="/images/hero.jpg"
+            src="/41.jpeg"
             alt="Movimiento consciente en WAVE Studio"
             className="h-full w-full object-cover"
           />

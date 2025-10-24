@@ -264,3 +264,14 @@ svg, img {
 @utility font-sans {
   font-family: var(--font-sans);
 }
+
+.logo {
+  display: inline-block;
+  width: 200px;
+  height: 50px;
+  background: url("/logo-light.png") no-repeat center/contain;
+}
+
+:root.dark .logo {
+  background-image: url("/logo-dark.png");
+}

@@ -234,36 +234,47 @@ function ReserveMenu({ open, onClose, session, tokens, onBooked }: ReserveMenuPr
   const canConfirm = session && qty >= 1 && qty <= max && !busy;
 
   async function confirm() {
-    if (!session) return;
-    if (!canConfirm) return;
-    try {
-      setBusy(true);
-      setErr(null);
+  if (!session) return;
+  if (!canConfirm) return;
 
-      const res = await fetch("/api/bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classId: session.id, quantity: qty }),
-      });
+  try {
+    setBusy(true);
+    setErr(null);
 
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `No se pudo confirmar (HTTP ${res.status})`);
+    const res = await fetch("/api/bookings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ classId: session.id, quantity: qty }),
+    });
+
+    // ✅ Si falla, intenta leer el JSON y tomar el campo "error"
+    if (!res.ok) {
+      let msg = `No se pudo confirmar la reserva (HTTP ${res.status})`;
+      try {
+        const data = await res.json();
+        if (data?.error) msg = data.error;
+      } catch {
+        // Si no es JSON, intenta leer texto plano
+        const text = await res.text();
+        if (text) msg = text;
       }
-      const data = await res.json().catch(() => ({}));
-      // Optimista: descuenta local; si el API manda saldo, úsalo.
-      onBooked(qty);
-      if (typeof data.tokens === "number") {
-        // onBooked ya descontó; si viene saldo exacto, podrías sincronizarlo en el padre.
-      }
-      onClose();
-    } catch (e: any) {
-      setErr(e?.message || "Error al reservar.");
-    } finally {
-      setBusy(false);
+      throw new Error(msg);
     }
-  }
 
+    // ✅ Si todo ok
+    const data = await res.json().catch(() => ({}));
+
+    onBooked(qty);
+    if (typeof data.tokens === "number") {
+      // onBooked ya descontó; podrías sincronizar saldo exacto si lo deseas
+    }
+    onClose();
+  } catch (e: any) {
+    setErr(e?.message || "Error al reservar.");
+  } finally {
+    setBusy(false);
+  }
+}
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
       {/* backdrop */}
@@ -378,7 +389,7 @@ function SessionCard({
     }
     if (s.status === "BOOK") {
       return (
-        <span className="ml-auto rounded-full bg-[color:var(--color-primary-50)] px-2 py-0.5 text-[11px] font-semibold text-[color:hsl(201_44%_36%)]">
+        <span className="ml-auto rounded-full bg-[color:var(--color-primary-50)] px-2 py-0.5 text-[11px] font-semibold text-[color:hsl(201 45% 95%)]">
           BOOK YOUR MAT
         </span>
       );
@@ -453,7 +464,7 @@ function DayColumn({
       className="card overflow-hidden flex flex-col h-[560px] md:h-[580px] snap-start"
       style={{ minWidth: "17rem" }}
     >
-      <div className="px-3 py-2 bg-[color:var(--color-primary-50)] text-center font-display text-sm font-bold text-[color:hsl(201_44%_36%)]">
+      <div className="px-3 py-2 bg-[color:var(--color-primary-50)] text-center font-display text-sm font-bold text-[color:hsl(201 45% 95%)]">
         <div>{day.dow}</div>
         <div className="text-[11px] font-semibold opacity-80">{day.dateLabel}</div>
       </div>

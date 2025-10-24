@@ -1,4 +1,3 @@
-// src/app/(marketing)/contacto/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -10,11 +9,12 @@ const EASE = cubicBezier(0.22, 1, 0.36, 1);
 
 export default function ContactPage() {
   const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   return (
     <section className="section">
       <div className="container-app grid gap-10 lg:grid-cols-[1.1fr_.9fr]">
-        {/* Intro / info compacta (sin repetir footer) */}
+        {/* Intro */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0, transition: { duration: 0.6, ease: EASE } }}
@@ -49,7 +49,6 @@ export default function ContactPage() {
             </div>
           </div>
 
-          {/* Enlaces útiles (sin duplicar info del footer) */}
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <Link href="/faq" className="btn-outline">
               <FiHelpCircle className="icon" />
@@ -68,7 +67,6 @@ export default function ContactPage() {
             </a>
           </div>
 
-          {/* Nota breve */}
           <p className="mt-3 text-xs text-muted-foreground">
             *La información de dirección, teléfono y mapa se encuentra en el footer.
           </p>
@@ -82,50 +80,57 @@ export default function ContactPage() {
           <div className="card p-6">
             <h2 className="font-display text-xl font-bold">Envíanos un mensaje</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Te contestaremos por correo electrónico.
+              Te contestaremos por WhatsApp.
             </p>
 
             {!sent ? (
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  // Aquí integrarías tu backend o servicio (Resend, Formspree, EmailJS, etc.)
-                  setSent(true);
+                  if (loading) return;
+                  setLoading(true);
+
+                  const form = new FormData(e.currentTarget as HTMLFormElement);
+                  const name = form.get("name")?.toString() ?? "";
+                  const email = form.get("email")?.toString() ?? "";
+                  const subject = form.get("subject")?.toString() ?? "";
+                  const message = form.get("message")?.toString() ?? "";
+
+                  // 🔗 Crear mensaje prellenado
+                  const text = `📨 Nuevo mensaje desde el formulario:
+Nombre: ${name}
+Email: ${email}
+Asunto: ${subject}
+
+${message}`;
+
+                  // Generar link oficial de WhatsApp (E.164 sin +)
+                  const phone = "528128877484";
+                  const encoded = encodeURIComponent(text);
+                  const url = `https://wa.me/${phone}?text=${encoded}`;
+
+                  // Abrir en nueva pestaña
+                  window.open(url, "_blank");
+
+                  setTimeout(() => setSent(true), 500);
+                  setLoading(false);
                 }}
                 className="mt-6 space-y-4"
               >
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label className="block text-sm font-medium mb-1">Nombre</label>
-                    <input
-                      type="text"
-                      name="name"
-                      required
-                      className="input"
-                      placeholder="Tu nombre"
-                    />
+                    <input type="text" name="name" required className="input" placeholder="Tu nombre" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">Correo</label>
-                    <input
-                      type="email"
-                      name="email"
-                      required
-                      className="input"
-                      placeholder="tu@email.com"
-                    />
+                    <input type="email" name="email" required className="input" placeholder="tu@email.com" />
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium mb-1">Asunto</label>
-                  <input
-                    type="text"
-                    name="subject"
-                    required
-                    className="input"
-                    placeholder="Tema del mensaje"
-                  />
+                  <input type="text" name="subject" required className="input" placeholder="Tema del mensaje" />
                 </div>
 
                 <div>
@@ -139,27 +144,27 @@ export default function ContactPage() {
                   />
                 </div>
 
-                <button type="submit" className="btn-primary w-full h-11">
+                <button type="submit" className="btn-primary w-full h-11" disabled={loading}>
                   <FiSend className="icon" />
-                  <span className="ml-1">Enviar mensaje</span>
+                  <span className="ml-1">{loading ? "Abriendo WhatsApp…" : "Enviar mensaje por WhatsApp"}</span>
                 </button>
               </form>
             ) : (
               <div className="mt-6 grid place-items-center text-center">
                 <div className="rounded-2xl bg-[color:var(--color-primary-50)] px-4 py-3 text-[color:hsl(201_44%_36%)]">
-                  ¡Gracias! Tu mensaje fue enviado.
+                  WhatsApp se abrió correctamente ✅
                 </div>
                 <p className="mt-3 text-sm text-muted-foreground">
-                  Te responderemos en menos de 24 horas hábiles. Revisa tu bandeja de entrada y de spam.
+                  Si no se abrió automáticamente, haz clic en el botón de abajo para abrirlo manualmente.
                 </p>
-                <div className="mt-6 flex flex-wrap justify-center gap-3">
-                  <Link href="/clases" className="btn-outline h-10">
-                    Ver calendario
-                  </Link>
-                  <Link href="/precios" className="btn-primary h-10">
-                    Ver paquetes
-                  </Link>
-                </div>
+                <a
+                  href="https://wa.me/528128877484"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn-primary mt-4"
+                >
+                  Abrir chat
+                </a>
               </div>
             )}
           </div>

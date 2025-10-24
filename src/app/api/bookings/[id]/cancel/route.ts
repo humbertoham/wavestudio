@@ -6,7 +6,7 @@ import { getAuth } from "@/lib/auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const CANCEL_WINDOW_MIN = 240; // 4h
+const CANCEL_WINDOW_MIN = 120; // 4h
 
 function j(status: number, body: any) {
   return NextResponse.json(body, { status });

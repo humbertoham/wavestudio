@@ -29,13 +29,30 @@ export async function GET(req: Request) {
   const to = searchParams.get("to");
   const focus = searchParams.get("focus") ?? undefined;
 
-  const where: any = {};
-  if (from || to) {
-    where.date = {
-      gte: from ? new Date(from) : undefined,
-      lt: to ? new Date(to) : undefined, // to exclusivo
-    };
+  // Piso mínimo: ahora (no mostrar pasadas)
+  const now = new Date();
+
+  // Determina límites de ventana
+  let gte = from ? new Date(from) : now;
+  if (isNaN(gte.getTime())) gte = now;
+  // Asegura no bajar de "now"
+  if (gte < now) gte = now;
+
+  let lt: Date | undefined = undefined;
+  if (to) {
+    const toDate = new Date(to);
+    if (!isNaN(toDate.getTime())) lt = toDate;
   }
+
+  // Si 'to' está en el pasado, no hay resultados
+  if (lt && lt <= now) {
+    return NextResponse.json([], { headers: { "Cache-Control": "no-store" } });
+  }
+
+  const where: any = {
+    isCanceled: false,        // ← filtra canceladas
+    date: { gte, lt },        // ← y solo futuras (>= now) dentro de ventana
+  };
   if (focus) where.focus = focus;
 
   const classes = await prisma.class.findMany({

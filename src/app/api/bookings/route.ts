@@ -41,7 +41,8 @@ async function getBookedSpots(classId: string) {
 export async function POST(req: Request) {
   try {
     const auth = await getAuth();
-    if (!auth?.sub) return j(401, { error: "UNAUTHORIZED" });
+    if (!auth?.sub)
+      return j(401, { error: "No tienes sesión activa. Por favor inicia sesión para continuar." });
 
     const body = (await req.json().catch(() => ({}))) as Body;
     const classId = String(body.classId || "").trim();
@@ -49,8 +50,8 @@ export async function POST(req: Request) {
       ? Math.max(1, Math.floor(body.quantity!))
       : 1;
 
-    if (!classId) return j(400, { error: "MISSING_CLASS_ID" });
-    if (quantity < 1) return j(400, { error: "INVALID_QUANTITY" });
+    if (!classId) return j(400, { error: "Falta seleccionar la clase." });
+    if (quantity < 1) return j(400, { error: "Cantidad de lugares inválida." });
 
     // 1) Trae clase (fuera de tx para validaciones rápidas/UX)
     const klass = await prisma.class.findUnique({
@@ -64,10 +65,10 @@ export async function POST(req: Request) {
         isCanceled: true,
       },
     });
-    if (!klass) return j(404, { error: "CLASS_NOT_FOUND" });
-    if (klass.isCanceled) return j(409, { error: "CLASS_CANCELED" });
+    if (!klass) return j(404, { error: "La clase no existe o fue eliminada." });
+    if (klass.isCanceled) return j(409, { error: "Esta clase fue cancelada." });
     if (klass.date.getTime() <= Date.now()) {
-      return j(409, { error: "CLASS_ALREADY_STARTED" });
+      return j(409, { error: "La clase ya comenzó y no puede ser reservada." });
     }
 
     const perSeatCost = Math.max(1, klass.creditCost ?? 1);
@@ -81,14 +82,16 @@ export async function POST(req: Request) {
 
     const capacity = klass.capacity ?? 0;
     const available = Math.max(0, capacity - alreadyBooked);
-    if (available <= 0) return j(409, { error: "CLASS_FULL" });
-    if (quantity > available) return j(409, { error: "NOT_ENOUGH_SPOTS", available });
+    if (available <= 0)
+      return j(409, { error: "Esta clase ya está llena. Intenta con otra sesión." });
+    if (quantity > available)
+      return j(409, {
+        error: `Solo quedan ${available} lugar(es) disponibles.`,
+      });
 
     if (tokenBalance < neededTokens) {
       return j(402, {
-        error: "INSUFFICIENT_TOKENS",
-        tokens: tokenBalance,
-        needed: neededTokens,
+        error: `No tienes créditos suficientes. Necesitas ${neededTokens} y actualmente tienes ${tokenBalance}.`,
       });
     }
 
@@ -170,7 +173,7 @@ export async function POST(req: Request) {
           },
         });
 
-        // Saldos y agregados finales (después de la creación)
+        // Saldos y agregados finales
         const afterTokensAgg = await tx.tokenLedger.aggregate({
           where: { userId: auth.sub },
           _sum: { delta: true },
@@ -184,7 +187,7 @@ export async function POST(req: Request) {
         return {
           bookingId: booking.id,
           tokens: afterTokensAgg._sum.delta ?? 0,
-          quantity, // cantidad efectivamente reservada
+          quantity,
           class: {
             id: classId,
             capacity: locked.capacity,
@@ -200,26 +203,30 @@ export async function POST(req: Request) {
       bookingId: result.bookingId,
       tokens: result.tokens,
       quantity: result.quantity,
-      class: result.class, // { id, capacity, booked }
+      class: result.class,
     });
   } catch (err: any) {
     if (err?.code === "NOT_ENOUGH_SPOTS") {
-      return j(409, { error: "NOT_ENOUGH_SPOTS", available: err.available ?? 0 });
+      return j(409, {
+        error: `Solo quedan ${err.available ?? 0} lugar(es) disponibles.`,
+      });
     }
     if (err?.code === "INSUFFICIENT_TOKENS") {
       return j(402, {
-        error: "INSUFFICIENT_TOKENS",
-        tokens: err.tokens ?? 0,
-        needed: err.needed ?? 0,
+        error: `No tienes créditos suficientes para completar esta reserva.`,
       });
     }
     if (err?.code === "CLASS_ALREADY_STARTED") {
-      return j(409, { error: "CLASS_ALREADY_STARTED" });
+      return j(409, {
+        error: "La clase ya está en curso y no puede ser reservada.",
+      });
     }
     if (err?.code === "CLASS_NOT_BOOKABLE") {
-      return j(409, { error: "CLASS_NOT_BOOKABLE" });
+      return j(409, { error: "Esta clase no está disponible para reservas." });
     }
     console.error("POST /api/bookings error:", err);
-    return j(500, { error: "BOOKING_FAILED" });
+    return j(500, {
+      error: "Ocurrió un error al procesar tu reserva. Intenta nuevamente.",
+    });
   }
 }
