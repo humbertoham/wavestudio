@@ -342,7 +342,7 @@ export function Navbar() {
                   <h4 className="font-display font-extrabold text-base">Contáctanos</h4>
                   <div className="mt-2 space-y-2 text-sm text-muted-foreground">
                     <p className="flex items-center gap-2">
-                      <FiPhone className="icon" /> 333 743 9983
+                      <FiPhone className="icon" /> +52 812 887 7484
                     </p>
                     <p className="flex items-center gap-2">
                       <FiMail className="icon" /> wwavestudio@outlook.com
