@@ -31,7 +31,6 @@ export async function POST(req: Request) {
 
     if (!user) return j(404, { error: "User not found" });
     if (!pack) return j(404, { error: "Pack not found" });
-    if (!pack.isActive) return j(409, { error: "Pack is not active" });
 
     // Calcula expiración (hoy + validityDays)
     const now = new Date();

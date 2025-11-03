@@ -44,15 +44,14 @@
   --color-border: hsl(220 8% 18%);
   --color-input: hsl(220 8% 18%);
 
-  /* Primary adaptado al dark mode */
-  --color-primary: #b54a42;       /* Más luminoso para contraste */
-  --color-primary-600: #993b35;   /* Medio */
-  --color-primary-700: #7a2f2b;   /* Oscuro pero legible */
-  --color-primary-100: hsl(201 45% 14%);
-  --color-primary-50:  hsl(201 45% 10%);
-}
+  /* Primary adaptado al dark mode (sin tonos azules) */
+  --color-primary: #c24a3f;       /* Rojo ladrillo más claro */
+  --color-primary-600: #a33c34;   /* Un poco más oscuro */
+  --color-primary-700: #832f2a;   /* Oscuro pero cálido */
+  --color-primary-100: hsl(6 45% 20%);  /* Rojo oscuro suave */
+  --color-primary-50:  hsl(6 40% 15%);  /* Casi negro con matiz rojo */
 /* ===== Base ===== */
-*, *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; } }
 
 html {
   -webkit-font-smoothing: antialiased;
@@ -274,4 +273,15 @@ svg, img {
 
 :root.dark .logo {
   background-image: url("/logo-dark.png");
+}
+/* Mejora visual para <select> en modo oscuro */
+:root.dark select.input {
+  background: var(--color-card);
+  color: var(--color-foreground);
+}
+
+/* Asegurar contraste en las <option> */
+:root.dark select.input option {
+  background: var(--color-card);
+  color: var(--color-foreground);
 }

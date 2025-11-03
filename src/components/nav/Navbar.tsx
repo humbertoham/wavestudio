@@ -76,24 +76,29 @@ export function Navbar() {
 
   const initials = useMemo(() => getInitials(user?.name), [user]);
 
-  async function handleLogout() {
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
-    } catch {
-      // ignora
-    } finally {
-      await refresh();
-      router.refresh?.();
-      setUserMenuOpen(false);
-      // Opcional: redirige al home si estabas en rutas privadas
-      if (pathname.startsWith("/cuenta") || pathname.startsWith("/admin")) {
-        router.push("/");
-      }
+ async function handleLogout() {
+  try {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+    });
+  } catch {
+    // ignora
+  } finally {
+    setUserMenuOpen(false);
+
+    // Si estabas en rutas privadas, haz un hard redirect al home
+    if (pathname.startsWith("/cuenta") || pathname.startsWith("/admin")) {
+      window.location.replace("/"); // no deja historial de la ruta privada
+      return;
     }
+
+    // En rutas públicas, recarga dura la página actual
+    window.location.reload();
   }
+}
+
 
   return (
     <header className="sticky top-0 z-50 bg-[color:var(--color-background)/0.8] backdrop-blur border-b border-border">

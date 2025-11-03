@@ -21,7 +21,7 @@ const packUpdateSchema = z.object({
   name: z.string().min(1).optional(),
   classes: z.coerce.number().int().positive().optional(),
   classesCount: z.coerce.number().int().positive().optional(),
-  price: z.coerce.number().positive().transform(v => Math.round(v)).optional(),
+  price: z.coerce.number().nonnegative("price inválido").transform(v => Math.round(v)).optional(),
   validityDays: z.coerce.number().int().positive().optional(),
   isActive: z.coerce.boolean().optional(),
   classesLabel: z.string().trim().min(1).nullable().optional(),

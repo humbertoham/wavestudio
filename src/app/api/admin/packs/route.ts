@@ -22,7 +22,7 @@ const packCreateSchema = z.object({
   name: z.string().min(1, "name requerido"),
   classes: z.coerce.number().int().positive().optional(),
   classesCount: z.coerce.number().int().positive().optional(),
-  price: z.coerce.number().positive("price inválido").transform(v => Math.round(v)),
+  price: z.coerce.number().nonnegative("price inválido").transform(v => Math.round(v)),
   validityDays: z.coerce.number().int().positive("validityDays debe ser > 0"),
   isActive: z.coerce.boolean().default(true),
   classesLabel: z.string().trim().min(1).optional(),

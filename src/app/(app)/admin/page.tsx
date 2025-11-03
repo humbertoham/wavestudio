@@ -11,13 +11,18 @@ const fetcher = (url: string) =>
   });
 
 function Section({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-2xl border p-4 md:p-6 bg-white">{children}</div>;
+  return (
+    <div className="p-4 md:p-6 border rounded-[var(--radius)] bg-[--color-card] text-[--color-card-foreground]">
+      {children}
+    </div>
+  );
 }
 
 type Instructor = { id: string; name: string; bio?: string | null };
 type ClassItem = {
   id: string; title: string; focus: string; date: string; durationMin: number; capacity: number;
-  instructorId: string; instructor?: { id: string; name: string }
+  instructorId: string; instructor?: { id: string; name: string };
+  isCanceled?: boolean; // ← agregar
 };
 type Pack = {
   id: string;
@@ -33,43 +38,186 @@ type Pack = {
   description: string[] | null;
 };
 type User = { id: string; name: string | null; email: string; dateOfBirth?: string | null };
+type UserDetails = {
+  user: {
+    id: string;
+    name: string | null;
+    email: string;
+    dateOfBirth?: string | null;
+    phone?: string | null;
+    emergencyPhone?: string | null;
+    affiliation: "NONE" | "WELLHUB" | "TOTALPASS";
+    createdAt: string;
+  };
+  tokenBalance: number;
+  purchases: Array<{
+    id: string;
+    createdAt: string;
+    expiresAt: string;
+    classesLeft: number;
+    pack: { id: string; name: string; classes: number; validityDays: number; price: number };
+    payment?: { id: string; status: "PENDING"|"APPROVED"|"REJECTED"|"REFUNDED"|"CANCELED"|null } | null;
+  }>;
+  bookings: Array<{
+    id: string;
+    status: "ACTIVE"|"CANCELED";
+    quantity: number;
+    createdAt: string;
+    class: {
+      id: string;
+      title: string;
+      date: string;
+      instructor?: { id: string; name: string } | null;
+    };
+    packPurchase?: { id: string; pack?: { id: string; name: string } | null } | null;
+  }>;
+};
+type BookingRow = {
+  id: string;
+  status: "ACTIVE" | "CANCELED";
+  quantity: number;
+  createdAt: string;
+  user: { id: string; name: string | null; email: string };
+  class: {
+    id: string;
+    title: string;
+    date: string;
+    instructor?: { id: string; name: string } | null;
+  };
+};
 
 // ...
 export default function AdminPage() {
-  const [tab, setTab] = useState<"classes"|"instructors"|"packs"|"enroll"|"birthdays"|"revenue"|"manual">("classes");
+  const [tab, setTab] = useState<
+    "classes" | "instructors" | "packs" | "enroll" | "birthdays" | "revenue" | "manual" | "bookings" | "users"
+  >("classes");
+
+  const tabs: Array<[value: typeof tab, label: string]> = [
+    ["classes", "Clases"],
+    ["instructors", "Instructores"],
+    ["packs", "Paquetes"],
+    ["enroll", "Inscribir a clase"],
+    ["birthdays", "Cumpleaños"],
+    ["revenue", "Ingresos"],
+    ["manual", "Venta manual"],
+     ["bookings", "Reservas"],
+     ["users", "Usuarios"],
+  ];
+
   return (
     <main className="container-app py-8 space-y-6">
       <h1 className="text-2xl font-bold">Panel de administrador</h1>
 
-      <div className="flex gap-2 flex-wrap">
-        {[
-          ["classes","Clases"],
-          ["instructors","Instructores"],
-          ["packs","Paquetes"],
-          ["enroll","Inscribir a clase"],
-          ["birthdays","Cumpleaños"],
-          ["revenue","Ingresos"],
-          ["manual","Venta manual"],           // ← NUEVA
-        ].map(([value,label])=>(
-          <button
-            key={value}
-            onClick={()=>setTab(value as any)}
-            className={`px-3 py-1.5 rounded-xl border ${tab===value ? "bg-black text-white border-black" : "bg-white"}`}
-          >{label}</button>
-        ))}
+      {/* Tabs */}
+      <div className="flex gap-2 flex-wrap" role="tablist" aria-label="Secciones del panel">
+        {tabs.map(([value, label]) => {
+          const selected = tab === value;
+          return (
+            <button
+              key={value}
+              role="tab"
+              aria-selected={selected}
+              aria-controls={`panel-${value}`}
+              onClick={() => setTab(value)}
+              className={selected ? "btn-primary" : "btn-outline"}
+            >
+              {label}
+            </button>
+          );
+        })}
       </div>
 
-      {tab==="classes" && <ClassesSection/>}
-      {tab==="instructors" && <InstructorsSection/>}
-      {tab==="packs" && <PacksSection/>}
-      {tab==="enroll" && <EnrollSection/>}
-      {tab==="birthdays" && <BirthdaysSection/>}
-      {tab==="revenue" && <RevenueSection/>}
-      {tab==="manual" && <ManualSaleSection/>}   {/* ← NUEVO */}
+      {/* Panels */}
+      <section
+        id="panel-classes"
+        role="tabpanel"
+        hidden={tab !== "classes"}
+        aria-labelledby="classes"
+        className="space-y-6"
+      >
+        {tab === "classes" && <ClassesSection />}
+      </section>
+
+      <section
+        id="panel-instructors"
+        role="tabpanel"
+        hidden={tab !== "instructors"}
+        aria-labelledby="instructors"
+        className="space-y-6"
+      >
+        {tab === "instructors" && <InstructorsSection />}
+      </section>
+
+      <section
+        id="panel-packs"
+        role="tabpanel"
+        hidden={tab !== "packs"}
+        aria-labelledby="packs"
+        className="space-y-6"
+      >
+        {tab === "packs" && <PacksSection />}
+      </section>
+
+      <section
+        id="panel-enroll"
+        role="tabpanel"
+        hidden={tab !== "enroll"}
+        aria-labelledby="enroll"
+        className="space-y-6"
+      >
+        {tab === "enroll" && <EnrollSection />}
+      </section>
+
+      <section
+        id="panel-birthdays"
+        role="tabpanel"
+        hidden={tab !== "birthdays"}
+        aria-labelledby="birthdays"
+        className="space-y-6"
+      >
+        {tab === "birthdays" && <BirthdaysSection />}
+      </section>
+
+      <section
+        id="panel-revenue"
+        role="tabpanel"
+        hidden={tab !== "revenue"}
+        aria-labelledby="revenue"
+        className="space-y-6"
+      >
+        {tab === "revenue" && <RevenueSection />}
+      </section>
+
+      <section
+        id="panel-manual"
+        role="tabpanel"
+        hidden={tab !== "manual"}
+        aria-labelledby="manual"
+        className="space-y-6"
+      >
+        {tab === "manual" && <ManualSaleSection />}
+      </section>
+      <section
+  id="panel-bookings"
+  role="tabpanel"
+  hidden={tab !== "bookings"}
+  aria-labelledby="bookings"
+  className="space-y-6"
+>
+  {tab === "bookings" && <BookingsSection />}
+</section>
+<section
+  id="panel-users"
+  role="tabpanel"
+  hidden={tab !== "users"}
+  aria-labelledby="users"
+  className="space-y-6"
+>
+  {tab === "users" && <UserInspectorSection />}
+</section>
     </main>
   );
 }
-
 
 /* ---------------------------------------------------
    CLASES — listar / crear / editar por fila / eliminar
@@ -86,15 +234,16 @@ function ClassesSection() {
   });
 
   const filtered = useMemo(()=> {
-    if (!data?.items) return [];
-    const q = search.trim().toLowerCase();
-    if (!q) return data.items;
-    return data.items.filter(c =>
-      c.title.toLowerCase().includes(q) ||
-      c.focus.toLowerCase().includes(q) ||
-      (c.instructor?.name ?? "").toLowerCase().includes(q)
-    );
-  }, [data, search]);
+  if (!data?.items) return [];
+  const q = search.trim().toLowerCase();
+  const base = data.items.filter(c => !c.isCanceled); // ← oculta canceladas
+  if (!q) return base;
+  return base.filter(c =>
+    c.title.toLowerCase().includes(q) ||
+    c.focus.toLowerCase().includes(q) ||
+    (c.instructor?.name ?? "").toLowerCase().includes(q)
+  );
+}, [data, search]);
 
   async function createClass(e: React.FormEvent) {
     e.preventDefault();
@@ -1245,16 +1394,15 @@ function ManualSaleSection() {
     );
   }, [users, userQuery]);
 
-  const filteredPacks = useMemo(() => {
-    const q = packQuery.trim().toLowerCase();
-    return (packs?.items ?? []).filter(p =>
-      p.isActive && (
-        p.name.toLowerCase().includes(q) ||
-        String(p.price).includes(q) ||
-        String(p.classes).includes(q)
-      )
-    );
-  }, [packs, packQuery]);
+ const filteredPacks = useMemo(() => {
+  const q = packQuery.trim().toLowerCase();
+  return (packs?.items ?? []).filter(p =>
+    p.name.toLowerCase().includes(q) ||
+    String(p.price).includes(q) ||
+    String(p.classes).includes(q)
+  );
+}, [packs, packQuery]);
+
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -1336,6 +1484,385 @@ function ManualSaleSection() {
 
         {msg && <p className="mt-2 text-sm">{msg}</p>}
       </form>
+    </Section>
+  );
+}
+/* 
+SECCION DE RESERVAS 
+*/
+function BookingsSection() {
+  const { data: classesData } = useSWR<{ items: ClassItem[] }>(
+    "/api/admin/classes",
+    fetcher
+  );
+
+  const [selectedClassId, setSelectedClassId] = useState<string>("");
+
+  // fetch de reservas para la clase elegida
+  const { data, error, isLoading } = useSWR<{ items: BookingRow[] }>(
+    selectedClassId ? `/api/admin/bookings?classId=${encodeURIComponent(selectedClassId)}` : null,
+    fetcher
+  );
+
+  // 🔎 QUERY para BUSCAR CLASE (no usuarios)
+  const [classQuery, setClassQuery] = useState("");
+
+  // 🔎 filtra las clases mostradas en el select usando classQuery
+  const allClasses = useMemo(() => classesData?.items ?? [], [classesData]);
+  const filteredClasses = useMemo(() => {
+    const term = classQuery.trim().toLowerCase();
+    const base = [...allClasses].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+    if (!term) return base;
+    return base.filter(c => {
+      const title = c.title.toLowerCase();
+      const instr = (c.instructor?.name ?? "").toLowerCase();
+      const dateStr = new Date(c.date).toLocaleString().toLowerCase();
+      return title.includes(term) || instr.includes(term) || dateStr.includes(term);
+    });
+  }, [allClasses, classQuery]);
+
+  // cuando cambia el select, fijamos la clase y limpiamos la query
+  function onSelectClass(id: string) {
+    setSelectedClassId(id);
+    setClassQuery("");
+  }
+
+  const selectedClass = useMemo(
+    () => allClasses.find(c => c.id === selectedClassId),
+    [allClasses, selectedClassId]
+  );
+
+  // Tabla: ya no hay buscador de email; solo mostramos reservas
+  const bookings = data?.items ?? [];
+
+  return (
+    <Section>
+      <div className="grid gap-3 md:grid-cols-3 mb-4">
+        {/* Columna buscador de CLASE */}
+        <div className="md:col-span-2">
+          <label className="block text-sm mb-1">Buscar clase (título / instructor / fecha)</label>
+          <input
+            className="input w-full"
+            placeholder="Ej. Yoga, Ana, 12/10 7:00 pm…"
+            value={classQuery}
+            onChange={e => setClassQuery(e.target.value)}
+          />
+        </div>
+
+        {/* Columna SELECT con clases filtradas */}
+        <div>
+          <label className="block text-sm mb-1">Selecciona la clase</label>
+          <select
+            className="input w-full"
+            value={selectedClassId}
+            onChange={e => onSelectClass(e.target.value)}
+          >
+            <option value="">— Selecciona —</option>
+            {filteredClasses.map(c => (
+              <option key={c.id} value={c.id}>
+                {new Date(c.date).toLocaleString()} — {c.title}
+                {c.instructor?.name ? ` (${c.instructor.name})` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {selectedClass ? (
+        <div className="mb-3 text-sm text-muted-foreground">
+          <strong>Clase:</strong> {selectedClass.title} —{" "}
+          {new Date(selectedClass.date).toLocaleString()}
+          {selectedClass.instructor?.name ? ` · ${selectedClass.instructor.name}` : ""}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground mb-3">
+          Busca y selecciona una clase para ver sus reservas.
+        </p>
+      )}
+
+      {selectedClassId && isLoading && (
+        <p className="text-sm text-muted-foreground">Cargando reservas…</p>
+      )}
+      {selectedClassId && error && (
+        <p className="text-sm text-red-600">Error cargando reservas</p>
+      )}
+
+      {selectedClassId && (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="text-left border-b">
+              <tr>
+                <th className="py-2">Reservado el</th>
+                <th className="py-2">Usuario</th>
+                <th className="py-2">Email</th>
+                <th className="py-2">Estado</th>
+                <th className="py-2 text-right">Cantidad</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bookings.map(b => (
+                <tr key={b.id} className="border-b align-top">
+                  <td className="py-2">{new Date(b.createdAt).toLocaleString()}</td>
+                  <td className="py-2">{b.user.name ?? "—"}</td>
+                  <td className="py-2">{b.user.email}</td>
+                  <td className="py-2">
+                    {b.status === "ACTIVE" ? (
+                      <span className="badge-success">Activa</span>
+                    ) : (
+                      <span className="badge-ghost">Cancelada</span>
+                    )}
+                  </td>
+                  <td className="py-2 text-right">{b.quantity}</td>
+                </tr>
+              ))}
+              {bookings.length === 0 && !isLoading && (
+                <tr>
+                  <td colSpan={6} className="py-3 text-center text-muted-foreground">
+                    Sin reservas para esta clase
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/* 
+SECCION DE USUARIOS
+*/
+function UserInspectorSection() {
+  const [q, setQ] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // 1️⃣ Mostrar últimos usuarios cuando no hay búsqueda
+  const { data: latestUsers, isLoading: loadingLatest } = useSWR<{ items: User[] }>(
+    q.trim() ? null : "/api/admin/users", // mismo endpoint sin ?q
+    fetcher
+  );
+
+  // 2️⃣ Buscar usuarios por q (nombre o email)
+  const { data: searchData, isLoading: searching } = useSWR<{ items: User[] }>(
+    q.trim() ? `/api/admin/users?q=${encodeURIComponent(q.trim())}` : null,
+    fetcher
+  );
+
+  // 3️⃣ Detalles del usuario seleccionado
+  const { data: details, isLoading: loadingDetails, error: detailsError } =
+    useSWR<UserDetails>(
+      selectedId ? `/api/admin/users/${selectedId}/details` : null,
+      fetcher
+    );
+
+  // 4️⃣ Decide qué lista mostrar
+  const list = q.trim() ? searchData?.items : latestUsers?.items;
+  const loadingList = q.trim() ? searching : loadingLatest;
+
+  return (
+    <Section>
+      <div className="grid md:grid-cols-3 gap-4">
+        {/* Columna izquierda: búsqueda + resultados */}
+        <div className="md:col-span-1 space-y-3">
+          <h2 className="text-xl font-semibold">Usuarios</h2>
+          <input
+            className="input w-full"
+            placeholder="Buscar por nombre o email…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            aria-label="Buscar usuario por nombre o email"
+          />
+          {loadingList && <p className="text-sm text-muted-foreground">Cargando…</p>}
+
+          <div className="border rounded-[var(--radius)] overflow-hidden">
+            <ul className="divide-y">
+              {(list ?? []).map((u) => (
+                <li key={u.id}>
+                  <button
+                    className={`w-full text-left p-3 hover:bg-[--color-muted] ${
+                      selectedId === u.id ? "bg-[--color-muted]" : ""
+                    }`}
+                    onClick={() => setSelectedId(u.id)}
+                    aria-current={selectedId === u.id ? "true" : undefined}
+                  >
+                    <div className="font-medium">{u.name ?? "—"}</div>
+                    <div className="text-sm text-muted-foreground">{u.email}</div>
+                  </button>
+                </li>
+              ))}
+
+              {!loadingList && (list?.length ?? 0) === 0 && (
+                <li className="p-3 text-sm text-muted-foreground">
+                  {q.trim() ? "Sin resultados" : "No hay usuarios registrados"}
+                </li>
+              )}
+            </ul>
+          </div>
+
+          {/* info contextual */}
+          {!q.trim() && !loadingList && (
+            <p className="text-xs text-muted-foreground text-center">
+              Mostrando los últimos usuarios registrados
+            </p>
+          )}
+        </div>
+
+        {/* Columna derecha: ficha del usuario */}
+        <div className="md:col-span-2 space-y-6">
+          {!selectedId && (
+            <p className="text-sm text-muted-foreground">
+              Selecciona un usuario para ver sus datos.
+            </p>
+          )}
+          {selectedId && loadingDetails && (
+            <p className="text-sm text-muted-foreground">Cargando detalles…</p>
+          )}
+          {selectedId && detailsError && (
+            <p className="text-sm text-red-600">Error al cargar detalles.</p>
+          )}
+
+          {selectedId && details && (
+            <>
+              {/* PERFIL */}
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="p-4 border rounded-[var(--radius)]">
+                  <h3 className="font-semibold mb-2">Perfil</h3>
+                  <dl className="grid grid-cols-3 gap-2 text-sm">
+                    <dt className="text-muted-foreground">Nombre</dt>
+                    <dd className="col-span-2">{details.user.name ?? "—"}</dd>
+
+                    <dt className="text-muted-foreground">Email</dt>
+                    <dd className="col-span-2">{details.user.email}</dd>
+
+                    <dt className="text-muted-foreground">Teléfono</dt>
+                    <dd className="col-span-2">{details.user.phone ?? "—"}</dd>
+
+                    <dt className="text-muted-foreground">Emergencia</dt>
+                    <dd className="col-span-2">{details.user.emergencyPhone ?? "—"}</dd>
+
+                    <dt className="text-muted-foreground">Afiliación</dt>
+                    <dd className="col-span-2">{details.user.affiliation}</dd>
+
+                    <dt className="text-muted-foreground">Nacimiento</dt>
+                    <dd className="col-span-2">
+                      {details.user.dateOfBirth
+                        ? new Date(details.user.dateOfBirth).toLocaleDateString()
+                        : "—"}
+                    </dd>
+
+                    <dt className="text-muted-foreground">Alta</dt>
+                    <dd className="col-span-2">
+                      {new Date(details.user.createdAt).toLocaleString()}
+                    </dd>
+                  </dl>
+                </div>
+
+                <div className="p-4 border rounded-[var(--radius)]">
+                  <h3 className="font-semibold mb-2">Saldo de tokens</h3>
+                  <p className="text-3xl font-bold">{details.tokenBalance}</p>
+                  <p className="text-sm text-muted-foreground">
+                    Suma de `TokenLedger.delta`
+                  </p>
+                </div>
+              </div>
+
+              {/* PAQUETES */}
+              <div className="p-4 border rounded-[var(--radius)]">
+                <h3 className="font-semibold mb-3">Paquetes comprados</h3>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="text-left border-b">
+                      <tr>
+                        <th>Fecha compra</th>
+                        <th>Paquete</th>
+                        <th>Clases incl.</th>
+                        <th>Clases restantes</th>
+                        <th>Vence</th>
+                        <th>Pago</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {details.purchases.map((p) => (
+                        <tr key={p.id} className="border-b">
+                          <td className="py-2">
+                            {new Date(p.createdAt).toLocaleString()}
+                          </td>
+                          <td className="py-2">{p.pack.name}</td>
+                          <td className="py-2">{p.pack.classes}</td>
+                          <td className="py-2">{p.classesLeft}</td>
+                          <td className="py-2">
+                            {new Date(p.expiresAt).toLocaleDateString()}
+                          </td>
+                          <td className="py-2">{p.payment?.status ?? "—"}</td>
+                        </tr>
+                      ))}
+                      {details.purchases.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={6}
+                            className="py-3 text-center text-muted-foreground"
+                          >
+                            Sin compras
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* RESERVAS */}
+              <div className="p-4 border rounded-[var(--radius)]">
+                <h3 className="font-semibold mb-3">Reservas</h3>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="text-left border-b">
+                      <tr>
+                        <th>Fecha reserva</th>
+                        <th>Clase</th>
+                        <th>Fecha clase</th>
+                        <th>Instructor</th>
+                        <th>Estatus - </th>
+                        <th>Cantidad</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {details.bookings.map((b) => (
+                        <tr key={b.id} className="border-b">
+                          <td className="py-2">
+                            {new Date(b.createdAt).toLocaleString()}
+                          </td>
+                          <td className="py-2">{b.class.title}</td>
+                          <td className="py-2">
+                            {new Date(b.class.date).toLocaleString()}
+                          </td>
+                          <td className="py-2">{b.class.instructor?.name ?? "—"}</td>
+                          <td className="py-2">{b.status}</td>
+                          <td className="py-2">{b.quantity}</td>
+                         
+                        </tr>
+                      ))}
+                      {details.bookings.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={7}
+                            className="py-3 text-center text-muted-foreground"
+                          >
+                            Sin reservas
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </Section>
   );
 }
