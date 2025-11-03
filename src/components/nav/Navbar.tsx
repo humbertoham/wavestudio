@@ -289,7 +289,7 @@ export function Navbar() {
                         href={href}
                         className={`block rounded-xl px-3 py-2 text-base font-medium ${
                           active
-                            ? "bg-[color:var(--color-primary-50)] text-[color:#4a100c]"
+                            ? "bg-[color:var(--color-primary-50)] text-[var(--color-primary)]"
                             : "hover:bg-muted"
                         }`}
                       >
