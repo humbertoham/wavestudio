@@ -1,15 +1,15 @@
 // src/app/api/admin/whoami/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromSession } from "../_utils";
+import { getUserFromSession, requireAdmin } from "../_utils";
 
-export const runtime = "nodejs"; // asegúrate que NO sea "edge"
+export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   const hasCookie = !!req.cookies.get("session")?.value;
-  const user = await getUserFromSession(req); // lee sub y va a DB
-  const isAdmin = !!user && user.role === "ADMIN";
 
-  if (!isAdmin) {
+  const authError = await requireAdmin(req);
+  if (authError) {
+    const user = await getUserFromSession(req); // may be null, but nice for debugging
     return NextResponse.json(
       {
         error: "UNAUTHORIZED",
@@ -17,12 +17,11 @@ export async function GET(req: NextRequest) {
         user,
         dbUrl: process.env.DATABASE_URL?.slice(0, 40),
       },
-      {
-        status: 401,
-        headers: { "Cache-Control": "no-store" },
-      }
+      { status: 401, headers: { "Cache-Control": "no-store" } }
     );
   }
+
+  const user = await getUserFromSession(req);
 
   return NextResponse.json(
     {
@@ -31,8 +30,6 @@ export async function GET(req: NextRequest) {
       hasCookie,
       dbUrl: process.env.DATABASE_URL?.slice(0, 40),
     },
-    {
-      headers: { "Cache-Control": "no-store" },
-    }
+    { headers: { "Cache-Control": "no-store" } }
   );
 }
