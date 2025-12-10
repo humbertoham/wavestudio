@@ -151,12 +151,13 @@ export default function PricingPage() {
         setPendingPackId(pack.id);
 
         const res = await fetch("/api/checkout-links", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            packId: pack.id,
-          }),
-        });
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    packId: pack.id,
+    userId: me?.id,   // 👈 AQUÍ LA CLAVE
+  }),
+});
 
         // 🔑 Leer el body solo una vez
         const raw = await res.text();
