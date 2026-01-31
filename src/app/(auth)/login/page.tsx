@@ -140,14 +140,14 @@ function LoginInner() {
                 />
                 Recordarme
               </label>
-{/*
+
               <Link
                 href="/forgot-password"
                 className="text-sm text-[var(--color-primary)] hover:underline underline-offset-4"
               >
                 ¿Olvidaste tu contraseña?
               </Link>
-              */}
+              
             </div>
 
             {/* Botones */}

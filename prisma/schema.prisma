@@ -84,6 +84,10 @@ model User {
   payments      Payment[]
   checkoutLinks CheckoutLink[]
 
+
+  // password reset
+  passwordResetTokens PasswordResetToken[]
+
   // perfil
   dateOfBirth    DateTime?
   phone          String?     @db.VarChar(20)
@@ -321,4 +325,16 @@ model WebhookLog {
   error       String?
 
   @@index([provider, deliveryId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
