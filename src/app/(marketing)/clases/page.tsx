@@ -5,10 +5,13 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, cubicBezier, type Variants } from "framer-motion";
 import { FiClock, FiUser } from "react-icons/fi";
+import { useRouter } from "next/navigation";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
 const MX_LOCALE: Intl.LocalesArgument = "es-MX";
+
+
 
 type ApiSession = {
   id: string;
@@ -375,9 +378,11 @@ function ReserveMenu({ open, onClose, session, tokens, onBooked }: ReserveMenuPr
 function SessionCard({
   s,
   onOpenReserve,
+  isAdmin,
 }: {
   s: Session;
   onOpenReserve: (s: Session) => void;
+  isAdmin: boolean;
 }) {
   const statusEl = useMemo(() => {
     if (s.status === "FULL" || s.spots <= 0) {
@@ -399,13 +404,32 @@ function SessionCard({
 
   const canBook = s.spots > 0 && s.time !== "—";
 
+  const router = useRouter();
+
+const handleCardClick = () => {
+  if (!isAdmin) return;
+  router.push(`/clases/${s.id}`);
+};
+
+
   return (
-    <motion.div variants={cardVariants} className="card p-3 h-40 md:h-44 flex flex-col">
+    <motion.div
+      variants={cardVariants}
+      className={`card p-3 h-40 md:h-44 flex flex-col ${
+        isAdmin ? "cursor-pointer hover:ring-2 hover:ring-primary/40" : ""
+      }`}
+      onClick={handleCardClick}
+    >
       <div className="flex items-center gap-2">
         <h4 className="font-display text-sm font-bold truncate">{s.title}</h4>
         {statusEl}
       </div>
-      {s.focus && <div className="mt-0.5 text-xs text-muted-foreground truncate">{s.focus}</div>}
+
+      {s.focus && (
+        <div className="mt-0.5 text-xs text-muted-foreground truncate">
+          {s.focus}
+        </div>
+      )}
 
       <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
         <div className="flex items-center gap-1 min-w-0">
@@ -432,12 +456,19 @@ function SessionCard({
         {canBook ? (
           <button
             className="btn-primary h-9 w-full justify-center text-sm"
-            onClick={() => onOpenReserve(s)}
+            onClick={(e) => {
+              e.stopPropagation(); // 🔥 evita click de la card
+              onOpenReserve(s);
+            }}
           >
             Reservar
           </button>
         ) : (
-          <button className="btn-outline h-9 w-full justify-center text-sm" disabled>
+          <button
+            className="btn-outline h-9 w-full justify-center text-sm"
+            disabled
+            onClick={(e) => e.stopPropagation()}
+          >
             No disponible
           </button>
         )}
@@ -445,6 +476,7 @@ function SessionCard({
     </motion.div>
   );
 }
+
 
 function DayColumn({
   day,
@@ -455,6 +487,19 @@ function DayColumn({
   index: number;
   onOpenReserve: (s: Session) => void;
 }) {
+
+  const [isAdmin, setIsAdmin] = useState(false);
+
+useEffect(() => {
+  fetch("/api/admin/whoami", { credentials: "include" })
+    .then((res) => {
+      if (res.ok) setIsAdmin(true);
+      else setIsAdmin(false);
+    })
+    .catch(() => setIsAdmin(false));
+}, []);
+
+
   return (
     <motion.div
       custom={index}
@@ -472,7 +517,7 @@ function DayColumn({
       <div className="flex-1 overflow-auto p-3 space-y-3">
         {day.sessions.length ? (
           day.sessions.map((s) => (
-            <SessionCard key={s.id} s={s} onOpenReserve={onOpenReserve} />
+            <SessionCard key={s.id} s={s} onOpenReserve={onOpenReserve} isAdmin={isAdmin} />
           ))
         ) : (
           <div className="grid h-full place-items-center text-sm text-muted-foreground">Sin clases</div>
@@ -486,15 +531,35 @@ export default function ClassesPage() {
   const [days, setDays] = useState<Day[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tokens, setTokens] = useState<number>(0);
+  const [isAuthed, setIsAuthed] = useState<boolean>(false);
+  const [showNoCredits, setShowNoCredits] = useState(false);
 
   // estado del modal
   const [reserveOpen, setReserveOpen] = useState(false);
   const [reserveSession, setReserveSession] = useState<Session | null>(null);
 
-  function openReserve(s: Session) {
-    setReserveSession(s);
-    setReserveOpen(true);
+function openReserve(s: Session) {
+  // 1️⃣ No logueado → login
+  if (!isAuthed) {
+    window.location.href = "/login";
+    return;
   }
+
+  // 2️⃣ Logueado pero sin créditos
+  if (tokens <= 0) {
+    setShowNoCredits(true);
+    return;
+  }
+
+  // 3️⃣ Todo OK → abrir modal
+  setReserveSession(s);
+  setReserveOpen(true);
+}
+
+
+  
+
+
 
   useEffect(() => {
     // Rango de 14 días comenzando en HOY (medianoche MX real)
@@ -534,10 +599,29 @@ export default function ClassesPage() {
         const hydrated = empty.map((d) => ({ ...d, sessions: grouped.get(d.dateKey) ?? [] }));
         setDays(hydrated);
 
-        if (tokensRes.ok) {
-          const tk = await tokensRes.json().catch(() => ({}));
-          if (typeof tk.tokens === "number") setTokens(tk.tokens);
-        }
+      if (tokensRes.ok) {
+  const tk = await tokensRes.json().catch(() => ({}));
+
+  // ✅ auth real (no inferida por tokens)
+  if (typeof tk.authenticated === "boolean") {
+    setIsAuthed(tk.authenticated);
+  } else {
+    setIsAuthed(false);
+  }
+
+  // tokens (si vienen)
+  if (typeof tk.tokens === "number") {
+    setTokens(tk.tokens);
+  } else {
+    setTokens(0);
+  }
+} else {
+  setIsAuthed(false);
+  setTokens(0);
+}
+
+
+
       } catch (e) {
         console.error(e);
         setError("No se pudieron cargar las clases.");
@@ -625,6 +709,48 @@ export default function ClassesPage() {
           Horarios sujetos a cambios. Reserva con anticipación para asegurar tu lugar.
         </p>
       </div>
+
+
+              {showNoCredits && (
+  <div className="fixed inset-0 z-40 flex items-end md:items-center justify-center">
+    <div
+      className="absolute inset-0 bg-black/40"
+      onClick={() => setShowNoCredits(false)}
+    />
+
+    <motion.div
+      initial={{ y: 30, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      className="relative w-full md:w-[420px] rounded-t-2xl md:rounded-2xl bg-[color:var(--color-card)] p-5 shadow-xl"
+    >
+      <h3 className="font-display text-lg font-bold">
+        No tienes créditos
+      </h3>
+
+      <p className="mt-2 text-sm text-muted-foreground">
+        Tienes <b>0 créditos</b>. Necesitas al menos <b>1 crédito</b> para
+        reservar espacios en una clase.
+      </p>
+
+      <div className="mt-4 flex gap-2">
+        <button
+          className="btn-outline h-10 px-4"
+          onClick={() => setShowNoCredits(false)}
+        >
+          Cerrar
+        </button>
+
+        <a
+          href="/precios"
+          className="btn-primary h-10 px-4 inline-flex items-center justify-center"
+        >
+          Obtener créditos
+        </a>
+      </div>
+    </motion.div>
+  </div>
+)}
+
 
       <ReserveMenu
         open={reserveOpen}

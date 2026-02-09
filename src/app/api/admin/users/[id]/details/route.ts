@@ -1,25 +1,23 @@
-// app/api/admin/users/[id]/details/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, requireAdmin } from "../../../_utils"; // ajusta el import
-import { z } from "zod";
+import { prisma, requireAdmin } from "../../../_utils";
 
 export const runtime = "nodejs";
 
-// Tipo de contexto con params asincrónico
 type Ctx = { params: Promise<{ id: string }> };
 
-// Helper para JSON response con status
 function j(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
 export async function GET(req: NextRequest, ctx: Ctx) {
+  // 🔐 Validar admin
   const auth = await requireAdmin(req);
   if (auth) return auth;
 
   const { id } = await ctx.params;
+  const now = new Date();
 
-  // 1) Buscar usuario base
+  // 1️⃣ Usuario
   const user = await prisma.user.findUnique({
     where: { id },
     select: {
@@ -34,26 +32,52 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     },
   });
 
-  if (!user) return j(404, { ok: false, message: "Usuario no encontrado" });
+  if (!user) {
+    return j(404, {
+      ok: false,
+      message: "Usuario no encontrado",
+    });
+  }
 
-  // 2) Calcular saldo de tokens
-  const agg = await prisma.tokenLedger.aggregate({
-    where: { userId: id },
-    _sum: { delta: true },
-  });
-  const tokenBalance = agg._sum.delta ?? 0;
-
-  // 3) Paquetes comprados
+  // 2️⃣ Paquetes comprados / asignados
   const purchases = await prisma.packPurchase.findMany({
     where: { userId: id },
     orderBy: { createdAt: "desc" },
     include: {
-      pack: { select: { id: true, name: true, classes: true, validityDays: true, price: true } },
-      payment: { select: { id: true, status: true } },
+      pack: {
+        select: {
+          id: true,
+          name: true,
+          classes: true,
+          validityDays: true,
+          price: true,
+        },
+      },
+      payment: {
+        select: {
+          id: true,
+          status: true,
+        },
+      },
     },
   });
 
-  // 4) Reservas (con clase e instructor)
+  // ✅ 3️⃣ SALDO REAL DESDE LEDGER (FUENTE DE VERDAD)
+  const tokenAgg = await prisma.tokenLedger.aggregate({
+  where: {
+    userId: id,
+    OR: [
+      { packPurchaseId: null }, // ADMIN_ADJUST
+      { packPurchase: { expiresAt: { gt: now } } }, // paquetes vigentes
+    ],
+  },
+  _sum: { delta: true },
+});
+
+const tokenBalance = Math.max(0, tokenAgg._sum.delta ?? 0);
+
+
+  // 4️⃣ Reservas
   const bookings = await prisma.booking.findMany({
     where: { userId: id },
     orderBy: { createdAt: "desc" },
@@ -63,32 +87,42 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           id: true,
           title: true,
           date: true,
-          instructor: { select: { id: true, name: true } },
+          instructor: {
+            select: { id: true, name: true },
+          },
         },
       },
       packPurchase: {
         select: {
           id: true,
-          pack: { select: { id: true, name: true } },
+          pack: {
+            select: { id: true, name: true },
+          },
         },
       },
     },
   });
 
-  // 5) Respuesta final
+  // 5️⃣ Response
   return j(200, {
     ok: true,
+
     user,
+
+    // 🔥 ESTE ES EL SALDO QUE DEBE USAR TODO EL SISTEMA
     tokenBalance,
-    purchases: purchases.map(p => ({
+
+    purchases: purchases.map((p) => ({
       id: p.id,
       createdAt: p.createdAt,
       expiresAt: p.expiresAt,
       classesLeft: p.classesLeft,
+      isExpired: p.expiresAt < now,
       pack: p.pack,
       payment: p.payment ?? null,
     })),
-    bookings: bookings.map(b => ({
+
+    bookings: bookings.map((b) => ({
       id: b.id,
       status: b.status,
       quantity: b.quantity,

@@ -4,7 +4,14 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion, cubicBezier } from "framer-motion";
-import { FiCalendar, FiClock, FiMapPin, FiUser, FiArrowLeft, FiXCircle } from "react-icons/fi";
+import {
+  FiCalendar,
+  FiClock,
+  FiMapPin,
+  FiUser,
+  FiArrowLeft,
+  FiXCircle,
+} from "react-icons/fi";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
@@ -12,15 +19,18 @@ const CANCEL_WINDOW_MIN = 240; // 4h
 
 type BookingStatus = "ACTIVE" | "CANCELED";
 
-type Instructor = { id: string; name: string; };
+type Instructor = {
+  id: string;
+  name: string;
+};
 
 type ClassLite = {
   id: string;
   title: string;
   focus: string;
-  date: string;       // ISO
+  date: string;
   durationMin: number;
-  creditCost?: number; // opcional si tu API lo trae
+  creditCost?: number;
   location?: string | null;
   instructor: Instructor;
 };
@@ -28,10 +38,32 @@ type ClassLite = {
 type Booking = {
   id: string;
   status: BookingStatus;
-  createdAt: string;  // ISO
+  createdAt: string;
   canceledAt?: string | null;
-  quantity: number;   // <- NECESARIO: asegúrate que tu API lo retorna
+  quantity: number;
   class: ClassLite;
+};
+
+/**
+ * =========================
+ * Paquetes
+ * =========================
+ */
+
+type PackLite = {
+  id: string;
+  name: string;
+  classes: number;
+  price: number;
+  classesLabel?: string | null;
+};
+
+type PackPurchase = {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  classesLeft: number;
+  pack: PackLite;
 };
 
 export default function MyClassesPage() {
@@ -39,7 +71,14 @@ export default function MyClassesPage() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  // Carga de reservas del usuario autenticado
+  const [packs, setPacks] = useState<PackPurchase[] | null>(null);
+  const [packsError, setPacksError] = useState<string | null>(null);
+
+  /**
+   * =========================
+   * Fetch bookings
+   * =========================
+   */
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -58,13 +97,47 @@ export default function MyClassesPage() {
         console.error(e);
         if (!mounted) return;
         setError("No se pudieron cargar tus reservas.");
-        setItems([]); // evitar skeleton infinito
+        setItems([]);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  /**
+   * =========================
+   * Fetch packs (API pendiente)
+   * =========================
+   */
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setPacksError(null);
+      try {
+        const res = await fetch("/api/users/me/packs", {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data: PackPurchase[] = await res.json();
+        if (!mounted) return;
+        setPacks(data.slice(0, 5));
+      } catch (e) {
+        console.error(e);
+        if (!mounted) return;
+        setPacksError("No se pudieron cargar tus paquetes.");
+        setPacks([]);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const now = useMemo(() => new Date(), []);
+
   const { upcoming, past } = useMemo(() => {
     const base = { upcoming: [] as Booking[], past: [] as Booking[] };
     if (!items) return base;
@@ -95,7 +168,8 @@ export default function MyClassesPage() {
     return m ? `${h}h ${m}m` : `${h}h`;
   };
 
-  const minutesUntil = (d: Date) => Math.floor((d.getTime() - Date.now()) / 60000);
+  const minutesUntil = (d: Date) =>
+    Math.floor((d.getTime() - Date.now()) / 60000);
 
   const canCancel = (b: Booking) => {
     if (b.status === "CANCELED") return false;
@@ -106,19 +180,21 @@ export default function MyClassesPage() {
   const cancelBooking = async (b: Booking) => {
     try {
       setBusyId(b.id);
-      // endpoint de cancelación (ver backend más abajo)
-      const res = await fetch(`/api/bookings/${b.id}/cancel`, { method: "PATCH" });
+      const res = await fetch(`/api/bookings/${b.id}/cancel`, {
+        method: "PATCH",
+      });
       if (!res.ok) {
         const { code, message } = await res.json().catch(() => ({}));
         const msg =
           code === "WINDOW_CLOSED"
-            ? "La ventana de cancelación ya cerró (2 horas antes)."
+            ? "La ventana de cancelación ya cerró."
             : message || "No se pudo cancelar la clase.";
         throw new Error(msg);
       }
       const updated: Booking = await res.json();
-      // refrescar localmente
-      setItems((cur) => (cur ? cur.map(x => (x.id === updated.id ? updated : x)) : cur));
+      setItems((cur) =>
+        cur ? cur.map((x) => (x.id === updated.id ? updated : x)) : cur
+      );
     } catch (e: any) {
       alert(e?.message || "No se pudo cancelar la clase.");
     } finally {
@@ -126,41 +202,52 @@ export default function MyClassesPage() {
     }
   };
 
+  const isExpired = (p: PackPurchase) =>
+    new Date(p.expiresAt).getTime() < Date.now();
+
   return (
     <section className="section">
       <div className="container-app">
         <motion.div
           initial={{ opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0, transition: { duration: 0.6, ease: EASE } }}
+          animate={{
+            opacity: 1,
+            y: 0,
+            transition: { duration: 0.6, ease: EASE },
+          }}
           className="mx-auto max-w-3xl"
         >
           <div className="mb-4">
-            <Link href="/clases" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-              <FiArrowLeft className="icon" /> Volver al calendario
+            <Link
+              href="/clases"
+              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <FiArrowLeft /> Volver al calendario
             </Link>
           </div>
 
-          <h1 className="font-display text-3xl font-extrabold">Mis clases</h1>
+          <h1 className="font-display text-3xl font-extrabold">Mis clases y paquetes</h1>
           <p className="mt-2 text-muted-foreground">
-            Aquí verás todas tus reservas activas y el historial de clases pasadas/canceladas.
+            Aquí verás tus reservas y tus paquetes comprados.
           </p>
 
-          {error && <div className="mt-6 text-sm text-red-600">{error} Inténtalo de nuevo más tarde.</div>}
+          {error && (
+            <div className="mt-6 text-sm text-red-600">
+              {error} Inténtalo de nuevo más tarde.
+            </div>
+          )}
 
-          {/* SKELETON */}
           {!items && !error && (
             <div className="mt-8 space-y-4">
               {Array.from({ length: 4 }).map((_, i) => (
-                <div key={`sk-${i}`} className="card p-5 animate-pulse">
+                <div key={i} className="card p-5 animate-pulse">
                   <div className="h-5 w-2/3 bg-muted rounded" />
                   <div className="mt-2 h-4 w-1/3 bg-muted rounded" />
-                  <div className="mt-4 h-3 w-1/2 bg-muted rounded" />
                 </div>
               ))}
             </div>
           )}
 
-          {/* CONTENIDO */}
           {items && (
             <>
               {/* Próximas */}
@@ -168,53 +255,121 @@ export default function MyClassesPage() {
                 <h2 className="font-display text-xl font-bold">Próximas</h2>
                 <div className="mt-4 grid gap-4">
                   {upcoming.length ? (
-                    upcoming
-                      .slice()
-                      .sort((a, b) => new Date(a.class.date).getTime() - new Date(b.class.date).getTime())
-                      .map((b, idx) => (
-                        <BookingCard
-                          key={b.id}
-                          booking={b}
-                          idx={idx}
-                          muted={false}
-                          canCancel={canCancel(b)}
-                          onCancel={() => cancelBooking(b)}
-                          busy={busyId === b.id}
-                        />
-                      ))
+                    upcoming.map((b, idx) => (
+                      <BookingCard
+                        key={b.id}
+                        booking={b}
+                        idx={idx}
+                        canCancel={canCancel(b)}
+                        onCancel={() => cancelBooking(b)}
+                        busy={busyId === b.id}
+                      />
+                    ))
                   ) : (
                     <div className="card p-8 text-center text-muted-foreground">
-                      No tienes reservas próximas. <Link className="underline" href="/clases">Reserva una clase</Link>.
+                      No tienes reservas próximas.
                     </div>
                   )}
                 </div>
               </section>
 
-              {/* Historial (solo 5) */}
+              {/* Historial */}
               <section className="mt-10">
                 <h2 className="font-display text-xl font-bold">Historial</h2>
                 <div className="mt-4 grid gap-4">
-                  {past.length ? (
-                    past
-                      .slice()
-                      .sort((a, b) => new Date(b.class.date).getTime() - new Date(a.class.date).getTime())
-                      .slice(0, 5)
-                      .map((b, idx) => (
-                        <BookingCard
-                          key={b.id}
-                          booking={b}
-                          idx={idx}
-                          muted
-                          canCancel={false}
-                          onCancel={() => {}}
-                        />
-                      ))
-                  ) : (
-                    <div className="card p-8 text-center text-muted-foreground">
-                      Aún no tienes historial de clases.
-                    </div>
-                  )}
+                  {past.slice(0, 5).map((b, idx) => (
+                    <BookingCard
+                      key={b.id}
+                      booking={b}
+                      idx={idx}
+                      muted
+                    />
+                  ))}
                 </div>
+              </section>
+
+              {/* Paquetes */}
+              <section className="mt-10">
+                <h2 className="font-display text-xl font-bold">
+                  Últimos paquetes comprados
+                </h2>
+
+                {!packs && !packsError && (
+                  <div className="mt-4 space-y-3">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="card p-5 animate-pulse">
+                        <div className="h-5 w-1/2 bg-muted rounded" />
+                        <div className="mt-2 h-4 w-1/3 bg-muted rounded" />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {packsError && (
+                  <p className="mt-4 text-sm text-red-600">{packsError}</p>
+                )}
+
+                {packs && (
+                  <div className="mt-4 grid gap-4">
+                    {packs.length ? (
+                      packs.map((p, idx) => {
+                        const expired = isExpired(p);
+                        return (
+                          <motion.div
+                            key={p.id}
+                            initial={{ opacity: 0, y: 14 }}
+                            animate={{
+                              opacity: 1,
+                              y: 0,
+                              transition: {
+                                delay: 0.04 * idx,
+                                ease: EASE,
+                              },
+                            }}
+                            className={`card p-5 ${
+                              expired ? "opacity-70 ring-1 ring-muted" : ""
+                            }`}
+                          >
+                            <div className="flex justify-between gap-4">
+                              <div>
+                                <h3 className="font-display text-lg font-bold">
+                                  {p.pack.name}
+                                </h3>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                  {p.pack.classesLabel ??
+                                    `${p.pack.classes} clases`}{" "}
+                                  ·{" "}
+                                  <span className="font-medium">
+                                    {p.classesLeft} restantes
+                                  </span>
+                                </p>
+                                <div className="mt-2 text-xs text-muted-foreground">
+                                  Comprado: {fmtDate(p.createdAt)}
+                                  <br />
+                                  Expira: {fmtDate(p.expiresAt)}
+                                </div>
+                              </div>
+
+                              <span
+                                className={`text-xs font-semibold uppercase ${
+                                  expired
+                                    ? "text-red-600"
+                                    : "text-emerald-600"
+                                }`}
+                              >
+                                {expired ? "Expirado" : "Activo"}
+                              </span>
+                            </div>
+                          </motion.div>
+                        );
+                      })
+                    ) : (
+                      <div className="card p-8 text-center text-muted-foreground">
+                        Aún no has comprado paquetes.
+                      </div>
+                    )}
+                  </div>
+                )}
               </section>
             </>
           )}
@@ -223,8 +378,11 @@ export default function MyClassesPage() {
     </section>
   );
 
-  // ---- Components ----
-
+  /**
+   * =========================
+   * Booking Card
+   * =========================
+   */
   function BookingCard({
     booking,
     idx,
@@ -249,66 +407,64 @@ export default function MyClassesPage() {
     return (
       <motion.div
         initial={{ opacity: 0, y: 18, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1, transition: { duration: 0.45, delay: 0.04 * idx, ease: EASE } }}
-        className={`card p-5 ${muted ? "opacity-80" : ""} ${canceled ? "ring-1 ring-red-200" : ""}`}
+        animate={{
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          transition: { duration: 0.45, delay: 0.04 * idx, ease: EASE },
+        }}
+        className={`card p-5 ${muted ? "opacity-80" : ""} ${
+          canceled ? "ring-1 ring-red-200" : ""
+        }`}
       >
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
           <div>
-            <h3 className="font-display text-lg font-bold flex items-center gap-2">
-              {cls.title} <span className="text-muted-foreground font-normal">· {cls.focus}</span>
-              {/* badge de spots */}
-              <span className="ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-xs">
-                {spots} {spots === 1 ? "spot" : "spots"}
+            <h3 className="font-display text-lg font-bold">
+              {cls.title}{" "}
+              <span className="text-muted-foreground font-normal">
+                · {cls.focus}
               </span>
             </h3>
-            <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+
+            <div className="mt-1 flex flex-wrap gap-4 text-sm text-muted-foreground">
               <span className="inline-flex items-center gap-1">
-                <FiCalendar className="icon" />
-                {fmtDate(cls.date)}
+                <FiCalendar /> {fmtDate(cls.date)}
               </span>
               <span className="inline-flex items-center gap-1">
-                <FiClock className="icon" />
-                {fmtDuration(cls.durationMin)}
+                <FiClock /> {fmtDuration(cls.durationMin)}
               </span>
               {cls.location && (
                 <span className="inline-flex items-center gap-1">
-                  <FiMapPin className="icon" />
-                  {cls.location}
+                  <FiMapPin /> {cls.location}
                 </span>
               )}
               <span className="inline-flex items-center gap-1">
-                <FiUser className="icon" />
-                {cls.instructor.name}
+                <FiUser /> {cls.instructor.name}
               </span>
             </div>
           </div>
 
-          <div className="mt-3 grid gap-2 sm:mt-0 sm:text-right">
+          <div className="mt-3 sm:mt-0 sm:text-right">
             {canceled ? (
-              <span className="text-xs font-semibold uppercase text-red-600">Cancelada</span>
+              <span className="text-xs font-semibold uppercase text-red-600">
+                Cancelada
+              </span>
             ) : canCancel ? (
               <button
                 onClick={onCancel}
                 disabled={busy}
-                className="btn-outline h-10 inline-flex items-center justify-center gap-2"
-                title={`Se reembolsarán ${refundTokens} clase${refundTokens === 1 ? "" : "s"}.`}
+                className="btn-outline h-10 inline-flex items-center gap-2"
               >
                 <FiXCircle />
-                {busy ? "Cancelando..." : `Cancelar (${refundTokens} clases)`}
+                {busy ? "Cancelando..." : `Cancelar (${refundTokens})`}
               </button>
             ) : (
               <span className="text-xs text-muted-foreground">
-                Cancelación disponible hasta 4 h antes. {/* no botón en historial ni fuera de ventana */}
+                Cancelación hasta 4h antes
               </span>
             )}
           </div>
         </div>
-
-        {canceled && booking.canceledAt && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Cancelada el {fmtDate(booking.canceledAt)}
-          </p>
-        )}
       </motion.div>
     );
   }

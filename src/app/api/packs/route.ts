@@ -15,6 +15,7 @@ type ApiPack = {
   validityDays?: number | null;
   highlight?: "popular" | "best" | null;
   description?: string[] | null;
+  oncePerUser?: boolean;
 };
 
 function toStringArray(json: Prisma.JsonValue | null): string[] | null {
@@ -33,41 +34,37 @@ export async function GET() {
     const rows = await prisma.pack.findMany({
       where: { isActive: true },
       orderBy: [{ highlight: "desc" }, { createdAt: "asc" }],
-      // 👇 SOLO campos que existen en tu modelo
       select: {
         id: true,
         name: true,
-        classes: true,        // <- existe
+        classes: true,
         price: true,
-        validityDays: true,   // <- existe
+        validityDays: true,
         classesLabel: true,
-        highlight: true,      // PackHighlight | null
-        description: true,    // JsonValue
+        highlight: true,
+        description: true,
+        oncePerUser: true, // ✅
       },
     });
 
     const data: ApiPack[] = rows.map((p) => ({
       id: p.id,
       name: p.name,
-      // si la DB ya trae un label, úsalo; si no, genera uno desde `classes`
       classesLabel:
         p.classesLabel ??
         (typeof p.classes === "number"
           ? `${p.classes} ${p.classes === 1 ? "clase" : "clases"}`
           : null),
-      // derivado desde `classes`
       classesCount: typeof p.classes === "number" ? p.classes : null,
       price: p.price,
-      // `validity` es un string DERIVADO desde `validityDays`
       validity:
         typeof p.validityDays === "number"
           ? `Vigencia de ${p.validityDays} días`
           : null,
       validityDays: p.validityDays ?? null,
-      // adapta tu enum de DB a "popular" | "best" si nombres coinciden
       highlight: (p.highlight as unknown as "popular" | "best" | null) ?? null,
-      // JsonValue -> string[]
       description: toStringArray(p.description),
+      oncePerUser: p.oncePerUser,
     }));
 
     return NextResponse.json(data);

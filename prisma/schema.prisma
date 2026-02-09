@@ -131,15 +131,22 @@ model Class {
 
 model Booking {
   id        String        @id @default(cuid())
-  user      User          @relation(fields: [userId], references: [id])
-  userId    String
+
+  user      User?         @relation(fields: [userId], references: [id])
+  userId    String?
+
+  guestName String?       // invitado
+
   class     Class         @relation(fields: [classId], references: [id])
   classId   String
+
   status    BookingStatus @default(ACTIVE)
   createdAt DateTime      @default(now())
 
-  // Permite varias plazas de un mismo usuario en la misma clase
-  quantity Int @default(1)
+  quantity  Int           @default(1)
+
+  // 🔥 ASISTENCIA
+  attended  Boolean       @default(false)
 
   packPurchase   PackPurchase? @relation(fields: [packPurchaseId], references: [id])
   packPurchaseId String?
@@ -147,13 +154,12 @@ model Booking {
   canceledAt  DateTime?
   refundToken Boolean?
 
-  // lado opuesto de TokenLedger.booking
   ledgerEntries TokenLedger[]
 
-  // Nota: NO hay @@unique([userId, classId]) para permitir varias plazas
   @@index([classId])
   @@index([userId])
 }
+
 
 /**
  * =========================
@@ -169,6 +175,8 @@ model Pack {
   isActive     Boolean        @default(true)
   createdAt    DateTime       @default(now())
   purchases    PackPurchase[]
+
+  oncePerUser    Boolean     @default(false) 
 
   // marketing/UI
   classesLabel String? // ej. "5 clases"

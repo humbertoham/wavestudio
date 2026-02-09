@@ -31,6 +31,7 @@ type Pack = {
   price: number;           // entero (pesos)
   validityDays: number;
   isActive: boolean;
+  oncePerUser: boolean; // ✅ AQUI
   createdAt: string;
 
   classesLabel: string | null;
@@ -89,18 +90,14 @@ type BookingRow = {
 // ...
 export default function AdminPage() {
   const [tab, setTab] = useState<
-    "classes" | "instructors" | "packs" | "enroll" | "birthdays" | "revenue" | "manual" | "bookings" | "users"
+    "classes" | "instructors" | "packs" | "revenue" | "users"
   >("classes");
 
   const tabs: Array<[value: typeof tab, label: string]> = [
     ["classes", "Clases"],
     ["instructors", "Instructores"],
     ["packs", "Paquetes"],
-    ["enroll", "Inscribir a clase"],
-    ["birthdays", "Cumpleaños"],
     ["revenue", "Ingresos"],
-    ["manual", "Venta manual"],
-     ["bookings", "Reservas"],
      ["users", "Usuarios"],
   ];
 
@@ -158,25 +155,9 @@ export default function AdminPage() {
         {tab === "packs" && <PacksSection />}
       </section>
 
-      <section
-        id="panel-enroll"
-        role="tabpanel"
-        hidden={tab !== "enroll"}
-        aria-labelledby="enroll"
-        className="space-y-6"
-      >
-        {tab === "enroll" && <EnrollSection />}
-      </section>
+     
 
-      <section
-        id="panel-birthdays"
-        role="tabpanel"
-        hidden={tab !== "birthdays"}
-        aria-labelledby="birthdays"
-        className="space-y-6"
-      >
-        {tab === "birthdays" && <BirthdaysSection />}
-      </section>
+      
 
       <section
         id="panel-revenue"
@@ -188,24 +169,8 @@ export default function AdminPage() {
         {tab === "revenue" && <RevenueSection />}
       </section>
 
-      <section
-        id="panel-manual"
-        role="tabpanel"
-        hidden={tab !== "manual"}
-        aria-labelledby="manual"
-        className="space-y-6"
-      >
-        {tab === "manual" && <ManualSaleSection />}
-      </section>
-      <section
-  id="panel-bookings"
-  role="tabpanel"
-  hidden={tab !== "bookings"}
-  aria-labelledby="bookings"
-  className="space-y-6"
->
-  {tab === "bookings" && <BookingsSection />}
-</section>
+      
+      
 <section
   id="panel-users"
   role="tabpanel"
@@ -552,6 +517,7 @@ function PacksSection() {
     price?: number;           // entero en pesos; si usas centavos cambia en el API
     validityDays?: number;
     isActive: boolean;
+    oncePerUser?: boolean; // 👈 NUEVO
     classesLabel?: string;
     highlight?: "" | HighlightOpt; // "" = sin highlight
     descriptionText?: string; // textarea; se transforma a string[]
@@ -581,15 +547,17 @@ function PacksSection() {
 
     // Construye payload limpio (sin undefineds)
     const payload: any = {
-      name: creating.name?.trim(),
-      classes: creating.classes,
-      price: creating.price, // el API redondea a entero
-      validityDays: creating.validityDays,
-      isActive: !!creating.isActive,
-      classesLabel: creating.classesLabel?.trim() || undefined,
-      highlight: isHighlight(creating.highlight) ? creating.highlight : undefined, // ✅ type guard
-      description: toLines(creating.descriptionText), // string[]
-    };
+  name: creating.name?.trim(),
+  classes: creating.classes,
+  price: creating.price,
+  validityDays: creating.validityDays,
+  isActive: !!creating.isActive,
+  oncePerUser: !!creating.oncePerUser, // 👈 NUEVO
+  classesLabel: creating.classesLabel?.trim() || undefined,
+  highlight: isHighlight(creating.highlight) ? creating.highlight : undefined,
+  description: toLines(creating.descriptionText),
+};
+
 
     // elimina undefined para no romper validaciones
     Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
@@ -689,7 +657,19 @@ function PacksSection() {
             }))
           }
         />
-
+     <label className="inline-flex items-center gap-2">
+  <input
+    type="checkbox"
+    checked={!!creating.oncePerUser}
+    onChange={(e) =>
+      setCreating((f) => ({
+        ...f,
+        oncePerUser: e.target.checked,
+      }))
+    }
+  />
+  Solo una vez por usuario
+</label>
         <label className="inline-flex items-center gap-2">
           <input
             type="checkbox"
@@ -698,6 +678,8 @@ function PacksSection() {
           />
           Activo
         </label>
+   
+
 
         {/* Nueva fila: classesLabel y highlight */}
         <input
@@ -800,6 +782,7 @@ function EditablePackRow({
     price?: number; // entero (pesos)
     validityDays?: number;
     isActive?: boolean;
+    oncePerUser?: boolean; // 👈 NUEVO
     classesLabel?: string | null;
     highlight?: "" | HighlightOpt | null; // "" = sin highlight
     descriptionText?: string; // textarea → string[]
@@ -809,6 +792,7 @@ function EditablePackRow({
     price: item.price,
     validityDays: item.validityDays,
     isActive: item.isActive,
+    oncePerUser: item.oncePerUser ?? false, // 👈 NUEVO
     classesLabel: item.classesLabel ?? "",
     highlight:
       item.highlight && typeof item.highlight === "string"
@@ -1058,6 +1042,25 @@ function EditablePackRow({
                   <option value="best">Best</option>
                 </select>
               </div>
+                    <div>
+  <label className="block text-xs text-gray-500 mb-1">
+    Restricción
+  </label>
+
+  <label className="inline-flex items-center gap-2 text-sm">
+    <input
+      type="checkbox"
+      checked={!!draft.oncePerUser}
+      onChange={(e) =>
+        setDraft((d) => ({
+          ...d,
+          oncePerUser: e.target.checked,
+        }))
+      }
+    />
+    Solo una vez por usuario
+  </label>
+</div>
 
               <div className="md:col-span-4">
                 <label className="block text-xs text-gray-500 mb-1">
@@ -1082,204 +1085,6 @@ function EditablePackRow({
 }
 
 
-/* ---------------------------------------------------
-   ENROLL — con filtros y reseteo tras inscripción
----------------------------------------------------- */
-function EnrollSection() {
-  const { data: classes } = useSWR<{ items: ClassItem[] }>("/api/admin/classes", fetcher);
-  const { data: users } = useSWR<{ items: User[] }>("/api/admin/users", fetcher);
-
-  const [userId, setUserId] = useState("");
-  const [classId, setClassId] = useState("");
-
-  const [userQuery, setUserQuery] = useState("");
-  const [classQuery, setClassQuery] = useState("");
-
-  const [msg, setMsg] = useState<string | null>(null);
-
-  const filteredUsers = useMemo(() => {
-    const q = userQuery.trim().toLowerCase();
-    if (!users?.items) return [];
-    if (!q) return users.items;
-    return users.items.filter(u =>
-      (u.name ?? "").toLowerCase().includes(q) ||
-      (u.email ?? "").toLowerCase().includes(q)
-    );
-  }, [users, userQuery]);
-
-  const filteredClasses = useMemo(() => {
-    const q = classQuery.trim().toLowerCase();
-    if (!classes?.items) return [];
-    if (!q) return classes.items;
-    return classes.items.filter(c => {
-      const dateStr = new Date(c.date).toLocaleString();
-      const instructor = c.instructor?.name ?? "";
-      return (
-        c.title.toLowerCase().includes(q) ||
-        (c.focus ?? "").toLowerCase().includes(q) ||
-        instructor.toLowerCase().includes(q) ||
-        dateStr.toLowerCase().includes(q)
-      );
-    });
-  }, [classes, classQuery]);
-
-  async function enroll(e: React.FormEvent) {
-    e.preventDefault();
-    setMsg(null);
-    const r = await fetch("/api/admin/booking", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, classId }),
-    });
-    if (r.ok) {
-      // ✅ limpiar todo al inscribir correctamente
-      setUserId("");
-      setClassId("");
-      setUserQuery("");
-      setClassQuery("");
-      setMsg("Usuario inscrito a la clase.");
-
-      // (Opcional) limpiar mensaje después de unos segundos
-      setTimeout(() => setMsg(null), 4000);
-    } else {
-      setMsg("No se pudo inscribir (quizá ya estaba o no hay cupo).");
-    }
-  }
-
-  return (
-    <Section>
-      <h2 className="text-xl font-semibold mb-4">Inscribir usuario a clase</h2>
-
-      <form onSubmit={enroll} className="grid gap-4">
-        {/* Buscador + select de usuarios */}
-        <div className="grid md:grid-cols-3 gap-3 items-start">
-          <div className="md:col-span-1">
-            <label className="block text-sm font-medium mb-1">Buscar usuario</label>
-            <input
-              className="input w-full"
-              placeholder="Nombre o email…"
-              value={userQuery}
-              onChange={e => setUserQuery(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              {filteredUsers.length} resultado{filteredUsers.length === 1 ? "" : "s"}
-            </p>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium mb-1">Selecciona usuario</label>
-            <select
-              className="input w-full"
-              required
-              value={userId}
-              onChange={e => setUserId(e.target.value)}
-            >
-              <option value="">-- Usuario --</option>
-              {filteredUsers.map(u => (
-                <option key={u.id} value={u.id}>
-                  {(u.name ?? u.email) + " — " + u.email}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Buscador + select de clases */}
-        <div className="grid md:grid-cols-3 gap-3 items-start">
-          <div className="md:col-span-1">
-            <label className="block text-sm font-medium mb-1">Buscar clase</label>
-            <input
-              className="input w-full"
-              placeholder="Título, enfoque, instructor o fecha…"
-              value={classQuery}
-              onChange={e => setClassQuery(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              {filteredClasses.length} resultado{filteredClasses.length === 1 ? "" : "s"}
-            </p>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium mb-1">Selecciona clase</label>
-            <select
-              className="input w-full"
-              required
-              value={classId}
-              onChange={e => setClassId(e.target.value)}
-            >
-              <option value="">-- Clase --</option>
-              {filteredClasses.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.title} — {new Date(c.date).toLocaleString()}{" "}
-                  {c.instructor?.name ? `— ${c.instructor.name}` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Acción */}
-        <div className="flex items-center gap-3">
-          <button className="btn-primary" disabled={!userId || !classId}>
-            Inscribir
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => {
-              setUserId("");
-              setClassId("");
-              setUserQuery("");
-              setClassQuery("");
-              setMsg(null);
-            }}
-          >
-            Limpiar
-          </button>
-        </div>
-
-        {msg && <p className="mt-2 text-sm">{msg}</p>}
-      </form>
-    </Section>
-  );
-}
-
-
-
-/* ---------------------------------------------------
-   CUMPLEAÑOS — igual que antes
----------------------------------------------------- */
-function BirthdaysSection() {
-  const { data, error, isLoading } = useSWR<{ today: User[]; upcoming: { user: User; date: string }[] }>(
-    "/api/admin/birthdays?days=30",
-    fetcher
-  );
-  return (
-    <Section>
-      <h2 className="text-xl font-semibold mb-4">Cumpleaños</h2>
-      {isLoading && <p className="text-sm text-gray-500">Cargando…</p>}
-      {error && <p className="text-sm text-red-600">Error cargando cumpleaños</p>}
-      <div className="grid md:grid-cols-2 gap-6">
-        <div>
-          <h3 className="font-medium mb-2">🎉 Hoy</h3>
-          <ul className="space-y-1">
-            {data?.today?.length ? data.today.map(u=>(
-              <li key={u.id}>{u.name ?? u.email} — {u.email}</li>
-            )) : <li className="text-sm text-gray-500">Nadie cumple hoy</li>}
-          </ul>
-        </div>
-        <div>
-          <h3 className="font-medium mb-2">Próximos 30 días</h3>
-          <ul className="space-y-1">
-            {data?.upcoming?.length ? data.upcoming.map(({user,date})=>(
-              <li key={user.id}>{new Date(date).toLocaleDateString()} — {user.name ?? user.email} ({user.email})</li>
-            )) : <li className="text-sm text-gray-500">Sin próximos</li>}
-          </ul>
-        </div>
-      </div>
-    </Section>
-  );
-}
 
 /* GANANCIAS DEL MES
 */
@@ -1370,267 +1175,6 @@ function RevenueSection() {
   );
 }
 
-/* 
-COMPRA DE PAQUETES MANUALMENTE
-*/
-function ManualSaleSection() {
-  const { data: users } = useSWR<{ items: User[] }>("/api/admin/users", fetcher);
-  const { data: packs } = useSWR<{ items: Pack[] }>("/api/admin/packs", fetcher);
-
-  const [userQuery, setUserQuery] = useState("");
-  const [packQuery, setPackQuery] = useState("");
-
-  const [userId, setUserId] = useState("");
-  const [packId, setPackId] = useState("");
-  const [note, setNote] = useState("");
-
-  const [msg, setMsg] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  const filteredUsers = useMemo(() => {
-    const q = userQuery.trim().toLowerCase();
-    return (users?.items ?? []).filter(u =>
-      (u.name ?? "").toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
-    );
-  }, [users, userQuery]);
-
- const filteredPacks = useMemo(() => {
-  const q = packQuery.trim().toLowerCase();
-  return (packs?.items ?? []).filter(p =>
-    p.name.toLowerCase().includes(q) ||
-    String(p.price).includes(q) ||
-    String(p.classes).includes(q)
-  );
-}, [packs, packQuery]);
-
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setMsg(null);
-    setSaving(true);
-    const r = await fetch("/api/admin/manual-purchases", {
-      method: "POST",
-      headers: { "Content-Type":"application/json" },
-      body: JSON.stringify({ userId, packId, note }),
-    });
-    setSaving(false);
-    if (r.ok) {
-      setUserId(""); setPackId(""); setNote(""); setUserQuery(""); setPackQuery("");
-      const d = await r.json();
-      setMsg(`✅ Venta registrada. Payment ${d.paymentId}. Ticket: $${d.amount}. Expira: ${new Date(d.expiresAt).toLocaleDateString()}`);
-    } else {
-      const err = await r.json().catch(()=> ({}));
-      setMsg(`❌ Error: ${err.error ?? r.status}`);
-    }
-  }
-
-  return (
-    <Section>
-      <h2 className="text-xl font-semibold mb-4">Venta manual de paquete</h2>
-
-      <form onSubmit={submit} className="grid gap-4">
-        {/* Usuario */}
-        <div className="grid md:grid-cols-3 gap-3 items-start">
-          <div>
-            <label className="block text-sm font-medium mb-1">Buscar usuario</label>
-            <input className="input w-full" placeholder="Nombre o email…" value={userQuery} onChange={e=>setUserQuery(e.target.value)} />
-            <p className="text-xs text-muted-foreground mt-1">{filteredUsers.length} resultado{filteredUsers.length===1?"":"s"}</p>
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium mb-1">Selecciona usuario</label>
-            <select className="input w-full" required value={userId} onChange={e=>setUserId(e.target.value)}>
-              <option value="">-- Usuario --</option>
-              {filteredUsers.map(u=>(
-                <option key={u.id} value={u.id}>{(u.name ?? u.email)} — {u.email}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Paquete */}
-        <div className="grid md:grid-cols-3 gap-3 items-start">
-          <div>
-            <label className="block text-sm font-medium mb-1">Buscar paquete</label>
-            <input className="input w-full" placeholder="Nombre, precio o #clases…" value={packQuery} onChange={e=>setPackQuery(e.target.value)} />
-            <p className="text-xs text-muted-foreground mt-1">{filteredPacks.length} resultado{filteredPacks.length===1?"":"s"}</p>
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-sm font-medium mb-1">Selecciona paquete</label>
-            <select className="input w-full" required value={packId} onChange={e=>setPackId(e.target.value)}>
-              <option value="">-- Paquete --</option>
-              {filteredPacks.map(p=>(
-                <option key={p.id} value={p.id}>
-                  {p.name} — {p.classes} clases — ${p.price} — {p.validityDays} días
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Nota opcional */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Nota (opcional)</label>
-          <input className="input w-full" placeholder="Ej. Venta en recepción / efectivo / ajuste" value={note} onChange={e=>setNote(e.target.value)} />
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button className="btn-primary" disabled={!userId || !packId || saving}>
-            {saving ? "Guardando…" : "Acreditar paquete"}
-          </button>
-          <button type="button" className="btn-secondary" onClick={()=>{
-            setUserId(""); setPackId(""); setUserQuery(""); setPackQuery(""); setNote(""); setMsg(null);
-          }}>Limpiar</button>
-        </div>
-
-        {msg && <p className="mt-2 text-sm">{msg}</p>}
-      </form>
-    </Section>
-  );
-}
-/* 
-SECCION DE RESERVAS 
-*/
-function BookingsSection() {
-  const { data: classesData } = useSWR<{ items: ClassItem[] }>(
-    "/api/admin/classes",
-    fetcher
-  );
-
-  const [selectedClassId, setSelectedClassId] = useState<string>("");
-
-  // fetch de reservas para la clase elegida
-  const { data, error, isLoading } = useSWR<{ items: BookingRow[] }>(
-    selectedClassId ? `/api/admin/bookings?classId=${encodeURIComponent(selectedClassId)}` : null,
-    fetcher
-  );
-
-  // 🔎 QUERY para BUSCAR CLASE (no usuarios)
-  const [classQuery, setClassQuery] = useState("");
-
-  // 🔎 filtra las clases mostradas en el select usando classQuery
-  const allClasses = useMemo(() => classesData?.items ?? [], [classesData]);
-  const filteredClasses = useMemo(() => {
-    const term = classQuery.trim().toLowerCase();
-    const base = [...allClasses].sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
-    if (!term) return base;
-    return base.filter(c => {
-      const title = c.title.toLowerCase();
-      const instr = (c.instructor?.name ?? "").toLowerCase();
-      const dateStr = new Date(c.date).toLocaleString().toLowerCase();
-      return title.includes(term) || instr.includes(term) || dateStr.includes(term);
-    });
-  }, [allClasses, classQuery]);
-
-  // cuando cambia el select, fijamos la clase y limpiamos la query
-  function onSelectClass(id: string) {
-    setSelectedClassId(id);
-    setClassQuery("");
-  }
-
-  const selectedClass = useMemo(
-    () => allClasses.find(c => c.id === selectedClassId),
-    [allClasses, selectedClassId]
-  );
-
-  // Tabla: ya no hay buscador de email; solo mostramos reservas
-  const bookings = data?.items ?? [];
-
-  return (
-    <Section>
-      <div className="grid gap-3 md:grid-cols-3 mb-4">
-        {/* Columna buscador de CLASE */}
-        <div className="md:col-span-2">
-          <label className="block text-sm mb-1">Buscar clase (título / instructor / fecha)</label>
-          <input
-            className="input w-full"
-            placeholder="Ej. Yoga, Ana, 12/10 7:00 pm…"
-            value={classQuery}
-            onChange={e => setClassQuery(e.target.value)}
-          />
-        </div>
-
-        {/* Columna SELECT con clases filtradas */}
-        <div>
-          <label className="block text-sm mb-1">Selecciona la clase</label>
-          <select
-            className="input w-full"
-            value={selectedClassId}
-            onChange={e => onSelectClass(e.target.value)}
-          >
-            <option value="">— Selecciona —</option>
-            {filteredClasses.map(c => (
-              <option key={c.id} value={c.id}>
-                {new Date(c.date).toLocaleString()} — {c.title}
-                {c.instructor?.name ? ` (${c.instructor.name})` : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {selectedClass ? (
-        <div className="mb-3 text-sm text-muted-foreground">
-          <strong>Clase:</strong> {selectedClass.title} —{" "}
-          {new Date(selectedClass.date).toLocaleString()}
-          {selectedClass.instructor?.name ? ` · ${selectedClass.instructor.name}` : ""}
-        </div>
-      ) : (
-        <p className="text-sm text-muted-foreground mb-3">
-          Busca y selecciona una clase para ver sus reservas.
-        </p>
-      )}
-
-      {selectedClassId && isLoading && (
-        <p className="text-sm text-muted-foreground">Cargando reservas…</p>
-      )}
-      {selectedClassId && error && (
-        <p className="text-sm text-red-600">Error cargando reservas</p>
-      )}
-
-      {selectedClassId && (
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="text-left border-b">
-              <tr>
-                <th className="py-2">Reservado el</th>
-                <th className="py-2">Usuario</th>
-                <th className="py-2">Email</th>
-                <th className="py-2">Estado</th>
-                <th className="py-2 text-right">Cantidad</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bookings.map(b => (
-                <tr key={b.id} className="border-b align-top">
-                  <td className="py-2">{new Date(b.createdAt).toLocaleString()}</td>
-                  <td className="py-2">{b.user.name ?? "—"}</td>
-                  <td className="py-2">{b.user.email}</td>
-                  <td className="py-2">
-                    {b.status === "ACTIVE" ? (
-                      <span className="badge-success">Activa</span>
-                    ) : (
-                      <span className="badge-ghost">Cancelada</span>
-                    )}
-                  </td>
-                  <td className="py-2 text-right">{b.quantity}</td>
-                </tr>
-              ))}
-              {bookings.length === 0 && !isLoading && (
-                <tr>
-                  <td colSpan={6} className="py-3 text-center text-muted-foreground">
-                    Sin reservas para esta clase
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Section>
-  );
-}
 
 /* 
 SECCION DE USUARIOS
@@ -1639,43 +1183,62 @@ function UserInspectorSection() {
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // 1️⃣ Mostrar últimos usuarios cuando no hay búsqueda
+  // admin actions
+  const [tokenDelta, setTokenDelta] = useState<number>(0);
+  const [adjustingTokens, setAdjustingTokens] = useState(false);
+
+  const [selectedPackId, setSelectedPackId] = useState("");
+  const [buyingPack, setBuyingPack] = useState(false);
+
+  // 1️⃣ últimos usuarios
   const { data: latestUsers, isLoading: loadingLatest } = useSWR<{ items: User[] }>(
-    q.trim() ? null : "/api/admin/users", // mismo endpoint sin ?q
+    q.trim() ? null : "/api/admin/users",
     fetcher
   );
 
-  // 2️⃣ Buscar usuarios por q (nombre o email)
+  // 2️⃣ búsqueda
   const { data: searchData, isLoading: searching } = useSWR<{ items: User[] }>(
     q.trim() ? `/api/admin/users?q=${encodeURIComponent(q.trim())}` : null,
     fetcher
   );
 
-  // 3️⃣ Detalles del usuario seleccionado
-  const { data: details, isLoading: loadingDetails, error: detailsError } =
-    useSWR<UserDetails>(
-      selectedId ? `/api/admin/users/${selectedId}/details` : null,
-      fetcher
-    );
+  // 3️⃣ detalles usuario
+  const {
+    data: details,
+    isLoading: loadingDetails,
+    error: detailsError,
+    mutate,
+  } = useSWR<UserDetails>(
+    selectedId ? `/api/admin/users/${selectedId}/details` : null,
+    fetcher
+  );
 
-  // 4️⃣ Decide qué lista mostrar
+  // 4️⃣ paquetes activos
+  const { data: packs } = useSWR<{ items: Pack[] }>(
+    "/api/admin/packs",
+    fetcher
+  );
+
   const list = q.trim() ? searchData?.items : latestUsers?.items;
   const loadingList = q.trim() ? searching : loadingLatest;
 
   return (
     <Section>
       <div className="grid md:grid-cols-3 gap-4">
-        {/* Columna izquierda: búsqueda + resultados */}
+        {/* LISTA */}
         <div className="md:col-span-1 space-y-3">
           <h2 className="text-xl font-semibold">Usuarios</h2>
+
           <input
             className="input w-full"
             placeholder="Buscar por nombre o email…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            aria-label="Buscar usuario por nombre o email"
           />
-          {loadingList && <p className="text-sm text-muted-foreground">Cargando…</p>}
+
+          {loadingList && (
+            <p className="text-sm text-muted-foreground">Cargando…</p>
+          )}
 
           <div className="border rounded-[var(--radius)] overflow-hidden">
             <ul className="divide-y">
@@ -1686,47 +1249,53 @@ function UserInspectorSection() {
                       selectedId === u.id ? "bg-[--color-muted]" : ""
                     }`}
                     onClick={() => setSelectedId(u.id)}
-                    aria-current={selectedId === u.id ? "true" : undefined}
                   >
                     <div className="font-medium">{u.name ?? "—"}</div>
-                    <div className="text-sm text-muted-foreground">{u.email}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {u.email}
+                    </div>
                   </button>
                 </li>
               ))}
 
               {!loadingList && (list?.length ?? 0) === 0 && (
                 <li className="p-3 text-sm text-muted-foreground">
-                  {q.trim() ? "Sin resultados" : "No hay usuarios registrados"}
+                  {q.trim() ? "Sin resultados" : "No hay usuarios"}
                 </li>
               )}
             </ul>
           </div>
 
-          {/* info contextual */}
           {!q.trim() && !loadingList && (
             <p className="text-xs text-muted-foreground text-center">
-              Mostrando los últimos usuarios registrados
+              Últimos usuarios registrados
             </p>
           )}
         </div>
 
-        {/* Columna derecha: ficha del usuario */}
+        {/* DETALLES */}
         <div className="md:col-span-2 space-y-6">
           {!selectedId && (
             <p className="text-sm text-muted-foreground">
-              Selecciona un usuario para ver sus datos.
+              Selecciona un usuario.
             </p>
           )}
+
           {selectedId && loadingDetails && (
-            <p className="text-sm text-muted-foreground">Cargando detalles…</p>
+            <p className="text-sm text-muted-foreground">
+              Cargando detalles…
+            </p>
           )}
+
           {selectedId && detailsError && (
-            <p className="text-sm text-red-600">Error al cargar detalles.</p>
+            <p className="text-sm text-red-600">
+              Error al cargar datos.
+            </p>
           )}
 
           {selectedId && details && (
             <>
-              {/* PERFIL */}
+              {/* PERFIL + TOKENS */}
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="p-4 border rounded-[var(--radius)]">
                   <h3 className="font-semibold mb-2">Perfil</h3>
@@ -1737,21 +1306,8 @@ function UserInspectorSection() {
                     <dt className="text-muted-foreground">Email</dt>
                     <dd className="col-span-2">{details.user.email}</dd>
 
-                    <dt className="text-muted-foreground">Teléfono</dt>
-                    <dd className="col-span-2">{details.user.phone ?? "—"}</dd>
-
-                    <dt className="text-muted-foreground">Emergencia</dt>
-                    <dd className="col-span-2">{details.user.emergencyPhone ?? "—"}</dd>
-
                     <dt className="text-muted-foreground">Afiliación</dt>
                     <dd className="col-span-2">{details.user.affiliation}</dd>
-
-                    <dt className="text-muted-foreground">Nacimiento</dt>
-                    <dd className="col-span-2">
-                      {details.user.dateOfBirth
-                        ? new Date(details.user.dateOfBirth).toLocaleDateString()
-                        : "—"}
-                    </dd>
 
                     <dt className="text-muted-foreground">Alta</dt>
                     <dd className="col-span-2">
@@ -1760,105 +1316,262 @@ function UserInspectorSection() {
                   </dl>
                 </div>
 
-                <div className="p-4 border rounded-[var(--radius)]">
-                  <h3 className="font-semibold mb-2">Saldo de tokens</h3>
-                  <p className="text-3xl font-bold">{details.tokenBalance}</p>
-                  <p className="text-sm text-muted-foreground">
-                    Suma de `TokenLedger.delta`
-                  </p>
-                </div>
+                <div className="p-4 border rounded-[var(--radius)] space-y-3">
+  <h3 className="font-semibold">Saldo de tokens</h3>
+
+  <p className="text-3xl font-bold">
+    {details.tokenBalance}
+  </p>
+
+  {/* Controles +/- */}
+  <div className="flex items-center gap-2">
+    <button
+      type="button"
+      className="btn btn-outline px-3"
+      onClick={() => setTokenDelta((d) => d - 1)}
+      disabled={adjustingTokens}
+    >
+      −
+    </button>
+
+    <input
+      type="number"
+      className="input w-24 text-center"
+      value={tokenDelta}
+      onChange={(e) => setTokenDelta(Number(e.target.value))}
+    />
+
+    <button
+      type="button"
+      className="btn btn-outline px-3"
+      onClick={() => setTokenDelta((d) => d + 1)}
+      disabled={adjustingTokens}
+    >
+      +
+    </button>
+  </div>
+
+  {/* Preview saldo */}
+  {tokenDelta !== 0 && (
+    <p className="text-sm">
+      Saldo resultante:{" "}
+      <span
+        className={
+          details.tokenBalance + tokenDelta < 0
+            ? "text-red-600 font-medium"
+            : "font-medium"
+        }
+      >
+        {details.tokenBalance + tokenDelta}
+      </span>
+    </p>
+  )}
+
+  {details.tokenBalance + tokenDelta < 0 && (
+    <p className="text-xs text-red-600">
+      El saldo no puede quedar negativo.
+    </p>
+  )}
+
+  <button
+    className="btn btn-primary w-full"
+    disabled={
+      tokenDelta === 0 ||
+      adjustingTokens ||
+      details.tokenBalance + tokenDelta < 0
+    }
+    onClick={async () => {
+      setAdjustingTokens(true);
+      try {
+        await fetch(
+          `/api/admin/users/${selectedId}/tokens`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              delta: tokenDelta,
+              reason: "ADMIN_ADJUST",
+            }),
+          }
+        );
+        setTokenDelta(0);
+        mutate();
+      } finally {
+        setAdjustingTokens(false);
+      }
+    }}
+  >
+    Aplicar ajuste
+  </button>
+
+  <p className="text-xs text-muted-foreground">
+    Ajuste manual: los botones + / − suman o restan tokens al saldo actual.
+    No modifica paquetes existentes.
+  </p>
+</div>
+
+
               </div>
 
-              {/* PAQUETES */}
+              {/* ASIGNAR PAQUETE */}
+              <div className="p-4 border rounded-[var(--radius)] space-y-3">
+                <h3 className="font-semibold">Asignar paquete</h3>
+
+                <div className="flex gap-2">
+                  <select
+                    className="input w-full"
+                    value={selectedPackId}
+                    onChange={(e) =>
+                      setSelectedPackId(e.target.value)
+                    }
+                  >
+                    <option value="">
+                      Selecciona un paquete…
+                    </option>
+                    {(packs?.items ?? []).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} · {p.classes} clases
+                      </option>
+                    ))}
+                  </select>
+
+                  <button
+                    className="btn btn-primary"
+                    disabled={!selectedPackId || buyingPack}
+                    onClick={async () => {
+                      setBuyingPack(true);
+                      try {
+                        await fetch(
+                          `/api/admin/users/${selectedId}/packs`,
+                          {
+                            method: "POST",
+                            headers: {
+                              "Content-Type": "application/json",
+                            },
+                            body: JSON.stringify({
+                              packId: selectedPackId,
+                            }),
+                          }
+                        );
+                        setSelectedPackId("");
+                        mutate();
+                      } finally {
+                        setBuyingPack(false);
+                      }
+                    }}
+                  >
+                    Asignar
+                  </button>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Crea una compra y acredita tokens automáticamente.
+                </p>
+              </div>
+
+              {/* PAQUETES COMPRADOS */}
               <div className="p-4 border rounded-[var(--radius)]">
-                <h3 className="font-semibold mb-3">Paquetes comprados</h3>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="text-left border-b">
-                      <tr>
-                        <th>Fecha compra</th>
-                        <th>Paquete</th>
-                        <th>Clases incl.</th>
-                        <th>Clases restantes</th>
-                        <th>Vence</th>
-                        <th>Pago</th>
+                <h3 className="font-semibold mb-3">Paquetes</h3>
+                <table className="min-w-full text-sm">
+                  <thead className="border-b text-left">
+                    <tr>
+                      <th>Paquete</th>
+                      <th>Restantes</th>
+                      <th>Vence</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {details.purchases.map((p) => (
+                      <tr key={p.id} className="border-b">
+                        <td className="py-2">{p.pack.name}</td>
+                        <td className="py-2">{p.classesLeft}</td>
+                        <td className="py-2">
+                          {new Date(p.expiresAt).toLocaleDateString()}
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {details.purchases.map((p) => (
-                        <tr key={p.id} className="border-b">
-                          <td className="py-2">
-                            {new Date(p.createdAt).toLocaleString()}
-                          </td>
-                          <td className="py-2">{p.pack.name}</td>
-                          <td className="py-2">{p.pack.classes}</td>
-                          <td className="py-2">{p.classesLeft}</td>
-                          <td className="py-2">
-                            {new Date(p.expiresAt).toLocaleDateString()}
-                          </td>
-                          <td className="py-2">{p.payment?.status ?? "—"}</td>
-                        </tr>
-                      ))}
-                      {details.purchases.length === 0 && (
-                        <tr>
-                          <td
-                            colSpan={6}
-                            className="py-3 text-center text-muted-foreground"
-                          >
-                            Sin compras
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                    {details.purchases.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="py-3 text-center text-muted-foreground"
+                        >
+                          Sin paquetes
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
-
+              
               {/* RESERVAS */}
-              <div className="p-4 border rounded-[var(--radius)]">
-                <h3 className="font-semibold mb-3">Reservas</h3>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="text-left border-b">
-                      <tr>
-                        <th>Fecha reserva</th>
-                        <th>Clase</th>
-                        <th>Fecha clase</th>
-                        <th>Instructor</th>
-                        <th>Estatus - </th>
-                        <th>Cantidad</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {details.bookings.map((b) => (
-                        <tr key={b.id} className="border-b">
-                          <td className="py-2">
-                            {new Date(b.createdAt).toLocaleString()}
-                          </td>
-                          <td className="py-2">{b.class.title}</td>
-                          <td className="py-2">
-                            {new Date(b.class.date).toLocaleString()}
-                          </td>
-                          <td className="py-2">{b.class.instructor?.name ?? "—"}</td>
-                          <td className="py-2">{b.status}</td>
-                          <td className="py-2">{b.quantity}</td>
-                         
-                        </tr>
-                      ))}
-                      {details.bookings.length === 0 && (
-                        <tr>
-                          <td
-                            colSpan={7}
-                            className="py-3 text-center text-muted-foreground"
-                          >
-                            Sin reservas
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+<div className="p-4 border rounded-[var(--radius)]">
+  <h3 className="font-semibold mb-3">Reservas</h3>
+
+  <div className="overflow-x-auto">
+    <table className="min-w-full text-sm">
+      <thead className="border-b text-left">
+        <tr>
+          <th>Reservado</th>
+          <th>Clase</th>
+          <th>Fecha clase</th>
+          <th>Instructor</th>
+          <th>Estado</th>
+          <th>Cantidad</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {details.bookings.map((b) => (
+          <tr key={b.id} className="border-b">
+            <td className="py-2">
+              {new Date(b.createdAt).toLocaleString()}
+            </td>
+
+            <td className="py-2">{b.class.title}</td>
+
+            <td className="py-2">
+              {new Date(b.class.date).toLocaleString()}
+            </td>
+
+            <td className="py-2">
+              {b.class.instructor?.name ?? "—"}
+            </td>
+
+            <td className="py-2">
+              <span
+                className={
+                  b.status === "ACTIVE"
+                    ? "text-green-600 font-medium"
+                    : "text-red-600 font-medium"
+                }
+              >
+                {b.status}
+              </span>
+            </td>
+
+            <td className="py-2 text-center">{b.quantity}</td>
+
+            
+          </tr>
+        ))}
+
+        {details.bookings.length === 0 && (
+          <tr>
+            <td
+              colSpan={7}
+              className="py-3 text-center text-muted-foreground"
+            >
+              Sin reservas
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
             </>
           )}
         </div>

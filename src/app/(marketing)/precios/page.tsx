@@ -19,6 +19,8 @@ type ApiPack = {
   validityDays?: number | null;
   highlight?: "popular" | "best" | null;
   description?: string[] | null;
+
+  oncePerUser?: boolean; // ✅ NUEVO
 };
 
 type Pack = {
@@ -29,6 +31,8 @@ type Pack = {
   validity: string;
   highlight?: "popular" | "best";
   description?: string[];
+
+oncePerUser: boolean; // ✅ NUEVO
 };
 
 type Me =
@@ -46,15 +50,15 @@ function toPack(p: ApiPack): Pack {
   const classesLabel =
     p.classesLabel ??
     (typeof p.classesCount === "number"
-      ? `${p.classesCount} ${
-          p.classesCount === 1 ? "clase" : "clases"
-        }`
+      ? `${p.classesCount} ${p.classesCount === 1 ? "clase" : "clases"}`
       : "—");
+
   const validity =
     p.validity ??
     (typeof p.validityDays === "number"
       ? `Vigencia de ${p.validityDays} días`
       : "Vigencia variable");
+
   return {
     id: p.id,
     name: p.name,
@@ -63,6 +67,8 @@ function toPack(p: ApiPack): Pack {
     validity,
     highlight: (p.highlight ?? undefined) as Pack["highlight"],
     description: p.description ?? undefined,
+
+    oncePerUser: !!p.oncePerUser, // ✅
   };
 }
 
@@ -74,7 +80,7 @@ export default function PricingPage() {
   // Sesión actual
   const [me, setMe] = useState<Me>(null);
   const [checkingMe, setCheckingMe] = useState(true);
-
+  const [myPackIds, setMyPackIds] = useState<Set<string>>(new Set());
   const [pendingPackId, setPendingPackId] = useState<string | null>(null);
 
   // Cargar packs y usuario
@@ -118,20 +124,54 @@ export default function PricingPage() {
         setCheckingMe(false);
       }
     }
+     async function loadMyPacks() {
+  if (!me?.id) return;
+
+  try {
+    const r = await fetch("/api/me/packs", { cache: "no-store" });
+    if (!r.ok) return;
+
+    const items: { packId: string }[] = await r.json();
+    setMyPackIds(new Set(items.map(i => i.packId)));
+  } catch {
+    /* noop */
+  }
+}
 
     loadPacks();
     loadMe();
+    loadMyPacks();
+
     return () => {
       mounted = false;
     };
+
+ 
+
+
+
+
+
   }, []);
 
+  const visiblePacks = useMemo(() => {
+  if (!packs) return null;
+
+  return packs.filter(p => {
+    if (!p.oncePerUser) return true;
+    if (!me) return true; // no logueado → sí se muestra
+    return !myPackIds.has(p.id); // logueado y ya lo tuvo → ocultar
+  });
+}, [packs, me, myPackIds]);
+
+
   const ordered = useMemo(() => {
-    if (!packs) return null;
-    const score = (h?: Pack["highlight"]) =>
-      h === "best" ? 2 : h === "popular" ? 1 : 0;
-    return [...packs].sort((a, b) => score(b.highlight) - score(a.highlight));
-  }, [packs]);
+  if (!visiblePacks) return null;
+  const score = (h?: Pack["highlight"]) =>
+    h === "best" ? 2 : h === "popular" ? 1 : 0;
+  return [...visiblePacks].sort((a, b) => score(b.highlight) - score(a.highlight));
+}, [visiblePacks]);
+
 
   const goLogin = useCallback(() => {
     const next = encodeURIComponent("/precios");
@@ -282,9 +322,25 @@ export default function PricingPage() {
                               <FiCheck className="icon mt-0.5" />
                               <span>{d}</span>
                             </li>
+                            
                           ))}
+                          <li>
+                                   {p.oncePerUser && (
+  <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${
+                            p.highlight === "best"
+                              ? "bg-primary text-white"
+                              : "bg-[color:var(--color-primary-50)] text-primary"
+                          }`}
+                        >
+                          Compra única
+                        </span>
+)}
+                          </li>
                         </ul>
                       )}
+               
+
 
                       <div className="mt-6 grid gap-2">
                         <button

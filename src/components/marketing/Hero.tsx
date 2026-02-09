@@ -81,12 +81,10 @@ Durante cada sesión, nos enfocaremos en conectar mente y cuerpo para maximizar 
             custom={3}
             className="mt-8 flex flex-wrap items-center gap-3"
           >
-            <Link href="/registro" className="btn-primary h-11 px-5">
+            <Link href="/clases" className="btn-primary h-11 px-5">
               Reservar clase
             </Link>
-            <Link href="/clases" className="btn-outline h-11 px-5">
-              Ver clases
-            </Link>
+          
           </motion.div>
 
          

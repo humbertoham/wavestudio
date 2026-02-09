@@ -94,3 +94,88 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     });
   }
 }
+
+export async function PATCH(req: NextRequest, ctx: Ctx) {
+  const auth = await requireAdmin(req);
+  if (auth) return auth;
+
+  const { id } = await ctx.params;
+  const raw = await req.json();
+
+  const {
+    title,
+    focus,
+    durationMin,
+    capacity,
+    instructorId,
+    time, // "HH:MM" desde la UI
+  } = raw ?? {};
+
+  // 1️⃣ Cargar clase + bookings activos
+  const cls = await prisma.class.findUnique({
+    where: { id },
+    include: {
+      bookings: {
+        where: { status: "ACTIVE" },
+      },
+    },
+  });
+
+  if (!cls) {
+    return j(404, { error: "CLASS_NOT_FOUND" });
+  }
+
+  // 2️⃣ Validar cupo
+  const usedSpots = cls.bookings.reduce(
+    (acc, b) => acc + (b.quantity ?? 1),
+    0
+  );
+
+  if (capacity !== undefined && capacity < usedSpots) {
+    return j(400, {
+      error: "CAPACITY_TOO_SMALL",
+      usedSpots,
+    });
+  }
+
+  // 3️⃣ Construir update seguro (whitelist)
+  const data: any = {};
+
+  if (title !== undefined) data.title = title;
+  if (focus !== undefined) data.focus = focus;
+  if (durationMin !== undefined) data.durationMin = durationMin;
+  if (capacity !== undefined) data.capacity = capacity;
+  if (instructorId !== undefined) data.instructorId = instructorId;
+
+  if (durationMin !== undefined) {
+  data.durationMin = Number(durationMin);
+}
+
+  if (capacity !== undefined) {
+  data.capacity = Number(capacity);
+}
+
+
+  // 4️⃣ Cambio de hora (sin cambiar fecha)
+  if (time) {
+    const [hh, mm] = String(time).split(":").map(Number);
+    if (Number.isFinite(hh) && Number.isFinite(mm)) {
+      const nextDate = new Date(cls.date);
+      nextDate.setHours(hh, mm, 0, 0);
+      data.date = nextDate;
+    }
+  }
+
+  const updated = await prisma.class.update({
+  where: { id },
+  data,
+  include: {
+    bookings: true,
+    instructor: true, // opcional pero recomendado
+  },
+});
+
+
+  return NextResponse.json(updated);
+}
+

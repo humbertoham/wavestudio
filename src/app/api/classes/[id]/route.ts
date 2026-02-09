@@ -1,26 +1,93 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/auth";
+import { prisma, requireAdmin } from "../../admin/_utils";
 
-export const runtime = "nodejs";
+type Ctx = {
+  params: Promise<{ id: string }>;
+};
 
-type Ctx = { params: Promise<{ id: string }> };
+/**
+ * =========================
+ * GET /api/classes/:id
+ * Detalle de clase (ADMIN)
+ * =========================
+ */
+export async function GET(req: NextRequest, ctx: Ctx) {
+  const auth = await requireAdmin(req);
+  if (auth) return auth;
 
-export async function DELETE(_req: NextRequest, ctx: Ctx) {
+  const { id } = await ctx.params;
+
+  const cls = await prisma.class.findUnique({
+    where: { id },
+    include: {
+      instructor: true,
+      bookings: {
+        where: { status: "ACTIVE" },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      },
+      waitlist: {
+        orderBy: { position: "asc" },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!cls) {
+    return NextResponse.json(
+      { error: "NOT_FOUND" },
+      { status: 404 }
+    );
+  }
+
+  return NextResponse.json(cls);
+}
+
+/**
+ * =========================
+ * DELETE /api/classes/:id
+ * Eliminar clase (ADMIN)
+ * =========================
+ */
+export async function DELETE(req: NextRequest, ctx: Ctx) {
+  const auth = await requireAdmin(req);
+  if (auth) return auth;
+
+  const { id } = await ctx.params;
+
   try {
-    // si tu requireAdmin necesita el Request, usa: await requireAdmin(_req);
-    requireAdmin();
-
-    const { id } = await ctx.params;   // 👈 importante: await
-    await prisma.class.delete({ where: { id } });
+    await prisma.class.delete({
+      where: { id },
+    });
 
     return NextResponse.json({ ok: true });
   } catch (e: any) {
-    const code =
-      e?.code === "P2025" ? 404 :
-      e?.message === "UNAUTHORIZED" ? 401 :
-      e?.message === "FORBIDDEN" ? 403 : 500;
+    // Prisma: registro no encontrado
+    if (e?.code === "P2025") {
+      return NextResponse.json(
+        { error: "NOT_FOUND" },
+        { status: 404 }
+      );
+    }
 
-    return NextResponse.json({ error: e?.message || "ERROR" }, { status: code });
+    return NextResponse.json(
+      { error: "ERROR" },
+      { status: 500 }
+    );
   }
 }
