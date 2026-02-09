@@ -32,7 +32,7 @@ export async function cancelBooking(bookingId: string, byUserId?: string) {
     if (canRefund && b.packPurchaseId) {
       await tx.tokenLedger.create({
         data: {
-          userId: b.userId,
+          userId: b.userId!,
           packPurchaseId: b.packPurchaseId!,
           bookingId: b.id,
           delta: +cost,
