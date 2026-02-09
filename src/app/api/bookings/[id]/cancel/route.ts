@@ -68,7 +68,7 @@ export async function PATCH(
       // 2) Ledger (+tokens por reembolso)
       await tx.tokenLedger.create({
         data: {
-          userId: booking.userId,
+          userId: booking.userId!,
           packPurchaseId: booking.packPurchase?.id ?? null,
           bookingId: booking.id,
           delta: refundTokens,
