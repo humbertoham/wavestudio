@@ -1,7 +1,7 @@
 // /src/app/api/classes/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdmin, getAuth } from "@/lib/auth";
 import { classCreateSchema } from "@/lib/zod";
 import { BookingStatus } from "@prisma/client";
 
@@ -16,26 +16,28 @@ export const runtime = "nodejs";
  *   title: string;
  *   focus?: string | null;
  *   coach: string;
- *   startsAt: string;      // ISO
- *   durationMin: number;   // default 60 si no existe
+ *   startsAt: string;
+ *   durationMin: number;
  *   capacity?: number | null;
- *   booked?: number | null; // SUM(quantity) de bookings ACTIVE
+ *   booked?: number | null;
  *   isFull?: boolean | null;
+ *   isCanceled?: boolean;
+ *   userHasBooking?: boolean;
  * }
  */
 export async function GET(req: Request) {
+  const auth = await getAuth(); // 👈 detectar usuario actual
+  const userId = auth?.sub ?? null;
+
   const { searchParams } = new URL(req.url);
   const from = searchParams.get("from");
   const to = searchParams.get("to");
   const focus = searchParams.get("focus") ?? undefined;
 
-  // Piso mínimo: ahora (no mostrar pasadas)
   const now = new Date();
 
-  // Determina límites de ventana
   let gte = from ? new Date(from) : now;
   if (isNaN(gte.getTime())) gte = now;
-  // Asegura no bajar de "now"
   if (gte < now) gte = now;
 
   let lt: Date | undefined = undefined;
@@ -44,36 +46,39 @@ export async function GET(req: Request) {
     if (!isNaN(toDate.getTime())) lt = toDate;
   }
 
-  // Si 'to' está en el pasado, no hay resultados
   if (lt && lt <= now) {
-    return NextResponse.json([], { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json([], {
+      headers: { "Cache-Control": "no-store" },
+    });
   }
 
   const where: any = {
-    isCanceled: false,        // ← filtra canceladas
-    date: { gte, lt },        // ← y solo futuras (>= now) dentro de ventana
+    date: { gte, lt },
   };
+
   if (focus) where.focus = focus;
 
   const classes = await prisma.class.findMany({
     where,
     include: {
-      instructor: true, // instructor.name
+      instructor: true,
       bookings: {
         where: { status: BookingStatus.ACTIVE },
-        select: { quantity: true },
+        select: {
+          quantity: true,
+          userId: true, // 👈 necesario para detectar booking propio
+        },
       },
     },
     orderBy: { date: "asc" },
   });
 
   const payload = classes.map((c) => {
-    const capacity: number | null = (c as any).capacity ?? null;
+    const capacity: number | null = c.capacity ?? null;
 
-    // SUMA quantity (no length)
-    const booked: number | null = Array.isArray((c as any).bookings)
-      ? (c as any).bookings.reduce(
-          (sum: number, b: { quantity: number | null }) => sum + (b.quantity ?? 0),
+    const booked: number | null = Array.isArray(c.bookings)
+      ? c.bookings.reduce(
+          (sum: number, b) => sum + (b.quantity ?? 0),
           0
         )
       : null;
@@ -83,16 +88,23 @@ export async function GET(req: Request) {
         ? booked >= capacity
         : false;
 
+    const userHasBooking =
+      userId != null
+        ? c.bookings.some((b) => b.userId === userId)
+        : false;
+
     return {
       id: c.id,
-      title: (c as any).title ?? "Clase",
-      focus: (c as any).focus ?? null,
-      coach: (c as any).instructor?.name ?? "—",
+      title: c.title ?? "Clase",
+      focus: c.focus ?? null,
+      coach: c.instructor?.name ?? "—",
       startsAt: c.date.toISOString(),
-      durationMin: (c as any).durationMin ?? 60,
+      durationMin: c.durationMin ?? 60,
       capacity,
       booked,
       isFull,
+      isCanceled: c.isCanceled ?? false,
+      userHasBooking, // 👈 NUEVO
     };
   });
 
@@ -101,22 +113,39 @@ export async function GET(req: Request) {
   });
 }
 
+/**
+ * POST /api/classes
+ * Solo admin
+ */
 export async function POST(req: Request) {
   try {
     requireAdmin();
+
     const body = await req.json();
     const parsed = classCreateSchema.safeParse(body);
-    if (!parsed.success) return NextResponse.json({ error: "INVALID" }, { status: 400 });
+
+    if (!parsed.success) {
+      return NextResponse.json({ error: "INVALID" }, { status: 400 });
+    }
 
     const { date, ...rest } = parsed.data;
+
     const cls = await prisma.class.create({
-      data: { ...rest, date: new Date(date) },
+      data: {
+        ...rest,
+        date: new Date(date),
+      },
     });
+
     return NextResponse.json(cls, { status: 201 });
   } catch (e: any) {
     const code =
-      e.message === "UNAUTHORIZED" ? 401 :
-      e.message === "FORBIDDEN"   ? 403 : 500;
+      e.message === "UNAUTHORIZED"
+        ? 401
+        : e.message === "FORBIDDEN"
+        ? 403
+        : 500;
+
     return NextResponse.json({ error: e.message }, { status: code });
   }
 }

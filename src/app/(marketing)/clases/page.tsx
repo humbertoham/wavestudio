@@ -23,6 +23,8 @@ type ApiSession = {
   capacity?: number | null;
   booked?: number | null;
   isFull?: boolean | null;
+  isCanceled?: boolean;
+  userHasBooking?: boolean;
 };
 
 type Session = {
@@ -32,11 +34,13 @@ type Session = {
   time: string;
   coach: string;
   duration: string;
-  status?: "BOOK" | "FULL";
+  isCanceled?: boolean;
+  status?: "BOOK" | "FULL" | "CANCELLED";
   startsAtISO: string;
   capacity?: number | null;
   booked?: number | null;
   spots: number; // calculado
+  userHasBooking?: boolean;
 };
 
 type Day = {
@@ -176,8 +180,14 @@ function buildEmptyDays(from: Date, count: number): Day[] {
 
 // ---------- Mapeo de API a UI ----------
 function toSession(api: ApiSession): Session {
+  const isCancelled = api.isCanceled === true;
+
   const full =
-    !!api.isFull || (!!api.capacity && typeof api.booked === "number" && api.booked >= api.capacity);
+    !!api.isFull ||
+    (!!api.capacity &&
+      typeof api.booked === "number" &&
+      api.booked >= api.capacity);
+
   const capacity = typeof api.capacity === "number" ? api.capacity : null;
   const booked = typeof api.booked === "number" ? api.booked : 0;
   const spots = capacity != null ? Math.max(0, capacity - booked) : 0;
@@ -189,13 +199,21 @@ function toSession(api: ApiSession): Session {
     coach: api.coach,
     time: fmtTimeMX(api.startsAt),
     duration: `${api.durationMin}MIN`,
-    status: full ? "FULL" : undefined,
+    status: isCancelled
+      ? "CANCELLED"
+      : full
+      ? "FULL"
+      : undefined,
+    isCanceled: isCancelled,
     startsAtISO: api.startsAt,
     capacity,
     booked,
     spots,
+    userHasBooking: api.userHasBooking ?? false,
+
   };
 }
+
 
 // ---------- Reserva: Modal sencillo ----------
 function useIsomorphicLayoutEffect(effect: any, deps: any[]) {
@@ -209,17 +227,23 @@ type ReserveMenuProps = {
   onClose: () => void;
   session: Session | null;
   tokens: number;
+  affiliation: string | null; // 👈 NUEVO
   onBooked: (qty: number) => void; // para actualizar tokens localmente
 };
 
-function ReserveMenu({ open, onClose, session, tokens, onBooked }: ReserveMenuProps) {
+function ReserveMenu({ open, onClose, session, tokens, onBooked, affiliation }: ReserveMenuProps) {
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const isCorporate =
+  affiliation === "WELLHUB" ||
+  affiliation === "TOTALPASS";
 
   const maxBySpots = session?.spots ?? 0;
-  const max = Math.max(0, Math.min(maxBySpots, tokens));
+  const baseMax = Math.max(0, Math.min(maxBySpots, tokens));
+  const max = isCorporate ? Math.min(1, baseMax) : baseMax;
+
 
   useIsomorphicLayoutEffect(() => {
     if (open) {
@@ -326,30 +350,38 @@ function ReserveMenu({ open, onClose, session, tokens, onBooked }: ReserveMenuPr
                     −
                   </button>
                   <input
-                    type="number"
-                    min={1}
-                    max={max || 1}
-                    value={qty}
-                    onChange={(e) =>
-                      setQty(() => {
-                        const v = Number(e.target.value || 1);
-                        return Math.max(1, Math.min(max || 1, v));
-                      })
-                    }
-                    className="input h-9 w-20 text-center"
-                  />
+  type="number"
+  min={1}
+  max={max || 1}
+  value={qty}
+  disabled={isCorporate}
+  onChange={(e) =>
+    setQty(() => {
+      const v = Number(e.target.value || 1);
+      return Math.max(1, Math.min(max || 1, v));
+    })
+  }
+  className="input h-9 w-20 text-center"
+/>
+
                   <button
-                    className="btn-outline h-9 px-3"
-                    onClick={() => setQty((q) => Math.min((max || 1), q + 1))}
-                    disabled={qty >= (max || 1) || busy}
-                  >
-                    +
-                  </button>
+  className="btn-outline h-9 px-3"
+  onClick={() => setQty((q) => Math.min(max, q + 1))}
+  disabled={qty >= max || busy || isCorporate}
+>
+  +
+</button>
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
                   Máx. permitido por disponibilidad y saldo: <b>{max}</b>
                 </div>
               </div>
+              {isCorporate && (
+  <div className="mt-2 text-xs text-muted-foreground">
+    Usuarios Wellhub y TotalPass solo pueden reservar 1 lugar.
+  </div>
+)}
+
             </div>
 
             {err && <div className="mt-3 text-sm text-red-600">{err}</div>}
@@ -402,7 +434,11 @@ function SessionCard({
     return null;
   }, [s.status, s.spots]);
 
-  const canBook = s.spots > 0 && s.time !== "—";
+  const canBook =
+  s.spots > 0 &&
+  s.time !== "—" &&
+  s.status !== "CANCELLED" &&
+  !s.userHasBooking;
 
   const router = useRouter();
 
@@ -453,25 +489,42 @@ const handleCardClick = () => {
       </div>
 
       <div className="mt-auto pt-2">
-        {canBook ? (
-          <button
-            className="btn-primary h-9 w-full justify-center text-sm"
-            onClick={(e) => {
-              e.stopPropagation(); // 🔥 evita click de la card
-              onOpenReserve(s);
-            }}
-          >
-            Reservar
-          </button>
-        ) : (
-          <button
-            className="btn-outline h-9 w-full justify-center text-sm"
-            disabled
-            onClick={(e) => e.stopPropagation()}
-          >
-            No disponible
-          </button>
-        )}
+       {s.userHasBooking ? (
+  <button
+    className="btn-outline h-9 w-full justify-center text-sm border-green-400 text-green-600"
+    disabled
+    onClick={(e) => e.stopPropagation()}
+  >
+    Ya reservado
+  </button>
+) : s.status === "CANCELLED" ? (
+  <button
+    className="btn-outline h-9 w-full justify-center text-sm border-red-400 text-red-600"
+    disabled
+    onClick={(e) => e.stopPropagation()}
+  >
+    Clase cancelada
+  </button>
+) : canBook ? (
+  <button
+    className="btn-primary h-9 w-full justify-center text-sm"
+    onClick={(e) => {
+      e.stopPropagation();
+      onOpenReserve(s);
+    }}
+  >
+    Reservar
+  </button>
+) : (
+  <button
+    className="btn-outline h-9 w-full justify-center text-sm"
+    disabled
+    onClick={(e) => e.stopPropagation()}
+  >
+    No disponible
+  </button>
+)}
+
       </div>
     </motion.div>
   );
@@ -533,6 +586,7 @@ export default function ClassesPage() {
   const [tokens, setTokens] = useState<number>(0);
   const [isAuthed, setIsAuthed] = useState<boolean>(false);
   const [showNoCredits, setShowNoCredits] = useState(false);
+  const [affiliation, setAffiliation] = useState<string | null>(null);
 
   // estado del modal
   const [reserveOpen, setReserveOpen] = useState(false);
@@ -601,6 +655,11 @@ function openReserve(s: Session) {
 
       if (tokensRes.ok) {
   const tk = await tokensRes.json().catch(() => ({}));
+
+  if (typeof tk.affiliation === "string") {
+  setAffiliation(tk.affiliation);
+}
+
 
   // ✅ auth real (no inferida por tokens)
   if (typeof tk.authenticated === "boolean") {
@@ -753,12 +812,14 @@ function openReserve(s: Session) {
 
 
       <ReserveMenu
-        open={reserveOpen}
-        onClose={() => setReserveOpen(false)}
-        session={reserveSession}
-        tokens={tokens}
-        onBooked={handleBooked}
-      />
+  open={reserveOpen}
+  onClose={() => setReserveOpen(false)}
+  session={reserveSession}
+  tokens={tokens}
+  affiliation={affiliation}
+  onBooked={handleBooked}
+/>
+
     </section>
   );
 }

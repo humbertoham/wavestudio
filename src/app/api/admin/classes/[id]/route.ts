@@ -157,14 +157,35 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
 
   // 4️⃣ Cambio de hora (sin cambiar fecha)
-  if (time) {
-    const [hh, mm] = String(time).split(":").map(Number);
-    if (Number.isFinite(hh) && Number.isFinite(mm)) {
-      const nextDate = new Date(cls.date);
-      nextDate.setHours(hh, mm, 0, 0);
-      data.date = nextDate;
-    }
+  // 4️⃣ Cambio de hora respetando zona México
+if (time) {
+  const [hh, mm] = String(time).split(":").map(Number);
+
+  if (Number.isFinite(hh) && Number.isFinite(mm)) {
+    const originalUTC = new Date(cls.date);
+
+    // Obtener partes de la fecha en México
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Mexico_City",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(originalUTC);
+
+    const year = Number(parts.find(p => p.type === "year")?.value);
+    const month = Number(parts.find(p => p.type === "month")?.value);
+    const day = Number(parts.find(p => p.type === "day")?.value);
+
+    // Construimos fecha como si fuera México
+    const mexicoLocal = new Date(
+      `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}T${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}:00`
+    );
+
+    data.date = mexicoLocal;
   }
+}
+
+
 
   const updated = await prisma.class.update({
   where: { id },

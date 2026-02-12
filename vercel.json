@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/internal/monthly-renewal",
+      "schedule": "0 11 1 * *"
+    }
+  ]
+}

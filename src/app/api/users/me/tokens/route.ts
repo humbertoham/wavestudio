@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   try {
-    // Intenta sesión real; si no hay, usa fallbacks (x-user-id / ?userId=)
+    // Intentar sesión real o fallback
     const auth = await getAuthOrDevFallback(req);
     const userId = auth?.sub || (await getUserIdFromRequest(req));
 
@@ -17,6 +17,24 @@ export async function GET(req: NextRequest) {
         {
           tokens: 0,
           authenticated: false,
+          affiliation: "NONE",
+        },
+        { status: 200 }
+      );
+    }
+
+    // 🔎 Traer afiliación del usuario
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { affiliation: true },
+    });
+
+    if (!user) {
+      return NextResponse.json(
+        {
+          tokens: 0,
+          authenticated: false,
+          affiliation: "NONE",
         },
         { status: 200 }
       );
@@ -24,6 +42,7 @@ export async function GET(req: NextRequest) {
 
     // ✅ LOGUEADO
     const now = new Date();
+
     const agg = await prisma.tokenLedger.aggregate({
       where: {
         userId,
@@ -41,15 +60,18 @@ export async function GET(req: NextRequest) {
       {
         tokens,
         authenticated: true,
+        affiliation: user.affiliation ?? "NONE",
       },
       { status: 200 }
     );
   } catch (err) {
     console.error("GET /api/users/me/tokens error:", err);
+
     return NextResponse.json(
       {
         tokens: 0,
         authenticated: false,
+        affiliation: "NONE",
         error: "TOKENS_FETCH_FAILED",
       },
       { status: 500 }

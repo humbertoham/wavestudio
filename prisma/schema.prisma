@@ -34,6 +34,7 @@ enum TokenReason {
   BOOKING_DEBIT // consumo por reserva
   CANCEL_REFUND // reembolso por cancelación válida
   ADMIN_ADJUST // ajustes manuales
+  CORPORATE_MONTHLY
 }
 
 enum PackHighlight {
