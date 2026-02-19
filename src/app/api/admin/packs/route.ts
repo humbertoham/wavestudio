@@ -86,6 +86,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const items = await prisma.pack.findMany({
+      where: { isVisible: true },
       orderBy: { createdAt: "desc" },
     });
 

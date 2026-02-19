@@ -154,22 +154,47 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 
   try {
     const { id } = await ctx.params;
-    await prisma.pack.delete({ where: { id } });
-    return NextResponse.json({ ok: true });
+
+    // Validación básica
+    if (!id) {
+      return NextResponse.json(
+        { error: "INVALID_ID" },
+        { status: 400 }
+      );
+    }
+
+    // Soft delete
+    const updated = await prisma.pack.update({
+      where: { id },
+      data: { isVisible: false, isActive: false },
+    });
+
+    return NextResponse.json(
+      { ok: true, item: updated },
+      { headers: { "Cache-Control": "no-store" } }
+    );
+
   } catch (e: any) {
     if (e?.message === "UNAUTHORIZED")
-      return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
+      return NextResponse.json(
+        { error: "UNAUTHORIZED" },
+        { status: 401 }
+      );
+
     if (e?.message === "FORBIDDEN")
-      return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+      return NextResponse.json(
+        { error: "FORBIDDEN" },
+        { status: 403 }
+      );
 
     if (e instanceof Prisma.PrismaClientKnownRequestError) {
+      // No encontrado
       if (e.code === "P2025")
-        return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
-      if (e.code === "P2003")
         return NextResponse.json(
-          { error: "FOREIGN_KEY: referencia inválida" },
-          { status: 400 }
+          { error: "NOT_FOUND" },
+          { status: 404 }
         );
+
       return NextResponse.json(
         { error: `PRISMA_${e.code}` },
         { status: 500 }
@@ -177,6 +202,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     }
 
     console.error("PACK_DELETE_ERROR", e);
+
     return NextResponse.json(
       { error: e?.message ?? "SERVER_ERROR" },
       { status: 500 }

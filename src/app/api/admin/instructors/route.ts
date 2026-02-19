@@ -3,7 +3,8 @@ import { prisma, requireAdmin } from "../_utils";
 
 export async function GET(req: NextRequest) {
   const auth = await requireAdmin(req); if (auth) return auth;
-  const items = await prisma.instructor.findMany({ orderBy:{ createdAt:"desc"}});
+  const items = await prisma.instructor.findMany({ orderBy:{ createdAt:"desc"}, where: { isVisible: true }
+});
   return NextResponse.json({ items });
 }
 

@@ -101,6 +101,9 @@ model Instructor {
   name      String
   bio       String?
   createdAt DateTime @default(now())
+
+  isVisible    Boolean  @default(true)
+
   classes   Class[]
 }
 
@@ -176,6 +179,8 @@ model Pack {
   isActive     Boolean        @default(true)
   createdAt    DateTime       @default(now())
   purchases    PackPurchase[]
+
+  isVisible    Boolean  @default(true)
 
   oncePerUser    Boolean     @default(false) 
 

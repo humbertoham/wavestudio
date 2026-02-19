@@ -17,6 +17,29 @@ function Section({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+function toLocalDatetimeMX(iso: string) {
+  const d = new Date(iso);
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Monterrey",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+
+  const year = parts.find(p => p.type === "year")?.value;
+  const month = parts.find(p => p.type === "month")?.value;
+  const day = parts.find(p => p.type === "day")?.value;
+
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Monterrey",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+
+  return `${year}-${month}-${day}T${time}`;
+}
 
 type Instructor = { id: string; name: string; bio?: string | null };
 type ClassItem = {
@@ -318,7 +341,7 @@ function EditableClassRow({
   const [draft, setDraft] = useState<Partial<ClassItem>>({
     title: item.title,
     focus: item.focus,
-    date: item.date.slice(0,16),
+    date: toLocalDatetimeMX(item.date),
     durationMin: item.durationMin,
     capacity: item.capacity,
     instructorId: item.instructorId
@@ -389,7 +412,7 @@ function EditableClassRow({
               <button className="btn-ghost" onClick={()=>{
                 setEditing(false);
                 setDraft({
-                  title: item.title, focus: item.focus, date: item.date.slice(0,16),
+                  title: item.title, focus: item.focus, date: toLocalDatetimeMX(item.date),
                   durationMin: item.durationMin, capacity: item.capacity, instructorId: item.instructorId
                 });
               }}>Cancelar</button>
