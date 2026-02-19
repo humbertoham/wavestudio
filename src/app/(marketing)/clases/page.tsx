@@ -41,6 +41,8 @@ type Session = {
   booked?: number | null;
   spots: number; // calculado
   userHasBooking?: boolean;
+  bookingId?: string;
+
 };
 
 type Day = {
@@ -228,7 +230,7 @@ type ReserveMenuProps = {
   session: Session | null;
   tokens: number;
   affiliation: string | null; // 👈 NUEVO
-  onBooked: (qty: number) => void; // para actualizar tokens localmente
+  onBooked: (qty: number, bookingId: string) => void;  // para actualizar tokens localmente
 };
 
 function ReserveMenu({ open, onClose, session, tokens, onBooked, affiliation }: ReserveMenuProps) {
@@ -289,9 +291,9 @@ function ReserveMenu({ open, onClose, session, tokens, onBooked, affiliation }: 
     }
 
     // ✅ Si todo ok
-    const data = await res.json().catch(() => ({}));
+    const data = await res.json();
 
-    onBooked(qty);
+    onBooked(qty, data.bookingId);
     if (typeof data.tokens === "number") {
       // onBooked ya descontó; podrías sincronizar saldo exacto si lo deseas
     }
@@ -410,12 +412,16 @@ function ReserveMenu({ open, onClose, session, tokens, onBooked, affiliation }: 
 function SessionCard({
   s,
   onOpenReserve,
+  onCancelBooking,
   isAdmin,
 }: {
   s: Session;
   onOpenReserve: (s: Session) => void;
+  onCancelBooking: (s: Session) => void;
   isAdmin: boolean;
 }) {
+
+
   const statusEl = useMemo(() => {
     if (s.status === "FULL" || s.spots <= 0) {
       return (
@@ -490,13 +496,15 @@ const handleCardClick = () => {
 
       <div className="mt-auto pt-2">
        {s.userHasBooking ? (
-  <button
-    className="btn-outline h-9 w-full justify-center text-sm border-green-400 text-green-600"
-    disabled
-    onClick={(e) => e.stopPropagation()}
-  >
-    Ya reservado
-  </button>
+  <div className="flex flex-col pb-2 gap-2">
+    <button
+      className="btn-outline h-9 w-full justify-center text-sm border-green-400 text-green-600"
+      disabled
+      onClick={(e) => e.stopPropagation()}
+    >
+      Ya reservado
+    </button>
+  </div>
 ) : s.status === "CANCELLED" ? (
   <button
     className="btn-outline h-9 w-full justify-center text-sm border-red-400 text-red-600"
@@ -535,11 +543,14 @@ function DayColumn({
   day,
   index,
   onOpenReserve,
+  onCancelBooking,
 }: {
   day: Day;
   index: number;
   onOpenReserve: (s: Session) => void;
+  onCancelBooking: (s: Session) => void;
 }) {
+
 
   const [isAdmin, setIsAdmin] = useState(false);
 
@@ -570,7 +581,14 @@ useEffect(() => {
       <div className="flex-1 overflow-auto p-3 space-y-3">
         {day.sessions.length ? (
           day.sessions.map((s) => (
-            <SessionCard key={s.id} s={s} onOpenReserve={onOpenReserve} isAdmin={isAdmin} />
+            <SessionCard
+  key={s.id}
+  s={s}
+  onOpenReserve={onOpenReserve}
+  onCancelBooking={onCancelBooking}
+  isAdmin={isAdmin}
+/>
+
           ))
         ) : (
           <div className="grid h-full place-items-center text-sm text-muted-foreground">Sin clases</div>
@@ -587,6 +605,7 @@ export default function ClassesPage() {
   const [isAuthed, setIsAuthed] = useState<boolean>(false);
   const [showNoCredits, setShowNoCredits] = useState(false);
   const [affiliation, setAffiliation] = useState<string | null>(null);
+  const [lateCancelSession, setLateCancelSession] = useState<Session | null>(null);
 
   // estado del modal
   const [reserveOpen, setReserveOpen] = useState(false);
@@ -610,6 +629,57 @@ function openReserve(s: Session) {
   setReserveOpen(true);
 }
 
+async function handleCancel(s: Session) {
+  const start = new Date(s.startsAtISO);
+  const minutesUntil =
+    Math.floor((start.getTime() - Date.now()) / 60000);
+
+  if (minutesUntil < 240) {
+    setLateCancelSession(s);
+    return;
+  }
+
+  await executeCancel(s);
+}
+
+async function executeCancel(s: Session) {
+  if (!s.bookingId) return;
+
+  const res = await fetch(`/api/bookings/${s.bookingId}/cancel`, {
+    method: "PATCH",
+  });
+
+  
+
+  if (!res.ok) return;
+
+  const data = await res.json();
+
+  setDays((prev) =>
+    prev?.map((day) => ({
+      ...day,
+      sessions: day.sessions.map((ses) => {
+        if (ses.id !== s.id) return ses;
+
+        const newBooked = Math.max(0, (ses.booked ?? 1) - 1);
+        const cap = ses.capacity ?? 0;
+        const newSpots = cap ? cap - newBooked : 0;
+
+        return {
+          ...ses,
+          userHasBooking: false,
+          bookingId: undefined,
+          booked: newBooked,
+          spots: newSpots,
+        };
+      }),
+    })) ?? prev
+  );
+
+  if (!data.lateCancel) {
+    setTokens((t) => t + 1);
+  }
+}
 
   
 
@@ -690,30 +760,33 @@ function openReserve(s: Session) {
     load();
   }, []);
 
-  function handleBooked(qty: number) {
-    // Descuento optimista de tokens
-    setTokens((t) => Math.max(0, t - qty));
-    // También descuenta spots en el calendario para la sesión afectada
-    if (!days || !reserveSession) return;
-    setDays((prev) => {
-      if (!prev) return prev;
-      return prev.map((day) => ({
-        ...day,
-        sessions: day.sessions.map((s) => {
-          if (s.id !== reserveSession.id) return s;
-          const newBooked = (s.booked ?? 0) + qty;
-          const cap = s.capacity ?? 0;
-          const newSpots = cap ? Math.max(0, cap - newBooked) : 0;
-          return {
-            ...s,
-            booked: newBooked,
-            spots: newSpots,
-            status: newSpots <= 0 ? "FULL" : s.status,
-          };
-        }),
-      }));
-    });
-  }
+  function handleBooked(qty: number, bookingId: string) {
+  setTokens((t) => Math.max(0, t - qty));
+
+  if (!reserveSession) return;
+
+  setDays((prev) =>
+    prev?.map((day) => ({
+      ...day,
+      sessions: day.sessions.map((s) => {
+        if (s.id !== reserveSession.id) return s;
+
+        const newBooked = (s.booked ?? 0) + qty;
+        const cap = s.capacity ?? 0;
+        const newSpots = cap ? Math.max(0, cap - newBooked) : 0;
+
+        return {
+          ...s,
+          booked: newBooked,
+          spots: newSpots,
+          userHasBooking: true,
+          bookingId,
+        };
+      }),
+    })) ?? prev
+  );
+}
+
 
   return (
     <section className="section">
@@ -738,7 +811,15 @@ function openReserve(s: Session) {
         <div className="mt-8 grid grid-flow-col auto-cols-[minmax(17rem,1fr)] gap-4 overflow-x-auto pb-2 snap-x snap-mandatory">
           {days
             ? days.map((day, i) => (
-                <DayColumn key={day.id} day={day} index={i} onOpenReserve={openReserve} />
+                <DayColumn
+  key={day.id}
+  day={day}
+  index={i}
+  onOpenReserve={openReserve}
+  onCancelBooking={handleCancel}
+/>
+
+
               ))
             : Array.from({ length: 7 }).map((_, i) => (
                 <div
@@ -810,6 +891,7 @@ function openReserve(s: Session) {
   </div>
 )}
 
+ 
 
       <ReserveMenu
   open={reserveOpen}
@@ -823,3 +905,4 @@ function openReserve(s: Session) {
     </section>
   );
 }
+

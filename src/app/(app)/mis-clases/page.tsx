@@ -70,6 +70,7 @@ export default function MyClassesPage() {
   const [items, setItems] = useState<Booking[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [lateCancelBooking, setLateCancelBooking] = useState<Booking | null>(null);
 
   const [packs, setPacks] = useState<PackPurchase[] | null>(null);
   const [packsError, setPacksError] = useState<string | null>(null);
@@ -260,7 +261,6 @@ export default function MyClassesPage() {
                         key={b.id}
                         booking={b}
                         idx={idx}
-                        canCancel={canCancel(b)}
                         onCancel={() => cancelBooking(b)}
                         busy={busyId === b.id}
                       />
@@ -375,6 +375,17 @@ export default function MyClassesPage() {
           )}
         </motion.div>
       </div>
+      {lateCancelBooking && (
+  <LateCancelModal
+    booking={lateCancelBooking}
+    onClose={() => setLateCancelBooking(null)}
+    onConfirm={async () => {
+      await cancelBooking(lateCancelBooking);
+      setLateCancelBooking(null);
+    }}
+  />
+)}
+
     </section>
   );
 
@@ -387,14 +398,12 @@ export default function MyClassesPage() {
     booking,
     idx,
     muted = false,
-    canCancel = false,
     onCancel,
     busy = false,
   }: {
     booking: Booking;
     idx: number;
     muted?: boolean;
-    canCancel?: boolean;
     onCancel?: () => void;
     busy?: boolean;
   }) {
@@ -403,7 +412,8 @@ export default function MyClassesPage() {
     const spots = booking.quantity ?? 1;
     const cost = cls.creditCost ?? 1;
     const refundTokens = spots * cost;
-
+    const start = new Date(cls.date);
+    const lateCancel = minutesUntil(start) < CANCEL_WINDOW_MIN;
     return (
       <motion.div
         initial={{ opacity: 0, y: 18, scale: 0.98 }}
@@ -446,26 +456,95 @@ export default function MyClassesPage() {
 
           <div className="mt-3 sm:mt-0 sm:text-right">
             {canceled ? (
-              <span className="text-xs font-semibold uppercase text-red-600">
-                Cancelada
-              </span>
-            ) : canCancel ? (
-              <button
-                onClick={onCancel}
-                disabled={busy}
-                className="btn-outline h-10 inline-flex items-center gap-2"
-              >
-                <FiXCircle />
-                {busy ? "Cancelando..." : `Cancelar (${refundTokens})`}
-              </button>
-            ) : (
-              <span className="text-xs text-muted-foreground">
-                Cancelación hasta 4h antes
-              </span>
-            )}
+  <span className="text-xs font-semibold uppercase text-red-600">
+    Cancelada
+  </span>
+) : (
+  <button
+    onClick={() => {
+  if (lateCancel) {
+    setLateCancelBooking(booking);
+  } else {
+    onCancel?.();
+  }
+}}
+
+    disabled={busy}
+    className="btn-outline h-10 inline-flex items-center gap-2"
+  >
+    <FiXCircle />
+    {busy
+  ? "Cancelando..."
+  : lateCancel
+  ? "Cancelar (sin reembolso)"
+  : `Cancelar (${refundTokens})`}
+
+  </button>
+)}
+
           </div>
         </div>
       </motion.div>
     );
   }
+}
+
+function LateCancelModal({
+  booking,
+  onClose,
+  onConfirm,
+}: {
+  booking: Booking;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 20, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        transition={{ duration: 0.25 }}
+        className="card w-full max-w-md p-6"
+      >
+        <h3 className="font-display text-xl font-bold">
+          Cancelación tardía
+        </h3>
+
+        <p className="mt-3 text-sm text-muted-foreground">
+          Estás cancelando la clase:
+        </p>
+
+        <p className="mt-1 font-semibold">
+          {booking.class.title} · {booking.class.focus}
+        </p>
+
+        <p className="mt-4 text-sm text-red-600">
+          Esta cancelación es con menos de 4 horas de anticipación.
+          <br />
+          No se te regresarán los créditos.
+        </p>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="btn-outline h-10"
+          >
+            Volver
+          </button>
+
+          <button
+            onClick={onConfirm}
+            className="h-10 px-4 rounded-md bg-red-600 text-white hover:bg-red-700 transition"
+          >
+            Confirmar cancelación
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
 }
