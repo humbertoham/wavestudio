@@ -41,15 +41,25 @@ function addDaysKeepingWallTimeUTC(baseUtc: Date, days: number): Date {
 
 // ==================== GET ====================
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req); if (auth) return auth;
+  const auth = await requireAdmin(req);
+  if (auth) return auth;
+
+  const now = new Date(); // UTC actual
 
   const items = await prisma.class.findMany({
+    where: {
+      date: {
+        gte: now, // 🔥 Solo clases que no han pasado
+      },
+      isCanceled: false, // opcional pero recomendable
+    },
     include: { instructor: true },
-    orderBy: { date: "desc" },
+    orderBy: { date: "asc" }, // 🔥 ahora ascendente tiene más sentido
   });
 
   return NextResponse.json({ items });
 }
+
 
 // ==================== POST ====================
 export async function POST(req: NextRequest) {

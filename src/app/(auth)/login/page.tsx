@@ -130,25 +130,24 @@ function LoginInner() {
             </div>
 
             {/* Recordarme / Olvidé */}
-            <div className="flex items-center justify-between">
-              <label className="inline-flex items-center gap-2 text-sm text-[color:var(--color-muted-foreground)]">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-[color:var(--color-input)] bg-[color:var(--color-card)]"
-                  checked={remember}
-                  onChange={(e) => setRemember(e.target.checked)}
-                />
-                Recordarme
-              </label>
+<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+  <label className="inline-flex items-center gap-2 text-sm text-[color:var(--color-muted-foreground)]">
+    <input
+      type="checkbox"
+      className="h-4 w-4 rounded border-[color:var(--color-input)] bg-[color:var(--color-card)]"
+      checked={remember}
+      onChange={(e) => setRemember(e.target.checked)}
+    />
+    Recordarme
+  </label>
 
-              <Link
-                href="/forgot-password"
-                className="text-sm text-[var(--color-primary)] hover:underline underline-offset-4"
-              >
-                ¿Olvidaste tu contraseña?
-              </Link>
-              
-            </div>
+  <Link
+    href="/forgot-password"
+    className="text-sm text-[var(--color-primary)] hover:underline underline-offset-4 sm:text-right"
+  >
+    ¿Olvidaste tu contraseña?
+  </Link>
+</div>
 
             {/* Botones */}
             <button

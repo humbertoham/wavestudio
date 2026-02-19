@@ -1,4 +1,3 @@
-// src/app/(marketing)/precios/page.tsx
 "use client";
 
 import { useEffect, useState, useMemo, useCallback } from "react";
@@ -19,8 +18,7 @@ type ApiPack = {
   validityDays?: number | null;
   highlight?: "popular" | "best" | null;
   description?: string[] | null;
-
-  oncePerUser?: boolean; // ✅ NUEVO
+  oncePerUser?: boolean;
 };
 
 type Pack = {
@@ -31,8 +29,7 @@ type Pack = {
   validity: string;
   highlight?: "popular" | "best";
   description?: string[];
-
-oncePerUser: boolean; // ✅ NUEVO
+  oncePerUser: boolean;
 };
 
 type Me =
@@ -67,39 +64,35 @@ function toPack(p: ApiPack): Pack {
     validity,
     highlight: (p.highlight ?? undefined) as Pack["highlight"],
     description: p.description ?? undefined,
-
-    oncePerUser: !!p.oncePerUser, // ✅
+    oncePerUser: !!p.oncePerUser,
   };
 }
 
 export default function PricingPage() {
   const router = useRouter();
+
   const [packs, setPacks] = useState<Pack[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Sesión actual
   const [me, setMe] = useState<Me>(null);
   const [checkingMe, setCheckingMe] = useState(true);
   const [myPackIds, setMyPackIds] = useState<Set<string>>(new Set());
   const [pendingPackId, setPendingPackId] = useState<string | null>(null);
 
-  // Cargar packs y usuario
+  /* =========================
+     1️⃣ Cargar packs y usuario
+     ========================= */
   useEffect(() => {
     let mounted = true;
 
     async function loadPacks() {
       try {
-        const res = await fetch("/api/packs", {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const res = await fetch("/api/packs", { cache: "no-store" });
+        if (!res.ok) throw new Error();
         const data: ApiPack[] = await res.json();
         if (!mounted) return;
         setPacks(data.map(toPack));
-      } catch (e) {
-        console.error(e);
+      } catch {
         if (!mounted) return;
         setError("No se pudieron cargar los paquetes.");
         setPacks([]);
@@ -113,65 +106,65 @@ export default function PricingPage() {
         if (r.ok) {
           const user = await r.json();
           setMe(user ?? null);
-        } else if (r.status === 401) {
-          setMe(null);
         } else {
           setMe(null);
         }
-      } catch {
-        setMe(null);
       } finally {
         setCheckingMe(false);
       }
     }
-     async function loadMyPacks() {
-  if (!me?.id) return;
-
-  try {
-    const r = await fetch("/api/me/packs", { cache: "no-store" });
-    if (!r.ok) return;
-
-    const items: { packId: string }[] = await r.json();
-    setMyPackIds(new Set(items.map(i => i.packId)));
-  } catch {
-    /* noop */
-  }
-}
 
     loadPacks();
     loadMe();
-    loadMyPacks();
 
     return () => {
       mounted = false;
     };
-
- 
-
-
-
-
-
   }, []);
 
+  /* =========================
+     2️⃣ Cargar packs del usuario
+     ========================= */
+  useEffect(() => {
+    async function loadMyPacks() {
+      if (!me?.id) {
+        setMyPackIds(new Set());
+        return;
+      }
+
+      try {
+        const r = await fetch("/api/me/packs", { cache: "no-store" });
+        if (!r.ok) return;
+
+        const items: { packId: string }[] = await r.json();
+        setMyPackIds(new Set(items.map(i => i.packId)));
+      } catch {
+        /* noop */
+      }
+    }
+
+    loadMyPacks();
+  }, [me]);
+
+  /* =========================
+     3️⃣ Filtrar oncePerUser
+     ========================= */
   const visiblePacks = useMemo(() => {
-  if (!packs) return null;
+    if (!packs) return null;
 
-  return packs.filter(p => {
-    if (!p.oncePerUser) return true;
-    if (!me) return true; // no logueado → sí se muestra
-    return !myPackIds.has(p.id); // logueado y ya lo tuvo → ocultar
-  });
-}, [packs, me, myPackIds]);
-
+    return packs.filter(p => {
+      if (!p.oncePerUser) return true;
+      if (!me) return true;
+      return !myPackIds.has(p.id);
+    });
+  }, [packs, me, myPackIds]);
 
   const ordered = useMemo(() => {
-  if (!visiblePacks) return null;
-  const score = (h?: Pack["highlight"]) =>
-    h === "best" ? 2 : h === "popular" ? 1 : 0;
-  return [...visiblePacks].sort((a, b) => score(b.highlight) - score(a.highlight));
-}, [visiblePacks]);
-
+    if (!visiblePacks) return null;
+    const score = (h?: Pack["highlight"]) =>
+      h === "best" ? 2 : h === "popular" ? 1 : 0;
+    return [...visiblePacks].sort((a, b) => score(b.highlight) - score(a.highlight));
+  }, [visiblePacks]);
 
   const goLogin = useCallback(() => {
     const next = encodeURIComponent("/precios");
@@ -191,41 +184,35 @@ export default function PricingPage() {
         setPendingPackId(pack.id);
 
         const res = await fetch("/api/checkout-links", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    packId: pack.id,
-    userId: me?.id,   // 👈 AQUÍ LA CLAVE
-  }),
-});
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            packId: pack.id,
+            userId: me.id,
+          }),
+        });
 
-        // 🔑 Leer el body solo una vez
         const raw = await res.text();
         let data: any = null;
         try {
           data = raw ? JSON.parse(raw) : null;
-        } catch {
-          /* cuerpo no JSON */
-        }
+        } catch {}
 
         if (!res.ok) {
-          console.error("checkout-links error:", data ?? raw);
-          throw new Error(
-            `No se pudo crear el enlace de pago (HTTP ${res.status})`
-          );
+          console.error(data ?? raw);
+          throw new Error();
         }
 
         const checkoutUrl: string | undefined =
           data?.checkoutUrl ?? data?.initPoint;
+
         if (!checkoutUrl) {
-          console.error("Respuesta sin checkoutUrl:", data ?? raw);
           throw new Error("La API no devolvió checkoutUrl");
         }
 
         window.location.href = checkoutUrl;
-      } catch (e) {
-        console.error(e);
-        alert("No se pudo iniciar la compra. Inténtalo de nuevo en unos minutos.");
+      } catch {
+        alert("No se pudo iniciar la compra. Inténtalo de nuevo.");
       } finally {
         setPendingPackId(null);
       }
@@ -245,154 +232,85 @@ export default function PricingPage() {
             Paquetes de entrenamiento
           </h1>
           <p className="mt-3 text-muted-foreground">
-            Elige el plan que mejor se adapte a tu ritmo. Todos pueden reservar desde la plataforma.
+            Elige el plan que mejor se adapte a tu ritmo.
           </p>
         </motion.div>
 
-        {error && (
-          <div className="mt-6 text-center text-sm text-red-600">
-            {error} Inténtalo de nuevo más tarde.
-          </div>
-        )}
+        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 items-stretch">
+          {ordered?.map((p, idx) => {
+            const isPending = pendingPackId === p.id;
 
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {ordered
-            ? ordered.length > 0
-              ? ordered.map((p, idx) => {
-                  const isPending = pendingPackId === p.id;
-                  return (
-                    <motion.div
-                      key={p.id}
-                      initial={{ opacity: 0, y: 18, scale: 0.98 }}
-                      animate={{
-                        opacity: 1,
-                        y: 0,
-                        scale: 1,
-                        transition: {
-                          duration: 0.5,
-                          delay: 0.06 * idx,
-                          ease: EASE,
-                        },
-                      }}
-                      className={`card relative p-6 ${
-                        p.highlight ? "ring-1 ring-primary/30" : ""
-                      }`}
-                    >
-                      {p.highlight && (
-                        <span
-                          className={`absolute right-4 top-4 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${
-                            p.highlight === "best"
-                              ? "bg-primary text-white"
-                              : "bg-[color:var(--color-primary-50)] text-primary"
-                          }`}
-                        >
-                          <FiZap className="icon" />
-                          {p.highlight === "best" ? "Mejor valor" : "Popular"}
-                        </span>
-                      )}
+            return (
+              <motion.div
+                key={p.id}
+                initial={{ opacity: 0, y: 18 }}
+                animate={{
+                  opacity: 1,
+                  y: 0,
+                  transition: { duration: 0.5, delay: 0.06 * idx, ease: EASE },
+                }}
+                className="card relative p-6 flex flex-col h-full"
+              >
+                {p.highlight && (
+                  <span className="absolute right-4 top-4 badge">
+                    <FiZap className="icon" />
+                    {p.highlight === "best" ? "Mejor valor" : "Popular"}
+                  </span>
+                )}
 
-                      <h3 className="font-display text-xl font-bold">
-                        {p.name}
-                      </h3>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        {p.classesLabel}
-                      </p>
+                <div className="flex-1 flex flex-col">
+                  <h3 className="font-display text-xl font-bold">{p.name}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {p.classesLabel}
+                  </p>
 
-                      <div className="mt-4">
-                        <div className="flex items-baseline gap-1">
-                          <span className="font-display text-3xl font-extrabold">
-                            {formatMXN(p.price)}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            / paquete
-                          </span>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {p.validity}
-                        </p>
-                      </div>
+                  <div className="mt-4">
+                    <span className="font-display text-3xl font-extrabold">
+                      {formatMXN(p.price)}
+                    </span>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {p.validity}
+                    </p>
+                  </div>
 
-                      {p.description && p.description.length > 0 && (
-                        <ul className="mt-4 space-y-2 text-sm">
-                          {p.description.map((d, i) => (
-                            <li
-                              key={`${p.id}-desc-${i}`}
-                              className="flex items-start gap-2 text-muted-foreground"
-                            >
-                              <FiCheck className="icon mt-0.5" />
-                              <span>{d}</span>
-                            </li>
-                            
-                          ))}
-                          <li>
-                                   {p.oncePerUser && (
-  <span
-                          className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${
-                            p.highlight === "best"
-                              ? "bg-primary text-white"
-                              : "bg-[color:var(--color-primary-50)] text-primary"
-                          }`}
-                        >
+                  {p.description && (
+                    <ul className="mt-4 space-y-2 text-sm">
+                      {p.description.map((d, i) => (
+                        <li key={i} className="flex items-start gap-2">
+                          <FiCheck className="icon mt-0.5" />
+                          <span>{d}</span>
+                        </li>
+                      ))}
+                      {p.oncePerUser && (
+                        <li className="text-xs font-semibold text-primary">
                           Compra única
-                        </span>
-)}
-                          </li>
-                        </ul>
+                        </li>
                       )}
-               
-
-
-                      <div className="mt-6 grid gap-2">
-                        <button
-                          className="btn-primary h-11 justify-center disabled:opacity-60"
-                          onClick={() => handleBuy(p)}
-                          disabled={isPending}
-                        >
-                          {isPending
-                            ? "Creando enlace..."
-                            : me
-                            ? "Elegir paquete"
-                            : "Inicia sesión para comprar"}
-                        </button>
-
-                        <Link
-                          href="/clases"
-                          className="btn-outline h-11 justify-center"
-                        >
-                          Ver calendario
-                        </Link>
-                      </div>
-                    </motion.div>
-                  );
-                })
-              : (
-                <div className="col-span-full">
-                  <div className="card p-10 text-center text-muted-foreground">
-                    Sin paquetes por ahora
-                  </div>
+                    </ul>
+                  )}
                 </div>
-              )
-            : Array.from({ length: 6 }).map((_, idx) => (
-                <div key={`sk-${idx}`} className="card p-6 animate-pulse">
-                  <div className="h-5 w-1/2 bg-muted rounded" />
-                  <div className="mt-2 h-4 w-1/3 bg-muted rounded" />
-                  <div className="mt-4 h-9 w-2/3 bg-muted rounded" />
-                  <div className="mt-2 h-3 w-1/4 bg-muted rounded" />
-                  <div className="mt-4 space-y-2">
-                    <div className="h-3 w-5/6 bg-muted rounded" />
-                    <div className="h-3 w-4/6 bg-muted rounded" />
-                  </div>
-                  <div className="mt-6 grid gap-2">
-                    <div className="h-11 bg-muted rounded" />
-                    <div className="h-11 bg-muted rounded" />
-                  </div>
+
+                <div className="mt-auto pt-6 grid gap-2">
+                  <button
+                    className="btn-primary h-11"
+                    onClick={() => handleBuy(p)}
+                    disabled={isPending}
+                  >
+                    {isPending
+                      ? "Creando enlace..."
+                      : me
+                      ? "Elegir paquete"
+                      : "Inicia sesión para comprar"}
+                  </button>
+
+                  <Link href="/clases" className="btn-outline h-11">
+                    Ver calendario
+                  </Link>
                 </div>
-              ))}
+              </motion.div>
+            );
+          })}
         </div>
-
-        <p className="mt-6 text-center text-xs text-muted-foreground">
-          Precios en MXN. Sujeto a cambios sin previo aviso. Aplican términos y políticas de cancelación.
-        </p>
       </div>
     </section>
   );

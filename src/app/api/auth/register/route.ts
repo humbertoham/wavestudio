@@ -92,6 +92,22 @@ export async function POST(req: Request) {
       select: { id: true, email: true },
     });
 
+   if (
+  affiliation === Affiliation.WELLHUB ||
+  affiliation === Affiliation.TOTALPASS
+) {
+  const monthlyAmount =
+    affiliation === Affiliation.WELLHUB ? 15 : 10;
+
+  await prisma.tokenLedger.create({
+    data: {
+      userId: user.id,
+      delta: monthlyAmount,
+      reason: "CORPORATE_MONTHLY",
+    },
+  });
+}
+
     return NextResponse.json(user, { status: 201 });
   } catch (err: any) {
     // Manejo fino de Prisma P2002 (unique violation)

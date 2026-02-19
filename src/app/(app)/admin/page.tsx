@@ -1090,7 +1090,11 @@ function EditablePackRow({
 */
 function RevenueSection() {
   // rango por defecto: últimos 30 días
-  const toISO = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  const toISO = (d: Date) =>
+    new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+
   const [to, setTo] = useState<string>(() => toISO(new Date()));
   const [from, setFrom] = useState<string>(() => {
     const d = new Date();
@@ -1098,7 +1102,11 @@ function RevenueSection() {
     return toISO(d);
   });
 
-  const params = new URLSearchParams({ from: new Date(from).toISOString(), to: new Date(to).toISOString() });
+  const params = new URLSearchParams({
+    from: new Date(from).toISOString(),
+    to: new Date(to).toISOString(),
+  });
+
   const { data, error, isLoading, mutate } = useSWR<{
     total: number;
     count: number;
@@ -1107,64 +1115,143 @@ function RevenueSection() {
   }>(`/api/admin/revenue?${params.toString()}`, fetcher);
 
   const fmtMoney = (n?: number) =>
-    typeof n === "number" ? n.toLocaleString("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 }) : "—";
+    typeof n === "number"
+      ? n.toLocaleString("es-MX", {
+          style: "currency",
+          currency: "MXN",
+          maximumFractionDigits: 0,
+        })
+      : "—";
 
   return (
     <Section>
-      <div className="flex flex-wrap items-end justify-between gap-3 mb-4">
+      {/* HEADER + FILTROS RESPONSIVE */}
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
         <h2 className="text-xl font-semibold">Ingresos</h2>
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-600">De</label>
-          <input className="input" type="datetime-local" value={from} onChange={e=>setFrom(e.target.value)} />
-          <label className="text-sm text-gray-600">a</label>
-          <input className="input" type="datetime-local" value={to} onChange={e=>setTo(e.target.value)} />
-          <button className="btn-outline" onClick={()=>mutate()}>Actualizar</button>
-          <button className="btn-ghost" onClick={()=>{
-            const now = new Date();
-            const d = new Date(); d.setDate(d.getDate()-30);
-            setFrom(toISO(d)); setTo(toISO(now));
-            // mutate después de setState para que el SWR re-evalúe con la nueva URL
-            setTimeout(()=>mutate(), 0);
-          }}>Últimos 30 días</button>
+
+        <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full md:w-auto">
+          {/* FROM */}
+          <div className="flex flex-col text-sm">
+            <label className="text-gray-600 mb-1">De</label>
+            <input
+              className="input w-full sm:w-auto"
+              type="datetime-local"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+          </div>
+
+          {/* TO */}
+          <div className="flex flex-col text-sm">
+            <label className="text-gray-600 mb-1">a</label>
+            <input
+              className="input w-full sm:w-auto"
+              type="datetime-local"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </div>
+
+          {/* BOTONES */}
+          <div className="flex gap-2 mt-1 sm:mt-6">
+            <button
+              className="btn-outline w-full sm:w-auto"
+              onClick={() => mutate()}
+            >
+              Actualizar
+            </button>
+
+            <button
+              className="btn-ghost w-full sm:w-auto"
+              onClick={() => {
+                const now = new Date();
+                const d = new Date();
+                d.setDate(d.getDate() - 30);
+                setFrom(toISO(d));
+                setTo(toISO(now));
+                setTimeout(() => mutate(), 0);
+              }}
+            >
+              Últimos 30 días
+            </button>
+          </div>
         </div>
       </div>
 
-      {isLoading && <p className="text-sm text-gray-500">Calculando…</p>}
-      {error && <p className="text-sm text-red-600">Error cargando ingresos</p>}
+      {isLoading && (
+        <p className="text-sm text-gray-500">Calculando…</p>
+      )}
+      {error && (
+        <p className="text-sm text-red-600">
+          Error cargando ingresos
+        </p>
+      )}
 
       {data && (
         <>
-          {/* KPIs */}
-          <div className="grid md:grid-cols-3 gap-3 mb-6">
+          {/* KPIs RESPONSIVE */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
             <div className="rounded-xl border p-4">
-              <div className="text-sm text-gray-600">Total aprobado</div>
-              <div className="text-2xl font-semibold">{fmtMoney(data.total)}</div>
+              <div className="text-sm text-gray-600">
+                Total aprobado
+              </div>
+              <div className="text-2xl font-semibold">
+                {fmtMoney(data.total)}
+              </div>
             </div>
+
             <div className="rounded-xl border p-4">
-              <div className="text-sm text-gray-600"># Pagos</div>
-              <div className="text-2xl font-semibold">{data.count}</div>
+              <div className="text-sm text-gray-600">
+                # Pagos
+              </div>
+              <div className="text-2xl font-semibold">
+                {data.count}
+              </div>
             </div>
+
             <div className="rounded-xl border p-4">
-              <div className="text-sm text-gray-600">Ticket promedio</div>
-              <div className="text-2xl font-semibold">{fmtMoney(data.average)}</div>
+              <div className="text-sm text-gray-600">
+                Ticket promedio
+              </div>
+              <div className="text-2xl font-semibold">
+                {fmtMoney(data.average)}
+              </div>
             </div>
           </div>
 
-          {/* Mini serie (día a día) */}
+          {/* TABLA RESPONSIVE */}
           <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="text-left border-b">
-                <tr><th>Fecha</th><th className="text-right">Total del día</th></tr>
+            <table className="min-w-[500px] w-full text-sm border-collapse">
+              <thead className="text-left border-b border-[var(--color-border)]">
+                <tr>
+                  <th>Fecha</th>
+                  <th className="text-right">Total del día</th>
+                </tr>
               </thead>
               <tbody>
-                {data.daily.map((d)=>(
-                  <tr key={d.date} className="border-b">
-                    <td className="py-2">{new Date(d.date).toLocaleDateString()}</td>
-                    <td className="py-2 text-right">{fmtMoney(d.total)}</td>
+                {data.daily.map((d) => (
+                  <tr
+                    key={d.date}
+                    className="border-b border-[var(--color-border)]"
+                  >
+                    <td className="py-2 whitespace-nowrap">
+                      {new Date(d.date).toLocaleDateString()}
+                    </td>
+                    <td className="py-2 text-right whitespace-nowrap">
+                      {fmtMoney(d.total)}
+                    </td>
                   </tr>
                 ))}
-                {data.daily.length===0 && (
-                  <tr><td colSpan={2} className="py-3 text-center text-gray-500">Sin pagos aprobados en el rango</td></tr>
+
+                {data.daily.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={2}
+                      className="py-3 text-center text-gray-500"
+                    >
+                      Sin pagos aprobados en el rango
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
@@ -1224,7 +1311,8 @@ function UserInspectorSection() {
 
   return (
     <Section>
-      <div className="grid md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
         {/* LISTA */}
         <div className="md:col-span-1 space-y-3">
           <h2 className="text-xl font-semibold">Usuarios</h2>
@@ -1471,45 +1559,52 @@ function UserInspectorSection() {
 
               {/* PAQUETES COMPRADOS */}
               <div className="p-4 border rounded-[var(--radius)]">
-                <h3 className="font-semibold mb-3">Paquetes</h3>
-                <table className="min-w-full text-sm">
-                  <thead className="border-b text-left">
-                    <tr>
-                      <th>Paquete</th>
-                      <th>Restantes</th>
-                      <th>Vence</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {details.purchases.map((p) => (
-                      <tr key={p.id} className="border-b">
-                        <td className="py-2">{p.pack.name}</td>
-                        <td className="py-2">{p.classesLeft}</td>
-                        <td className="py-2">
-                          {new Date(p.expiresAt).toLocaleDateString()}
-                        </td>
-                      </tr>
-                    ))}
-                    {details.purchases.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={3}
-                          className="py-3 text-center text-muted-foreground"
-                        >
-                          Sin paquetes
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+  <h3 className="font-semibold mb-3">Paquetes</h3>
+
+  <div className="overflow-x-auto">
+    <table className="min-w-[600px] w-full text-sm border-collapse">
+      <thead className="border-b border-[var(--color-border)] text-left">
+        <tr>
+          <th>Paquete</th>
+          <th>Restantes</th>
+          <th>Vence</th>
+        </tr>
+      </thead>
+      <tbody>
+        {details.purchases.map((p) => (
+          <tr key={p.id} className="border-b border-[var(--color-border)]">
+            <td className="py-2">{p.pack.name}</td>
+            <td className="py-2">{p.classesLeft}</td>
+            <td className="py-2">
+              <span className="whitespace-nowrap">
+                {new Date(p.expiresAt).toLocaleDateString()}
+              </span>
+            </td>
+          </tr>
+        ))}
+
+        {details.purchases.length === 0 && (
+          <tr>
+            <td
+              colSpan={3}
+              className="py-3 text-center text-muted-foreground"
+            >
+              Sin paquetes
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  </div>
+</div>
+
               
               {/* RESERVAS */}
 <div className="p-4 border rounded-[var(--radius)]">
   <h3 className="font-semibold mb-3">Reservas</h3>
 
   <div className="overflow-x-auto">
-    <table className="min-w-full text-sm">
+    <table className="min-w-[800px] w-full text-sm border-collapse">
       <thead className="border-b text-left">
         <tr>
           <th>Reservado</th>
@@ -1525,13 +1620,19 @@ function UserInspectorSection() {
         {details.bookings.map((b) => (
           <tr key={b.id} className="border-b">
             <td className="py-2">
-              {new Date(b.createdAt).toLocaleString()}
+              <span className="whitespace-nowrap">
+  {new Date(b.createdAt).toLocaleString()}
+</span>
+
             </td>
 
             <td className="py-2">{b.class.title}</td>
 
             <td className="py-2">
-              {new Date(b.class.date).toLocaleString()}
+              <span className="whitespace-nowrap">
+  {new Date(b.class.date).toLocaleString()}
+</span>
+
             </td>
 
             <td className="py-2">

@@ -14,6 +14,8 @@ import {
   FiX,
 } from "react-icons/fi";
 
+
+
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
 const MX_LOCALE: Intl.LocalesArgument = "es-MX";

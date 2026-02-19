@@ -4,6 +4,11 @@ import { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
 
+import { zonedTimeToUtc, utcToZonedTime } from "date-fns-tz";
+
+const USER_TZ = "America/Monterrey";
+
+
 // Tipar el contexto con params async (App Router)
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -164,26 +169,25 @@ if (time) {
   if (Number.isFinite(hh) && Number.isFinite(mm)) {
     const originalUTC = new Date(cls.date);
 
-    // Obtener partes de la fecha en México
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/Mexico_City",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).formatToParts(originalUTC);
+    // Convertimos UTC guardado → hora local México
+    const mexicoZoned = utcToZonedTime(originalUTC, USER_TZ);
 
-    const year = Number(parts.find(p => p.type === "year")?.value);
-    const month = Number(parts.find(p => p.type === "month")?.value);
-    const day = Number(parts.find(p => p.type === "day")?.value);
+    const yyyy = mexicoZoned.getFullYear();
+    const MM = String(mexicoZoned.getMonth() + 1).padStart(2, "0");
+    const dd = String(mexicoZoned.getDate()).padStart(2, "0");
 
-    // Construimos fecha como si fuera México
-    const mexicoLocal = new Date(
-      `${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}T${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}:00`
-    );
+    const HH = String(hh).padStart(2, "0");
+    const mmStr = String(mm).padStart(2, "0");
 
-    data.date = mexicoLocal;
+    const localLike = `${yyyy}-${MM}-${dd} ${HH}:${mmStr}`;
+
+    // Convertimos México → UTC real
+    const utcDate = zonedTimeToUtc(localLike, USER_TZ);
+
+    data.date = utcDate;
   }
 }
+
 
 
 

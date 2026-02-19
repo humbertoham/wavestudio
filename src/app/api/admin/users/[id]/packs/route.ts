@@ -44,10 +44,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     where: { id: packId },
   });
 
-  if (!pack || !pack.isActive) {
+  if (!pack) {
     return json(400, {
       ok: false,
-      message: "Paquete inválido o inactivo",
+      message: "Paquete inválido",
     });
   }
 
