@@ -126,26 +126,28 @@ export default function PricingPage() {
      2️⃣ Cargar packs del usuario
      ========================= */
   useEffect(() => {
-    async function loadMyPacks() {
-      if (!me?.id) {
-        setMyPackIds(new Set());
-        return;
-      }
-
-      try {
-        const r = await fetch("/api/me/packs", { cache: "no-store" });
-        if (!r.ok) return;
-
-        const items: { packId: string }[] = await r.json();
-        setMyPackIds(new Set(items.map(i => i.packId)));
-      } catch {
-        /* noop */
-      }
+  async function loadOncePerUser() {
+    if (!me?.id) {
+      setMyPackIds(new Set());
+      return;
     }
 
-    loadMyPacks();
-  }, [me]);
+    try {
+      const r = await fetch("/api/users/me/onceperuser", {
+        cache: "no-store",
+      });
 
+      if (!r.ok) return;
+
+      const packIds: string[] = await r.json();
+      setMyPackIds(new Set(packIds));
+    } catch {
+      /* noop */
+    }
+  }
+
+  loadOncePerUser();
+}, [me]);
   /* =========================
      3️⃣ Filtrar oncePerUser
      ========================= */
