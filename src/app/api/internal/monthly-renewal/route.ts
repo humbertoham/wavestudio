@@ -12,12 +12,7 @@ export async function GET() {
   const now = new Date();
 
   // Solo día 1
-  if (now.getUTCDate() !== 1) {
-    return NextResponse.json({
-      ok: false,
-      message: "Solo puede ejecutarse el día 1",
-    });
-  }
+  
 
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth();
