@@ -25,6 +25,7 @@ type ApiSession = {
   isFull?: boolean | null;
   isCanceled?: boolean;
   userHasBooking?: boolean;
+  bookingId?: string;
 };
 
 type Session = {
@@ -212,6 +213,7 @@ function toSession(api: ApiSession): Session {
     booked,
     spots,
     userHasBooking: api.userHasBooking ?? false,
+    bookingId: api.bookingId ?? undefined,
 
   };
 }
@@ -457,7 +459,7 @@ const handleCardClick = () => {
   return (
     <motion.div
       variants={cardVariants}
-      className={`card p-3 h-40 md:h-44 flex flex-col ${
+      className={`card p-3 flex flex-col ${
         isAdmin ? "cursor-pointer hover:ring-2 hover:ring-primary/40" : ""
       }`}
       onClick={handleCardClick}
@@ -503,6 +505,16 @@ const handleCardClick = () => {
       onClick={(e) => e.stopPropagation()}
     >
       Ya reservado
+    </button>
+
+    <button
+      className="btn-outline h-9 w-full  justify-center text-sm border-red-400 text-red-600"
+      onClick={(e) => {
+        e.stopPropagation();
+        onCancelBooking(s);
+      }}
+    >
+      Cancelar reserva
     </button>
   </div>
 ) : s.status === "CANCELLED" ? (
@@ -643,6 +655,7 @@ async function handleCancel(s: Session) {
 }
 
 async function executeCancel(s: Session) {
+  console.log(s.bookingId)
   if (!s.bookingId) return;
 
   const res = await fetch(`/api/bookings/${s.bookingId}/cancel`, {
@@ -891,7 +904,17 @@ async function executeCancel(s: Session) {
   </div>
 )}
 
- 
+  {lateCancelSession && (
+  <LateCancelModal
+    session={lateCancelSession}
+    onClose={() => setLateCancelSession(null)}
+    onConfirm={async () => {
+      await executeCancel(lateCancelSession);
+      setLateCancelSession(null);
+    }}
+  />
+)}
+
 
       <ReserveMenu
   open={reserveOpen}
@@ -906,3 +929,45 @@ async function executeCancel(s: Session) {
   );
 }
 
+function LateCancelModal({
+  session,
+  onClose,
+  onConfirm,
+}: {
+  session: Session;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 0.2 }}
+        className="card w-full max-w-md p-6"
+      >
+        <h3 className="font-display text-xl font-bold">
+          Cancelación tardía
+        </h3>
+
+        <p className="mt-4 text-sm text-red-600">
+          Faltan menos de 4 horas.
+          <br />
+          No se te regresarán los créditos.
+        </p>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button onClick={onClose} className="btn-outline h-10">
+            Volver
+          </button>
+          <button
+            onClick={onConfirm}
+            className="h-10 px-4 rounded-md bg-red-600 text-white hover:bg-red-700"
+          >
+            Confirmar cancelación
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}

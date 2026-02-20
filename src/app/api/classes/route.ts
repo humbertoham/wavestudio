@@ -65,6 +65,7 @@ export async function GET(req: Request) {
       bookings: {
         where: { status: BookingStatus.ACTIVE },
         select: {
+          id: true,  
           quantity: true,
           userId: true, // 👈 necesario para detectar booking propio
         },
@@ -93,6 +94,12 @@ export async function GET(req: Request) {
         ? c.bookings.some((b) => b.userId === userId)
         : false;
 
+    const userBooking =
+  userId != null
+    ? c.bookings.find((b) => b.userId === userId)
+    : undefined;
+
+
     return {
       id: c.id,
       title: c.title ?? "Clase",
@@ -105,6 +112,7 @@ export async function GET(req: Request) {
       isFull,
       isCanceled: c.isCanceled ?? false,
       userHasBooking, // 👈 NUEVO
+      bookingId: userBooking?.id ?? null, // 👈 ESTA LÍNEA
     };
   });
 

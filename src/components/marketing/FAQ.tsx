@@ -86,8 +86,8 @@ function FAQItem({ q, a }: { q: string; a: string }) {
 
 export default function FAQ() {
   return (
-    <motion.section layout className="section">
-      <div className="container-app max-w-3xl" id="FAQ">
+    <motion.section layout className="section"  id="faq">
+      <div className="container-app max-w-3xl">
         <h2 className="font-display text-3xl font-extrabold text-center md:text-4xl">
           Preguntas frecuentes
         </h2>

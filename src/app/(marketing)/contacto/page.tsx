@@ -50,7 +50,7 @@ export default function ContactPage() {
           </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
-            <Link href="/faq" className="btn-outline">
+            <Link href="/#faq" className="btn-outline">
               <FiHelpCircle className="icon" />
               <span className="ml-1">Ver preguntas frecuentes</span>
             </Link>
