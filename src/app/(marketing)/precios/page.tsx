@@ -251,13 +251,7 @@ export default function PricingPage() {
                 }}
                 className="card relative p-6 flex flex-col h-full"
               >
-                {p.highlight && (
-                  <span className="absolute right-4 top-4 badge">
-                    <FiZap className="icon" />
-                    {p.highlight === "best" ? "Mejor valor" : "Popular"}
-                  </span>
-                )}
-
+              
                 <div className="flex-1 flex flex-col">
                   <h3 className="font-display text-xl font-bold">{p.name}</h3>
                   <p className="mt-1 text-sm text-muted-foreground">

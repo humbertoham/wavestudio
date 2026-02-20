@@ -138,13 +138,26 @@ export default function RegisterPage() {
                 Fecha de nacimiento
               </label>
               <input
-                id="dob"
-                type="date"
-                required
-                value={dateOfBirth}
-                onChange={(e) => setDateOfBirth(e.target.value)}
-                className="w-full rounded-xl border border-[color:var(--color-input)] bg-[color:var(--color-card)] px-4 py-2.5 text-[color:var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-              />
+  id="dob"
+  type="date"
+  required
+  value={dateOfBirth}
+  onChange={(e) => setDateOfBirth(e.target.value)}
+  className="
+    w-full
+    box-border
+    appearance-none
+    rounded-xl
+    border border-[color:var(--color-input)]
+    bg-[color:var(--color-card)]
+    px-4
+    py-2.5
+    text-[color:var(--color-foreground)]
+    focus:outline-none
+    focus:ring-2
+    focus:ring-[var(--color-primary)]
+  "
+/>
             </div>
 
             {/* Teléfonos */}
