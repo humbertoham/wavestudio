@@ -26,7 +26,10 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   // Si viene "date" en string, conviértelo a Date
   const { date, ...rest } = raw ?? {};
   const data: any = { ...rest };
-  if (date) data.date = new Date(date);
+  if (date) {
+  const localLike = date.replace("T", " ");
+  data.date = zonedTimeToUtc(localLike, USER_TZ);
+}
 
   const item = await prisma.class.update({
     where: { id },
