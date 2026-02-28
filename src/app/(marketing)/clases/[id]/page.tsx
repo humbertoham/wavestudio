@@ -28,6 +28,7 @@ type UserLite = {
   id: string;
   name: string;
   credits: number;
+  affiliation?: "NONE" | "WELLHUB" | "TOTALPASS";
 };
 
 type InstructorLite = {
@@ -51,7 +52,7 @@ type ClassApi = {
     quantity: number;
     status?: "ACTIVE" | "CANCELED";
     attended?: boolean; // <- si no existe en backend, vendrá undefined
-    user: { id: string; name: string; email: string } | null; // null si invitado (solo si lo soportas)
+    user: { id: string; name: string; email: string; affiliation?: "NONE" | "WELLHUB" | "TOTALPASS"; } | null; // null si invitado (solo si lo soportas)
     guestName?: string; // si manejas invitados sin user
   }[];
 };
@@ -63,6 +64,7 @@ type AttendeeRow = {
   isGuest: boolean;
   attended: boolean;
   quantity: number;
+  affiliation?: "NONE" | "WELLHUB" | "TOTALPASS";
 };
 
 function fmtDateTimeMX(iso: string) {
@@ -300,11 +302,14 @@ export default function ClassAdminPage() {
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [userSearch, setUserSearch] = useState("");
 
   const [selectedUserId, setSelectedUserId] = useState("");
   const [guestName, setGuestName] = useState("");
 
   const [editOpen, setEditOpen] = useState(false);
+
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
   /* ======================
      Load data
@@ -363,6 +368,7 @@ export default function ClassAdminPage() {
       isGuest: !b.user,
       attended: !!b.attended,
       quantity: b.quantity ?? 1,
+      affiliation: b.user?.affiliation ?? "NONE",
     }));
   }, [cls]);
 
@@ -376,6 +382,15 @@ export default function ClassAdminPage() {
   }, [cls, usedSpots]);
 
   const dateInfo = useMemo(() => (cls ? fmtDateTimeMX(cls.date) : null), [cls]);
+
+  const filteredUsers = useMemo(() => {
+  const q = userSearch.trim().toLowerCase();
+  if (!q) return users.slice(0, 20); // limita si no hay búsqueda
+
+  return users.filter(u =>
+    u.name.toLowerCase().includes(q)
+  ).slice(0, 20);
+}, [users, userSearch]);
 
   /* ======================
      Actions
@@ -608,10 +623,27 @@ export default function ClassAdminPage() {
             {attendees.map((a) => (
               <div key={a.bookingId} className="card p-4 flex justify-between items-center">
                 <div className="min-w-0">
-                  <p className="font-semibold truncate">
-                    {a.name}
-                    {a.isGuest && <span className="ml-2 text-xs badge">Invitado</span>}
-                  </p>
+                 <p className="font-semibold truncate flex items-center gap-2">
+  {a.name}
+
+  {a.isGuest && (
+    <span className="text-xs px-2 py-0.5 rounded bg-gray-200">
+      Invitado
+    </span>
+  )}
+
+  {a.affiliation === "WELLHUB" && (
+    <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">
+      WELLHUB
+    </span>
+  )}
+
+  {a.affiliation === "TOTALPASS" && (
+    <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">
+      TOTALPASS
+    </span>
+  )}
+</p>
                   {a.email && <p className="text-xs text-muted-foreground truncate">{a.email}</p>}
                   {a.quantity > 1 && (
                     <p className="text-xs text-muted-foreground">Plazas: {a.quantity}</p>
@@ -661,39 +693,79 @@ export default function ClassAdminPage() {
 
           <div className="card p-5 grid gap-4 sm:grid-cols-2">
             {/* Usuario registrado */}
-            <div>
-              <p className="font-semibold mb-2">Usuario registrado</p>
-              <select
-                className="input"
-                value={selectedUserId}
-                onChange={(e) => setSelectedUserId(e.target.value)}
-                disabled={cls.isCanceled || spotsLeft <= 0 || busy !== null}
-                title={cls.isCanceled ? "Clase cancelada" : undefined}
-              >
-                <option value="">Selecciona usuario</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id} disabled={u.credits < 1}>
-                    {u.name} ({u.credits} créditos)
-                  </option>
-                ))}
-              </select>
+           <div className="relative">
+  <p className="font-semibold mb-2">Usuario registrado</p>
 
-              <button
-                className="btn-primary mt-3 w-full"
-                onClick={addUser}
-                disabled={
-                  !selectedUserId || cls.isCanceled || spotsLeft <= 0 || busy !== null
-                }
-              >
-                <FiUserPlus /> Agregar 
-              </button>
+  {/* Trigger */}
+  <button
+    type="button"
+    onClick={() => setUserDropdownOpen((p) => !p)}
+    disabled={cls.isCanceled || spotsLeft <= 0 || busy !== null}
+    className="input w-full flex justify-between items-center"
+  >
+    <span className="truncate">
+      {selectedUserId
+        ? users.find((u) => u.id === selectedUserId)?.name
+        : "Seleccionar usuario"}
+    </span>
+    <span className="text-xs opacity-60">▼</span>
+  </button>
 
-              {spotsLeft <= 0 && (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  No hay spots disponibles.
-                </p>
-              )}
-            </div>
+  {/* Dropdown */}
+  {userDropdownOpen && (
+    <div className="absolute z-20 mt-2 w-full rounded-xl border bg-white shadow-lg">
+      <div className="p-2">
+        <input
+          className="input"
+          placeholder="Buscar usuario..."
+          value={userSearch}
+          onChange={(e) => setUserSearch(e.target.value)}
+          autoFocus
+        />
+      </div>
+
+      <div className="max-h-48 overflow-y-auto">
+        {filteredUsers.length === 0 && (
+          <div className="px-3 py-2 text-sm text-muted-foreground">
+            Sin resultados
+          </div>
+        )}
+
+        {filteredUsers.map((u) => (
+          <button
+            key={u.id}
+            type="button"
+            onClick={() => {
+              setSelectedUserId(u.id);
+              setUserSearch("");
+              setUserDropdownOpen(false);
+            }}
+            disabled={u.credits < 1}
+            className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex justify-between items-center ${
+              u.credits < 1 ? "opacity-50 cursor-not-allowed" : ""
+            }`}
+          >
+            <span>{u.name}</span>
+            <span className="text-xs opacity-60">
+              {u.credits} créditos
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )}
+
+  {/* Add button */}
+  <button
+    className="btn-primary mt-3 w-full"
+    onClick={addUser}
+    disabled={
+      !selectedUserId || cls.isCanceled || spotsLeft <= 0 || busy !== null
+    }
+  >
+    <FiUserPlus /> Agregar
+  </button>
+</div>
 
             {/* Invitado */}
             <div>

@@ -57,30 +57,42 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   // 6️⃣ Transacción (IMPORTANTÍSIMO)
   const result = await prisma.$transaction(async (tx) => {
-    // 6a️⃣ Crear PackPurchase
-    const purchase = await tx.packPurchase.create({
-      data: {
-        userId,
-        packId: pack.id,
-        classesLeft: pack.classes,
-        expiresAt,
-      },
-    });
-
-    // 6b️⃣ Acreditar tokens (expiran con el paquete)
-    await tx.tokenLedger.create({
-      data: {
-        userId,
-        packPurchaseId: purchase.id,
-        delta: pack.classes,
-        reason: "PURCHASE_CREDIT",
-        // ⛔ NO usamos expiresAt aquí porque
-        // el filtro se hace vía packPurchase.expiresAt
-      },
-    });
-
-    return purchase;
+  // 1️⃣ Crear PackPurchase
+  const purchase = await tx.packPurchase.create({
+    data: {
+      userId,
+      packId: pack.id,
+      classesLeft: pack.classes,
+      expiresAt,
+    },
   });
+
+  // 2️⃣ Acreditar tokens
+  await tx.tokenLedger.create({
+    data: {
+      userId,
+      packPurchaseId: purchase.id,
+      delta: pack.classes,
+      reason: "PURCHASE_CREDIT",
+    },
+  });
+
+  // 3️⃣ 🔥 Crear Payment ADMIN (esto es lo nuevo)
+  await tx.payment.create({
+    data: {
+      provider: "ADMIN",
+      status: "APPROVED",
+      amount: pack.price,
+      currency: "MXN",
+      userId,
+      packPurchase: {
+  connect: { id: purchase.id }
+}
+    },
+  });
+
+  return purchase;
+});
 
   // 7️⃣ Respuesta
   return json(200, {

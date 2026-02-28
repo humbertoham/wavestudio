@@ -11,7 +11,37 @@ export async function GET() {
 
   const now = new Date();
 
-  
+  // Solo día 1
+  if (now.getUTCDate() !== 1) {
+    return NextResponse.json({
+      ok: false,
+      message: "Solo puede ejecutarse el día 1",
+    });
+  }
+
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+
+  const firstDay = new Date(Date.UTC(year, month, 1));
+  const nextMonth = new Date(Date.UTC(year, month + 1, 1));
+
+  const alreadyRun = await prisma.tokenLedger.findFirst({
+    where: {
+      reason: "CORPORATE_MONTHLY",
+      createdAt: {
+        gte: firstDay,
+        lt: nextMonth,
+      },
+    },
+  });
+
+  if (alreadyRun) {
+    return NextResponse.json({
+      ok: false,
+      message: "Ya ejecutado este mes",
+    });
+  }
+
   const users = await prisma.user.findMany({
     where: {
       affiliation: { in: ["WELLHUB", "TOTALPASS"] },

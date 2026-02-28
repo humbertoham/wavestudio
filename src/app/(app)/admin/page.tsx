@@ -289,14 +289,24 @@ function ClassesSection() {
         </select>
 
         {/* ← NUEVO: check para replicar en el mes siguiente */}
-        <label className="md:col-span-2 inline-flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={!!creating.repeatNextMonth}
-            onChange={e=>setCreating(f=>({...f, repeatNextMonth: e.target.checked}))}
-          />
-          Repetir todo el mes siguiente (mismo día de la semana y hora)
-        </label>
+        <div className="md:col-span-2">
+  <label className="block text-sm mb-1">
+    ¿Repetir todo el mes siguiente?
+  </label>
+  <select
+    className="input"
+    value={creating.repeatNextMonth ? "yes" : "no"}
+    onChange={e =>
+      setCreating(f => ({
+        ...f,
+        repeatNextMonth: e.target.value === "yes",
+      }))
+    }
+  >
+    <option value="no">No</option>
+    <option value="yes">Sí</option>
+  </select>
+</div>
 
         <button className="btn-primary md:col-span-3">Agregar clase</button>
       </form>
@@ -1108,34 +1118,21 @@ function EditablePackRow({
 }
 
 
-
-/* GANANCIAS DEL MES
-*/
 function RevenueSection() {
-  // rango por defecto: últimos 30 días
-  const toISO = (d: Date) =>
-    new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-      .toISOString()
-      .slice(0, 16);
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(
+    now.getMonth() + 1
+  ).padStart(2, "0")}`;
 
-  const [to, setTo] = useState<string>(() => toISO(new Date()));
-  const [from, setFrom] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return toISO(d);
-  });
-
-  const params = new URLSearchParams({
-    from: new Date(from).toISOString(),
-    to: new Date(to).toISOString(),
-  });
+  const [month, setMonth] = useState(defaultMonth);
 
   const { data, error, isLoading, mutate } = useSWR<{
-    total: number;
-    count: number;
-    average: number;
-    daily: { date: string; total: number }[];
-  }>(`/api/admin/revenue?${params.toString()}`, fetcher);
+    packRevenue: number;
+    appsRevenue: number;
+    totalRevenue: number;
+    wellhub: { count: number; revenue: number };
+    totalpass: { count: number; revenue: number };
+  }>(`/api/admin/revenue?month=${month}`, fetcher);
 
   const fmtMoney = (n?: number) =>
     typeof n === "number"
@@ -1148,54 +1145,27 @@ function RevenueSection() {
 
   return (
     <Section>
-      {/* HEADER + FILTROS RESPONSIVE */}
+      {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
-        <h2 className="text-xl font-semibold">Ingresos</h2>
+        <h2 className="text-xl font-semibold">Ingresos del mes</h2>
 
-        <div className="flex flex-col sm:flex-row flex-wrap gap-3 w-full md:w-auto">
-          {/* FROM */}
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
           <div className="flex flex-col text-sm">
-            <label className="text-gray-600 mb-1">De</label>
+            <label className="text-gray-600 mb-1">Mes</label>
             <input
-              className="input w-full sm:w-auto"
-              type="datetime-local"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
+              type="month"
+              className="input"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
             />
           </div>
 
-          {/* TO */}
-          <div className="flex flex-col text-sm">
-            <label className="text-gray-600 mb-1">a</label>
-            <input
-              className="input w-full sm:w-auto"
-              type="datetime-local"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-            />
-          </div>
-
-          {/* BOTONES */}
           <div className="flex gap-2 mt-1 sm:mt-6">
             <button
               className="btn-outline w-full sm:w-auto"
               onClick={() => mutate()}
             >
               Actualizar
-            </button>
-
-            <button
-              className="btn-ghost w-full sm:w-auto"
-              onClick={() => {
-                const now = new Date();
-                const d = new Date();
-                d.setDate(d.getDate() - 30);
-                setFrom(toISO(d));
-                setTo(toISO(now));
-                setTimeout(() => mutate(), 0);
-              }}
-            >
-              Últimos 30 días
             </button>
           </div>
         </div>
@@ -1212,72 +1182,65 @@ function RevenueSection() {
 
       {data && (
         <>
-          {/* KPIs RESPONSIVE */}
+          {/* KPI PRINCIPAL */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
             <div className="rounded-xl border p-4">
               <div className="text-sm text-gray-600">
-                Total aprobado
+                Ingresos totales
               </div>
               <div className="text-2xl font-semibold">
-                {fmtMoney(data.total)}
+                {fmtMoney(data.totalRevenue)}
               </div>
             </div>
 
             <div className="rounded-xl border p-4">
               <div className="text-sm text-gray-600">
-                # Pagos
+                Ingresos paquetes
               </div>
               <div className="text-2xl font-semibold">
-                {data.count}
+                {fmtMoney(data.packRevenue)}
               </div>
             </div>
 
             <div className="rounded-xl border p-4">
               <div className="text-sm text-gray-600">
-                Ticket promedio
+                Ingresos apps
               </div>
               <div className="text-2xl font-semibold">
-                {fmtMoney(data.average)}
+                {fmtMoney(data.appsRevenue)}
               </div>
             </div>
           </div>
 
-          {/* TABLA RESPONSIVE */}
-          <div className="overflow-x-auto">
-            <table className="min-w-[500px] w-full text-sm border-collapse">
-              <thead className="text-left border-b border-[var(--color-border)]">
-                <tr>
-                  <th>Fecha</th>
-                  <th className="text-right">Total del día</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.daily.map((d) => (
-                  <tr
-                    key={d.date}
-                    className="border-b border-[var(--color-border)]"
-                  >
-                    <td className="py-2 whitespace-nowrap">
-                      {new Date(d.date).toLocaleDateString()}
-                    </td>
-                    <td className="py-2 text-right whitespace-nowrap">
-                      {fmtMoney(d.total)}
-                    </td>
-                  </tr>
-                ))}
+          {/* BREAKDOWN APPS */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+            <div className="rounded-xl border p-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600">
+                  WELLHUB
+                </span>
+                <span className="text-xs px-2 py-1 rounded bg-green-100 text-green-700">
+                  {data.wellhub.count} asistencias
+                </span>
+              </div>
+              <div className="text-xl font-semibold mt-2">
+                {fmtMoney(data.wellhub.revenue)}
+              </div>
+            </div>
 
-                {data.daily.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={2}
-                      className="py-3 text-center text-gray-500"
-                    >
-                      Sin pagos aprobados en el rango
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+            <div className="rounded-xl border p-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-600">
+                  TOTALPASS
+                </span>
+                <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700">
+                  {data.totalpass.count} asistencias
+                </span>
+              </div>
+              <div className="text-xl font-semibold mt-2">
+                {fmtMoney(data.totalpass.revenue)}
+              </div>
+            </div>
           </div>
         </>
       )}

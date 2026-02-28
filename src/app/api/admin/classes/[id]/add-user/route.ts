@@ -64,48 +64,68 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       expiresAt: { gt: new Date() },
     },
     orderBy: {
-      expiresAt: "asc", // usar el que expira antes
+      expiresAt: "asc",
     },
   });
 
+  // 🔹 Si no hay pack, revisar balance total en ledger (corporativo)
+  let corporateBalance = 0;
+
   if (!pack) {
-    return j(400, { error: "NO_CREDITS_AVAILABLE" });
+    const agg = await prisma.tokenLedger.aggregate({
+      where: { userId },
+      _sum: { delta: true },
+    });
+
+    corporateBalance = agg._sum.delta ?? 0;
+
+    if (corporateBalance < 1) {
+      return j(400, { error: "NO_CREDITS_AVAILABLE" });
+    }
   }
 
   // 5️⃣ Transacción
   const booking = await prisma.$transaction(async (tx) => {
-    // 5a) Crear booking
-    const booking = await tx.booking.create({
+    const newBooking = await tx.booking.create({
       data: {
         userId,
         classId,
         quantity: 1,
-        packPurchaseId: pack.id,
+        packPurchaseId: pack ? pack.id : null,
       },
     });
 
-    // 5b) Descontar crédito
-    await tx.packPurchase.update({
-      where: { id: pack.id },
-      data: {
-        classesLeft: {
-          decrement: 1,
+    if (pack) {
+      // 🔹 Consumir pack
+      await tx.packPurchase.update({
+        where: { id: pack.id },
+        data: {
+          classesLeft: { decrement: 1 },
         },
-      },
-    });
+      });
 
-    // 5c) Ledger
-    await tx.tokenLedger.create({
-      data: {
-        userId,
-        bookingId: booking.id,
-        packPurchaseId: pack.id,
-        delta: -1,
-        reason: "BOOKING_DEBIT",
-      },
-    });
+      await tx.tokenLedger.create({
+        data: {
+          userId,
+          bookingId: newBooking.id,
+          packPurchaseId: pack.id,
+          delta: -1,
+          reason: "BOOKING_DEBIT",
+        },
+      });
+    } else {
+      // 🔹 Consumir corporate
+      await tx.tokenLedger.create({
+        data: {
+          userId,
+          bookingId: newBooking.id,
+          delta: -1,
+          reason: "BOOKING_DEBIT",
+        },
+      });
+    }
 
-    return booking;
+    return newBooking;
   });
 
   return NextResponse.json({

@@ -11,46 +11,97 @@ function j(status: number, body: any) {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const fromParam = searchParams.get("from");
-    const toParam = searchParams.get("to");
+    const monthParam = searchParams.get("month"); 
+    // formato esperado: 2026-02
 
-    const to = toParam ? new Date(toParam) : new Date();
-    const from = fromParam ? new Date(fromParam) : new Date(to.getTime() - 30*24*60*60*1000); // últimos 30 días por defecto
+    let from: Date;
+    let to: Date;
 
-    if (isNaN(from.getTime()) || isNaN(to.getTime())) {
-      return j(400, { error: "Parámetros 'from' o 'to' inválidos" });
+    if (monthParam) {
+      const [year, month] = monthParam.split("-").map(Number);
+      from = new Date(Date.UTC(year, month - 1, 1));
+      to = new Date(Date.UTC(year, month, 1));
+    } else {
+      const now = new Date();
+      from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
     }
 
-    // Trae sólo APPROVED en el rango
-    const rows = await prisma.payment.findMany({
+    // ============================
+    // 🟢 INGRESOS PAQUETES
+    // ============================
+
+    const payments = await prisma.payment.findMany({
       where: {
         status: "APPROVED",
         createdAt: { gte: from, lt: to },
       },
-      select: { amount: true, createdAt: true },
-      orderBy: { createdAt: "asc" },
+      select: { amount: true },
     });
 
-    const total = rows.reduce((s, r) => s + (r.amount ?? 0), 0);
-    const count = rows.length;
-    const average = count ? Math.round(total / count) : 0;
+    const packRevenue = payments.reduce(
+      (sum, p) => sum + (p.amount ?? 0),
+      0
+    );
 
-    // Agregación por día (JS) para evitar groupBy por timestamp
-    const dayKey = (d: Date) => {
-      const z = new Date(d);
-      z.setHours(0,0,0,0);
-      return z.toISOString();
-    };
-    const byDay = new Map<string, number>();
-    for (const r of rows) {
-      const k = dayKey(r.createdAt);
-      byDay.set(k, (byDay.get(k) ?? 0) + (r.amount ?? 0));
+    // ============================
+    // 🔵 INGRESOS APPS
+    // ============================
+
+    const attendedBookings = await prisma.booking.findMany({
+      where: {
+        attended: true,
+        status: "ACTIVE",
+        class: {
+          date: { gte: from, lt: to },
+        },
+        user: {
+          affiliation: { in: ["WELLHUB", "TOTALPASS"] },
+        },
+      },
+      select: {
+        user: {
+          select: { affiliation: true },
+        },
+      },
+    });
+
+    let wellhubCount = 0;
+    let totalpassCount = 0;
+
+    for (const b of attendedBookings) {
+      if (b.user?.affiliation === "WELLHUB") {
+        wellhubCount++;
+      } else if (b.user?.affiliation === "TOTALPASS") {
+        totalpassCount++;
+      }
     }
-    const daily = Array.from(byDay.entries())
-      .sort((a,b)=> new Date(a[0]).getTime() - new Date(b[0]).getTime())
-      .map(([date, total]) => ({ date, total }));
 
-    return j(200, { total, count, average, daily });
+    const wellhubRevenue = wellhubCount * 160;
+    const totalpassRevenue = totalpassCount * 140;
+    const appsRevenue = wellhubRevenue + totalpassRevenue;
+
+    // ============================
+    // 🔥 TOTAL GENERAL
+    // ============================
+
+    const totalRevenue = packRevenue + appsRevenue;
+
+    return j(200, {
+      month: monthParam,
+      packRevenue,
+      appsRevenue,
+      wellhub: {
+        count: wellhubCount,
+        revenue: wellhubRevenue,
+      },
+      totalpass: {
+        count: totalpassCount,
+        revenue: totalpassRevenue,
+      },
+      totalRevenue,
+    });
+
   } catch (err: any) {
     console.error("revenue error", err);
     return j(500, { error: "INTERNAL_ERROR" });
