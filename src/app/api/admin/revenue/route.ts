@@ -11,16 +11,22 @@ function j(status: number, body: any) {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const monthParam = searchParams.get("month"); 
-    // formato esperado: 2026-02
+    const monthParam = searchParams.get("month"); // formato: 2026-02
 
     let from: Date;
     let to: Date;
 
     if (monthParam) {
-      const [year, month] = monthParam.split("-").map(Number);
-      from = new Date(Date.UTC(year, month - 1, 1));
-      to = new Date(Date.UTC(year, month, 1));
+      const [yearStr, monthStr] = monthParam.split("-");
+      const year = Number(yearStr);
+      const month = Number(monthStr);
+
+      if (!year || !month || month < 1 || month > 12) {
+        return j(400, { error: "INVALID_MONTH_FORMAT" });
+      }
+
+      from = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
+      to = new Date(Date.UTC(year, month, 1, 0, 0, 0));
     } else {
       const now = new Date();
       from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -31,51 +37,43 @@ export async function GET(req: Request) {
     // 🟢 INGRESOS PAQUETES
     // ============================
 
-    const payments = await prisma.payment.findMany({
+    const packAgg = await prisma.payment.aggregate({
       where: {
         status: "APPROVED",
         createdAt: { gte: from, lt: to },
       },
-      select: { amount: true },
+      _sum: { amount: true },
     });
 
-    const packRevenue = payments.reduce(
-      (sum, p) => sum + (p.amount ?? 0),
-      0
-    );
+    const packRevenue = packAgg._sum.amount ?? 0;
 
     // ============================
-    // 🔵 INGRESOS APPS
+    // 🔵 INGRESOS WELLHUB
     // ============================
 
-    const attendedBookings = await prisma.booking.findMany({
+    const wellhubCount = await prisma.booking.count({
       where: {
         attended: true,
-        status: "ACTIVE",
         class: {
           date: { gte: from, lt: to },
         },
         user: {
-          affiliation: { in: ["WELLHUB", "TOTALPASS"] },
-        },
-      },
-      select: {
-        user: {
-          select: { affiliation: true },
+          affiliation: "WELLHUB",
         },
       },
     });
 
-    let wellhubCount = 0;
-    let totalpassCount = 0;
-
-    for (const b of attendedBookings) {
-      if (b.user?.affiliation === "WELLHUB") {
-        wellhubCount++;
-      } else if (b.user?.affiliation === "TOTALPASS") {
-        totalpassCount++;
-      }
-    }
+    const totalpassCount = await prisma.booking.count({
+      where: {
+        attended: true,
+        class: {
+          date: { gte: from, lt: to },
+        },
+        user: {
+          affiliation: "TOTALPASS",
+        },
+      },
+    });
 
     const wellhubRevenue = wellhubCount * 160;
     const totalpassRevenue = totalpassCount * 140;
