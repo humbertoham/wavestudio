@@ -108,159 +108,208 @@ export async function POST(req: Request) {
     return j(200, { ok: true });
   }
 
-  // === 5) Consultar el pago en MP (estado más reciente) ===
-  let mp: any;
-  try {
-    mp = await new MPPayment(client).get({ id: paymentId });
-  } catch (e) {
-    await prisma.webhookLog.update({
-      where: { id: log.id },
-      data: { processedOk: false, error: "MP_PAYMENT_GET_FAILED" },
-    });
-    return j(200, { ok: true });
+ // === 5) Consultar el pago en MP (estado más reciente) ===
+let mp: any;
+
+// pequeño retry interno por si MP aún no tiene listo el payment
+async function getPaymentWithRetry(id: string, attempts = 3) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await new MPPayment(client).get({ id });
+    } catch (e) {
+      if (i === attempts - 1) throw e;
+      await new Promise(r => setTimeout(r, 1000)); // esperar 1s
+    }
   }
+}
 
-  const mpStatus = mp?.status;
-  const mpStatusDetail = mp?.status_detail;
-  const mpExtRef = mp?.external_reference ?? payload?.data?.external_reference;
-  const mpPrefId = mp?.preference_id ?? payload?.data?.preference_id ?? prefIdFromMO;
-  const mpCurrency = mp?.currency_id;
-  const mpAmount = typeof mp?.transaction_amount === "number" ? mp.transaction_amount : Number(mp?.transaction_amount);
-  const mpPayerEmail = mp?.payer?.email;
-
-  const [extUserId, extPackId, hintedPaymentId] = (mpExtRef ?? "").split("|");
-
-  // === 6) Buscar Payment local por varias llaves ===
-  let local = await prisma.payment.findFirst({
-    where: {
-      OR: [
-        { mpPaymentId: paymentId },
-        mpPrefId ? { mpPreferenceId: mpPrefId } : undefined,
-        mpExtRef ? { mpExternalRef: mpExtRef } : undefined,
-      ].filter(Boolean) as any,
-    },
-    include: { checkoutLink: true, packPurchase: true },
+try {
+  mp = await getPaymentWithRetry(paymentId);
+} catch (e) {
+  await prisma.webhookLog.update({
+    where: { id: log.id },
+    data: { processedOk: false, error: "MP_PAYMENT_GET_FAILED_RETRY" },
   });
 
-  if (!local && hintedPaymentId) {
-    local = await prisma.payment.findUnique({
-      where: { id: hintedPaymentId },
-      include: { checkoutLink: true, packPurchase: true },
-    });
-  }
+  // IMPORTANTE: devolver 500 para que MP reintente
+  return new Response("Retry", { status: 500 });
+}
 
-  if (!local) {
-    await prisma.webhookLog.update({
+const mpStatus = mp?.status;
+const mpExtRef = mp?.external_reference ?? payload?.data?.external_reference;
+const mpPrefId = mp?.preference_id ?? payload?.data?.preference_id ?? prefIdFromMO;
+const mpAmount = Number(mp?.transaction_amount);
+const mpPayerEmail = mp?.payer?.email;
+
+const [extUserId, extPackId, hintedPaymentId] = (mpExtRef ?? "").split("|");
+
+// === 6) Buscar Payment local ===
+let local = await prisma.payment.findFirst({
+  where: {
+    OR: [
+      { mpPaymentId: paymentId },
+      mpPrefId ? { mpPreferenceId: mpPrefId } : undefined,
+      mpExtRef ? { mpExternalRef: mpExtRef } : undefined,
+    ].filter(Boolean) as any,
+  },
+  include: { checkoutLink: true, packPurchase: true },
+});
+
+if (!local && hintedPaymentId) {
+  local = await prisma.payment.findUnique({
+    where: { id: hintedPaymentId },
+    include: { checkoutLink: true, packPurchase: true },
+  });
+}
+
+if (!local) {
+  await prisma.webhookLog.update({
+    where: { id: log.id },
+    data: { processedOk: false, error: "LOCAL_PAYMENT_NOT_FOUND_RETRY" },
+  });
+
+  return new Response("Retry", { status: 500 });
+}
+
+// === 7) Transacción segura ===
+try {
+  await prisma.$transaction(async (tx) => {
+
+  const newStatus = mapStatus(mpStatus);
+
+  const updated = await tx.payment.update({
+    where: { id: local!.id },
+    data: {
+      status: newStatus as any,
+      mpPaymentId: paymentId,
+      mpPreferenceId: mpPrefId ?? local!.mpPreferenceId,
+      mpExternalRef: mpExtRef ?? local!.mpExternalRef,
+      mpPayerEmail: mpPayerEmail ?? local!.mpPayerEmail,
+      mpRaw: mp,
+    },
+  });
+
+  // 🔥 PASO 1 — recargar checkoutLink fresh dentro de la TX
+  const link = await tx.checkoutLink.findFirst({
+    where: { paymentId: updated.id },
+    select: {
+      id: true,
+      userId: true,
+      packId: true,
+      status: true,
+    },
+  });
+
+    // Solo acreditamos si aprobado
+    if (newStatus !== "APPROVED") {
+      await tx.webhookLog.update({
+        where: { id: log.id },
+        data: { processedOk: true, error: `NO_CREDIT_STATUS_${newStatus}` },
+      });
+      return;
+    }
+
+    // IDPOTENCIA REAL por paymentId
+    const existing = await tx.packPurchase.findUnique({
+      where: { paymentId: updated.id },
+    });
+
+    if (existing) {
+      await tx.webhookLog.update({
+        where: { id: log.id },
+        data: { processedOk: true, error: "ALREADY_CREDITED" },
+      });
+      return;
+    }
+
+    // Resolver usuario
+    let beneficiaryUserId: string | null =
+      (extUserId && extUserId !== "anon" ? extUserId : null) ??
+      link?.userId ??
+      null;
+
+    if (!beneficiaryUserId && mpPayerEmail) {
+      const email = mpPayerEmail.trim().toLowerCase();
+      const u = await tx.user.upsert({
+        where: { email },
+        update: {},
+        create: { name: email.split("@")[0], email, passwordHash: "TEMP-AUTO" },
+        select: { id: true },
+      });
+      beneficiaryUserId = u.id;
+    }
+
+    if (!beneficiaryUserId) {
+      throw new Error("NO_BENEFICIARY_USER");
+    }
+
+    // Fallback robusto para packId
+    let packId =
+      link?.packId ??
+      extPackId ??
+      null;
+
+    if (!packId) {
+  const linkFallback = await tx.checkoutLink.findFirst({
+    where: { paymentId: updated.id },
+    select: { packId: true },
+  });
+  packId = linkFallback?.packId ?? null;
+}
+
+    if (!packId) {
+      throw new Error("PACK_ID_NOT_RESOLVED");
+    }
+
+    const pack = await tx.pack.findUnique({
+      where: { id: packId },
+    });
+
+    if (!pack || !pack.isActive) {
+  throw new Error("PACK_NOT_ACTIVE_OR_NOT_FOUND");
+}
+
+
+    // Crear compra
+    const purchase = await tx.packPurchase.create({
+      data: {
+        userId: beneficiaryUserId,
+        packId: pack.id,
+        classesLeft: pack.classes,
+        expiresAt: new Date(Date.now() + pack.validityDays * 86400000),
+        paymentId: updated.id,
+      },
+    });
+
+    await tx.tokenLedger.create({
+      data: {
+        userId: beneficiaryUserId,
+        packPurchaseId: purchase.id,
+        delta: pack.classes,
+        reason: "PURCHASE_CREDIT",
+      },
+    });
+
+    if (link && link.status !== "COMPLETED") {
+      await tx.checkoutLink.update({
+        where: { id: link.id },
+        data: { status: "COMPLETED", completedAt: new Date() },
+      });
+    }
+
+    await tx.webhookLog.update({
       where: { id: log.id },
-      data: { processedOk: true, error: "LOCAL_PAYMENT_NOT_FOUND" },
+      data: { processedOk: true, error: `CREDIT_OK_user=${beneficiaryUserId}_pack=${packId}` },
     });
-    return j(200, { ok: true });
-  }
+  });
+} catch (e: any) {
+  await prisma.webhookLog.update({
+    where: { id: log.id },
+    data: { processedOk: false, error: `TX_ERROR:${e.message}` },
+  });
 
-  // === 7) Procesar siempre el estado más reciente (idempotente) ===
-  try {
-    await prisma.$transaction(async (tx) => {
-      const newStatus = mapStatus(mpStatus);
-
-      const updated = await tx.payment.update({
-        where: { id: local!.id },
-        data: {
-          status: newStatus as any,
-          mpPaymentId: paymentId,
-          mpPreferenceId: mpPrefId ?? local!.mpPreferenceId,
-          mpExternalRef: mpExtRef ?? local!.mpExternalRef,
-          mpPayerEmail: mpPayerEmail ?? local!.mpPayerEmail,
-          mpRaw: mp,
-        },
-        include: { checkoutLink: true, packPurchase: true },
-      });
-
-      // Si no está aprobado, solo marcamos y salimos
-      if (newStatus !== "APPROVED") {
-        if (["REJECTED", "CANCELED", "REFUNDED"].includes(newStatus) && updated.checkoutLink && updated.checkoutLink.status !== "COMPLETED") {
-          await tx.checkoutLink.update({ where: { id: updated.checkoutLink.id }, data: { status: "CANCELED" } });
-        }
-        await tx.webhookLog.update({ where: { id: log.id }, data: { processedOk: true, error: `NO_CREDIT_STATUS_${newStatus}` } });
-        return;
-      }
-
-      // Si ya se acreditó: idempotencia
-      if (updated.packPurchase) {
-        if (updated.checkoutLink && updated.checkoutLink.status !== "COMPLETED") {
-          await tx.checkoutLink.update({ where: { id: updated.checkoutLink.id }, data: { status: "COMPLETED", completedAt: new Date() } });
-        }
-        await tx.webhookLog.update({ where: { id: log.id }, data: { processedOk: true, error: "ALREADY_CREDITED" } });
-        return;
-      }
-
-      // Resolver beneficiario (extUserId | checkoutLink.userId | mp.payer.email)
-      let beneficiaryUserId: string | null =
-        (extUserId && extUserId !== "anon" ? extUserId : null) ??
-        updated.checkoutLink?.userId ?? null;
-
-      if (!beneficiaryUserId && mpPayerEmail) {
-        const email = String(mpPayerEmail).trim().toLowerCase();
-        const u = await tx.user.upsert({
-          where: { email },
-          update: {},
-          create: { name: email.split("@")[0], email, passwordHash: "TEMP-AUTO" },
-          select: { id: true },
-        });
-        beneficiaryUserId = u.id;
-        await tx.webhookLog.update({ where: { id: log.id }, data: { error: "AUTO_CREATED_USER_FOR_PAYER_EMAIL" } });
-      }
-
-      if (!beneficiaryUserId) {
-        await tx.webhookLog.update({ where: { id: log.id }, data: { processedOk: true, error: "NO_BENEFICIARY_USER" } });
-        return;
-      }
-
-      // Determinar pack
-      const packId = updated.checkoutLink?.packId ?? (extPackId || null);
-      if (!packId) throw new Error("CHECKOUT_LINK_WITHOUT_PACK");
-
-      const pack = await tx.pack.findUnique({ where: { id: packId } });
-      if (!pack) throw new Error("PACK_NOT_FOUND");
-
-      // En modo pruebas no bloqueamos por mismatches de monto; solo anotamos
-      if (typeof mpAmount === "number" && Number.isFinite(mpAmount) && mpAmount !== pack.price) {
-        await tx.webhookLog.update({ where: { id: log.id }, data: { error: `AMOUNT_MISMATCH mp=${mpAmount} pack=${pack.price}` } });
-      }
-      if (mpCurrency && mpCurrency !== "MXN") {
-        await tx.webhookLog.update({ where: { id: log.id }, data: { error: `CURRENCY_MISMATCH mp=${mpCurrency}` } });
-      }
-
-      // Crear PackPurchase + TokenLedger
-      const purchase = await tx.packPurchase.create({
-        data: {
-          userId: beneficiaryUserId,
-          packId: pack.id,
-          classesLeft: pack.classes,
-          expiresAt: new Date(Date.now() + pack.validityDays * 24 * 60 * 60 * 1000),
-          paymentId: updated.id,
-        },
-      });
-
-      await tx.tokenLedger.create({
-        data: { userId: beneficiaryUserId, packPurchaseId: purchase.id, delta: pack.classes, reason: "PURCHASE_CREDIT" },
-      });
-
-      if (updated.checkoutLink) {
-        await tx.checkoutLink.update({
-          where: { id: updated.checkoutLink.id },
-          data: { status: "COMPLETED", completedAt: new Date() },
-        });
-      }
-
-      await tx.webhookLog.update({ where: { id: log.id }, data: { processedOk: true, error: "CREDIT_OK" } });
-    });
-  } catch (e: any) {
-    await prisma.webhookLog.update({
-      where: { id: log.id },
-      data: { processedOk: false, error: `TX_ERROR:${String(e?.message ?? e)}` },
-    });
-    return j(200, { ok: true });
-  }
+  return new Response("Retry TX", { status: 500 });
+}
 
   // If MP later refunds, revert (same behavior as your previous logic)
   if ((mpStatus || "").toLowerCase() === "refunded") {
