@@ -34,28 +34,22 @@ export async function GET(req: Request) {
   const to = searchParams.get("to");
   const focus = searchParams.get("focus") ?? undefined;
 
-  const now = new Date();
+let gte = from ? new Date(from) : new Date();
+if (isNaN(gte.getTime())) gte = new Date();
 
-  let gte = from ? new Date(from) : now;
-  if (isNaN(gte.getTime())) gte = now;
-  if (gte < now) gte = now;
+let lt: Date | undefined = undefined;
+if (to) {
+  const toDate = new Date(to);
+  if (!isNaN(toDate.getTime())) lt = toDate;
+}
 
-  let lt: Date | undefined = undefined;
-  if (to) {
-    const toDate = new Date(to);
-    if (!isNaN(toDate.getTime())) lt = toDate;
-  }
 
-  if (lt && lt <= now) {
-    return NextResponse.json([], {
-      headers: { "Cache-Control": "no-store" },
-    });
-  }
-
-  const where: any = {
-    date: { gte, lt },
-  };
-
+ const where: any = {
+  date: {
+    gte,
+    ...(lt ? { lt } : {}),
+  },
+};
   if (focus) where.focus = focus;
 
   const classes = await prisma.class.findMany({

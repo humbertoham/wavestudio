@@ -524,9 +524,9 @@ function LateCancelModal({
         </p>
 
         <p className="mt-4 text-sm text-red-600">
-          Esta cancelación es con menos de 4 horas de anticipación.
+          Faltan menos de 4 horas.
           <br />
-          No se te regresarán los créditos.
+          Si cancelas tu clase no se te regresarán los créditos por nuestras políticas de cancelación.
         </p>
 
         <div className="mt-6 flex justify-end gap-3">

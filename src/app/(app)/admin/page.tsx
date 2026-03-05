@@ -1219,7 +1219,7 @@ function RevenueSection() {
                 <span className="text-sm text-gray-600">
                   WELLHUB
                 </span>
-                <span className="text-xs px-2 py-1 rounded bg-green-100 text-green-700">
+                <span className="text-xs px-2 py-1 rounded bg-pink-100 text-pink-700">
                   {data.wellhub.count} asistencias
                 </span>
               </div>
@@ -1233,7 +1233,7 @@ function RevenueSection() {
                 <span className="text-sm text-gray-600">
                   TOTALPASS
                 </span>
-                <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700">
+                <span className="text-xs px-2 py-1 rounded bg-green-100 text-green-700">
                   {data.totalpass.count} asistencias
                 </span>
               </div>

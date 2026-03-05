@@ -633,13 +633,13 @@ export default function ClassAdminPage() {
   )}
 
   {a.affiliation === "WELLHUB" && (
-    <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">
+    <span className="text-xs px-2 py-0.5 rounded bg-pink-100 text-pink-700">
       WELLHUB
     </span>
   )}
 
   {a.affiliation === "TOTALPASS" && (
-    <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-700">
+    <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">
       TOTALPASS
     </span>
   )}

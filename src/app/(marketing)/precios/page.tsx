@@ -236,6 +236,12 @@ export default function PricingPage() {
           <p className="mt-3 text-muted-foreground">
             Elige el plan que mejor se adapte a tu ritmo.
           </p>
+          <p className="mt-3 text-muted-foreground">
+            ✨ 10% OFF pagando en efectivo o transferencia.
+          </p>
+          <p className="mt-3 text-muted-foreground">
+           📩 Escríbenos por DM.
+          </p>
         </motion.div>
 
         <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 items-stretch">
