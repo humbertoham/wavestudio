@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdmin } from "../../_utils";
+import { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
 
-// App Router params async
 type Ctx = { params: Promise<{ id: string }> };
 
 function j(status: number, body: any) {
@@ -28,57 +28,73 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     return j(404, { error: "BOOKING_NOT_FOUND" });
   }
 
-  // 2️⃣ Idempotencia: si ya está cancelado, no repetir
+  // 2️⃣ Idempotencia: si ya está cancelado
   if (booking.status === "CANCELED") {
     return j(200, { ok: true, alreadyCanceled: true });
   }
 
-  // 3️⃣ Transacción completa
-  await prisma.$transaction(async (tx) => {
-    // 3a) Cancelar booking
-    await tx.booking.update({
-      where: { id: booking.id },
-      data: {
-        status: "CANCELED",
-        canceledAt: new Date(),
-      },
-    });
+  await prisma.$transaction(
+    async (tx) => {
 
-    // 3b) Buscar débito original en ledger
-    const debit = await tx.tokenLedger.findFirst({
-      where: {
-        bookingId: booking.id,
-        reason: "BOOKING_DEBIT",
-      },
-      orderBy: { createdAt: "desc" },
-    });
-
-    // 3c) Si hubo débito, devolver tokens
-    if (booking.userId && debit) {
-      // devolver tokens al pack si existe
-      if (debit.packPurchaseId) {
-        await tx.packPurchase.update({
-          where: { id: debit.packPurchaseId },
-          data: {
-            classesLeft: {
-              increment: booking.quantity ?? 1,
-            },
-          },
-        });
-      }
-
-      // ledger de reembolso
-      await tx.tokenLedger.create({
-        data: {
-          userId: booking.userId,
+      // 🔒 evitar doble refund
+      const alreadyRefunded = await tx.tokenLedger.findFirst({
+        where: {
           bookingId: booking.id,
-          packPurchaseId: debit.packPurchaseId,
-          delta: booking.quantity ?? 1,
           reason: "CANCEL_REFUND",
         },
       });
+
+      // 3️⃣ Cancelar booking
+      await tx.booking.update({
+        where: { id: booking.id },
+        data: {
+          status: "CANCELED",
+          canceledAt: new Date(),
+        },
+      });
+
+      if (alreadyRefunded) return;
+
+      // 4️⃣ Buscar TODOS los debits asociados
+      const debits = await tx.tokenLedger.findMany({
+        where: {
+          bookingId: booking.id,
+          reason: "BOOKING_DEBIT",
+        },
+      });
+
+      for (const d of debits) {
+
+        const refundAmount = Math.abs(d.delta);
+
+        // devolver tokens al pack si existe
+        if (d.packPurchaseId) {
+          await tx.packPurchase.update({
+            where: { id: d.packPurchaseId },
+            data: {
+              classesLeft: {
+                increment: refundAmount,
+              },
+            },
+          });
+        }
+
+        // ledger refund
+        await tx.tokenLedger.create({
+          data: {
+            userId: booking.userId!,
+            bookingId: booking.id,
+            packPurchaseId: d.packPurchaseId,
+            delta: refundAmount,
+            reason: "CANCEL_REFUND",
+          },
+        });
+      }
+    },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     }
-  });
+  );
 
   return j(200, {
     ok: true,

@@ -62,20 +62,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     },
   });
 
-  // ✅ 3️⃣ SALDO REAL DESDE LEDGER (FUENTE DE VERDAD)
-  const tokenAgg = await prisma.tokenLedger.aggregate({
-  where: {
-    userId: id,
-    OR: [
-      { packPurchaseId: null }, // ADMIN_ADJUST
-      { packPurchase: { expiresAt: { gt: now } } }, // paquetes vigentes
-    ],
-  },
-  _sum: { delta: true },
-});
-
-const tokenBalance = Math.max(0, tokenAgg._sum.delta ?? 0);
-
+  // ✅ 3️⃣ SALDO REAL DESDE PACKS (TOKENS NO EXPIRADOS)
+  const tokenBalance = purchases
+    .filter((p) => p.expiresAt > now && p.classesLeft > 0)
+    .reduce((sum, p) => sum + p.classesLeft, 0);
 
   // 4️⃣ Reservas
   const bookings = await prisma.booking.findMany({
@@ -109,7 +99,7 @@ const tokenBalance = Math.max(0, tokenAgg._sum.delta ?? 0);
 
     user,
 
-    // 🔥 ESTE ES EL SALDO QUE DEBE USAR TODO EL SISTEMA
+    // 🔥 saldo correcto
     tokenBalance,
 
     purchases: purchases.map((p) => ({

@@ -40,7 +40,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     });
   }
 
-  // 3️⃣ Verificar que el usuario exista
+  // 3️⃣ Verificar usuario
   const userExists = await prisma.user.findUnique({
     where: { id: userId },
     select: { id: true },
@@ -53,13 +53,24 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     });
   }
 
-  // 4️⃣ Calcular saldo actual (ledger-based)
-  const agg = await prisma.tokenLedger.aggregate({
-    where: { userId },
-    _sum: { delta: true },
+  const now = new Date();
+
+  // 4️⃣ Obtener packs vigentes
+  const packs = await prisma.packPurchase.findMany({
+    where: {
+      userId,
+      expiresAt: { gt: now },
+      classesLeft: { gt: 0 },
+    },
+    orderBy: { expiresAt: "asc" },
+    select: { id: true, classesLeft: true },
   });
 
-  const currentBalance = agg._sum.delta ?? 0;
+  const currentBalance = packs.reduce(
+    (sum, p) => sum + p.classesLeft,
+    0
+  );
+
   const nextBalance = currentBalance + delta;
 
   // 5️⃣ Proteger contra saldo negativo
@@ -71,16 +82,64 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     });
   }
 
-  // 6️⃣ Registrar ajuste en el ledger
-  await prisma.tokenLedger.create({
-    data: {
-      userId,
-      delta,
-      reason, // ADMIN_ADJUST
-    },
+  // 6️⃣ Transacción
+  await prisma.$transaction(async (tx) => {
+
+    // ➕ ADMIN AGREGA TOKENS
+    if (delta > 0) {
+
+      await tx.packPurchase.create({
+        data: {
+          userId,
+          packId: "ADMIN_ADJUST", // etiqueta lógica
+          classesLeft: delta,
+          expiresAt: new Date(
+            Date.now() + 10 * 365 * 24 * 60 * 60 * 1000 // 10 años
+          ),
+        },
+      });
+
+      await tx.tokenLedger.create({
+        data: {
+          userId,
+          delta,
+          reason,
+        },
+      });
+
+      return;
+    }
+
+    // ➖ ADMIN QUITA TOKENS
+    let remaining = Math.abs(delta);
+
+    for (const pack of packs) {
+      if (remaining <= 0) break;
+
+      const use = Math.min(pack.classesLeft, remaining);
+
+      await tx.packPurchase.update({
+        where: { id: pack.id },
+        data: {
+          classesLeft: {
+            decrement: use,
+          },
+        },
+      });
+
+      await tx.tokenLedger.create({
+        data: {
+          userId,
+          packPurchaseId: pack.id,
+          delta: -use,
+          reason,
+        },
+      });
+
+      remaining -= use;
+    }
   });
 
-  // 7️⃣ Respuesta
   return json(200, {
     ok: true,
     previousBalance: currentBalance,

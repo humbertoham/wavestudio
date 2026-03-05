@@ -81,26 +81,46 @@ export async function PATCH(
         });
 
         // 2️⃣ Si NO es cancelación tardía → devolver tokens
-        if (!isLateCancel) {
-          await tx.tokenLedger.create({
-            data: {
-              userId: booking.userId!,
-              packPurchaseId: booking.packPurchase?.id ?? null,
-              bookingId: booking.id,
-              delta: refundTokens,
-              reason: "CANCEL_REFUND",
-            },
-          });
+  if (!isLateCancel) {
 
-          if (booking.packPurchase?.id) {
-            await tx.packPurchase.update({
-              where: { id: booking.packPurchase.id },
-              data: {
-                classesLeft: { increment: refundTokens },
-              },
-            });
-          }
-        }
+  const alreadyRefunded = await tx.tokenLedger.findFirst({
+    where: {
+      bookingId: booking.id,
+      reason: "CANCEL_REFUND",
+    },
+  });
+
+  if (!alreadyRefunded) {
+
+    const debits = await tx.tokenLedger.findMany({
+      where: {
+        bookingId: booking.id,
+        reason: "BOOKING_DEBIT",
+      },
+    });
+
+    for (const d of debits) {
+      if (d.packPurchaseId) {
+        await tx.packPurchase.update({
+          where: { id: d.packPurchaseId },
+          data: {
+            classesLeft: { increment: Math.abs(d.delta) },
+          },
+        });
+      }
+
+      await tx.tokenLedger.create({
+        data: {
+          userId: booking.userId!,
+          packPurchaseId: d.packPurchaseId,
+          bookingId: booking.id,
+          delta: Math.abs(d.delta),
+          reason: "CANCEL_REFUND",
+        },
+      });
+    }
+  }
+}
 
         // 3️⃣ Liberar cupos (promover waitlist si existe)
         for (let i = 0; i < seatsReleased; i++) {

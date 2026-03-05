@@ -13,12 +13,18 @@ function j(status: number, body: any) {
 
 type Body = { classId?: string; quantity?: number };
 
+// ✅ SALDO REAL: sumar packs vigentes (classesLeft)
 async function getUserTokenBalance(userId: string) {
-  const agg = await prisma.tokenLedger.aggregate({
-    where: { userId },
-    _sum: { delta: true },
+  const now = new Date();
+  const agg = await prisma.packPurchase.aggregate({
+    where: {
+      userId,
+      expiresAt: { gt: now },
+      classesLeft: { gt: 0 },
+    },
+    _sum: { classesLeft: true },
   });
-  return agg._sum.delta ?? 0;
+  return agg._sum.classesLeft ?? 0;
 }
 
 async function getBookedSpots(classId: string) {
@@ -44,25 +50,21 @@ export async function POST(req: Request) {
       select: { affiliation: true },
     });
 
-    if (!user)
-      return j(404, { error: "Usuario no encontrado." });
+    if (!user) return j(404, { error: "Usuario no encontrado." });
 
     const isCorporate =
-      user.affiliation === "WELLHUB" ||
-      user.affiliation === "TOTALPASS";
+      user.affiliation === "WELLHUB" || user.affiliation === "TOTALPASS";
 
     const body = (await req.json().catch(() => ({}))) as Body;
     const classId = String(body.classId || "").trim();
 
-    if (!classId)
-      return j(400, { error: "Falta seleccionar la clase." });
+    if (!classId) return j(400, { error: "Falta seleccionar la clase." });
 
     const quantity = Number.isFinite(body.quantity)
       ? Math.max(1, Math.floor(body.quantity!))
       : 1;
 
-    if (quantity < 1)
-      return j(400, { error: "Cantidad de lugares inválida." });
+    if (quantity < 1) return j(400, { error: "Cantidad de lugares inválida." });
 
     // 🔒 BLOQUEO: corporate solo 1 lugar
     if (isCorporate && quantity > 1) {
@@ -101,11 +103,9 @@ export async function POST(req: Request) {
       },
     });
 
-    if (!klass)
-      return j(404, { error: "La clase no existe o fue eliminada." });
+    if (!klass) return j(404, { error: "La clase no existe o fue eliminada." });
 
-    if (klass.isCanceled)
-      return j(409, { error: "Esta clase fue cancelada." });
+    if (klass.isCanceled) return j(409, { error: "Esta clase fue cancelada." });
 
     if (klass.date.getTime() <= Date.now())
       return j(409, {
@@ -115,7 +115,7 @@ export async function POST(req: Request) {
     const perSeatCost = Math.max(1, klass.creditCost ?? 1);
     const neededTokens = perSeatCost * quantity;
 
-    // 2️⃣ Validaciones rápidas
+    // 2️⃣ Validaciones rápidas (fuera de TX)
     const [alreadyBooked, tokenBalance] = await Promise.all([
       getBookedSpots(classId),
       getUserTokenBalance(auth.sub),
@@ -142,6 +142,8 @@ export async function POST(req: Request) {
     // 3️⃣ Transacción blindada
     const result = await prisma.$transaction(
       async (tx) => {
+        const now = new Date();
+
         // 🔒 Revalidación corporate dentro de tx
         if (isCorporate) {
           const existingInside = await tx.booking.findFirst({
@@ -194,19 +196,27 @@ export async function POST(req: Request) {
             available: spotsLeft,
           });
 
-        const againTokens = await tx.tokenLedger.aggregate({
-          where: { userId: auth.sub },
-          _sum: { delta: true },
+        const totalCost = quantity * perSeatCost;
+
+        // ✅ Obtener packs vigentes (ordenados por expiración)
+        const packs = await tx.packPurchase.findMany({
+          where: {
+            userId: auth.sub,
+            expiresAt: { gt: now },
+            classesLeft: { gt: 0 },
+          },
+          orderBy: { expiresAt: "asc" },
+          select: { id: true, classesLeft: true },
         });
 
-        const currTokens = againTokens._sum.delta ?? 0;
-        const totalCost = quantity * perSeatCost;
+        const currTokens = packs.reduce((sum, p) => sum + p.classesLeft, 0);
 
         if (currTokens < totalCost)
           throw Object.assign(new Error(), {
             code: "INSUFFICIENT_TOKENS",
           });
 
+        // Crear booking
         const booking = await tx.booking.create({
           data: {
             userId: auth.sub,
@@ -217,14 +227,40 @@ export async function POST(req: Request) {
           select: { id: true },
         });
 
-        await tx.tokenLedger.create({
-          data: {
-            userId: auth.sub,
-            delta: -totalCost,
-            reason: TokenReason.BOOKING_DEBIT,
-            bookingId: booking.id,
-          },
-        });
+        // ✅ Debitar packs (consume primero el que vence antes)
+        let remaining = totalCost;
+
+        for (const pack of packs) {
+          if (remaining <= 0) break;
+
+          const use = Math.min(pack.classesLeft, remaining);
+
+          // Decrementar saldo real
+          await tx.packPurchase.update({
+            where: { id: pack.id },
+            data: { classesLeft: { decrement: use } },
+          });
+
+          // Ledger por pack (historial)
+          await tx.tokenLedger.create({
+            data: {
+              userId: auth.sub,
+              packPurchaseId: pack.id,
+              delta: -use,
+              reason: TokenReason.BOOKING_DEBIT,
+              bookingId: booking.id,
+            },
+          });
+
+          remaining -= use;
+        }
+
+        // Seguridad extra (no debería pasar)
+        if (remaining !== 0) {
+          throw Object.assign(new Error("DEBIT_MISMATCH"), {
+            code: "INSUFFICIENT_TOKENS",
+          });
+        }
 
         return { bookingId: booking.id };
       },
@@ -248,14 +284,12 @@ export async function POST(req: Request) {
 
     if (err?.code === "INSUFFICIENT_TOKENS")
       return j(402, {
-        error:
-          "No tienes créditos suficientes para completar esta reserva.",
+        error: "No tienes créditos suficientes para completar esta reserva.",
       });
 
     if (err?.code === "CLASS_ALREADY_STARTED")
       return j(409, {
-        error:
-          "La clase ya está en curso y no puede ser reservada.",
+        error: "La clase ya está en curso y no puede ser reservada.",
       });
 
     if (err?.code === "CLASS_NOT_BOOKABLE")
@@ -266,8 +300,7 @@ export async function POST(req: Request) {
     console.error("POST /api/bookings error:", err);
 
     return j(500, {
-      error:
-        "Ocurrió un error al procesar tu reserva. Intenta nuevamente.",
+      error: "Ocurrió un error al procesar tu reserva. Intenta nuevamente.",
     });
   }
 }

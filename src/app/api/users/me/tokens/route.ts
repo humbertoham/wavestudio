@@ -7,7 +7,6 @@ export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   try {
-    // Intentar sesión real o fallback
     const auth = await getAuthOrDevFallback(req);
     const userId = auth?.sub || (await getUserIdFromRequest(req));
 
@@ -23,7 +22,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 🔎 Traer afiliación del usuario
+    // 🔎 afiliación
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { affiliation: true },
@@ -40,21 +39,19 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // ✅ LOGUEADO
     const now = new Date();
 
-    const agg = await prisma.tokenLedger.aggregate({
+    // ✅ SALDO REAL DESDE PACKS
+    const packs = await prisma.packPurchase.findMany({
       where: {
         userId,
-        OR: [
-          { packPurchaseId: null }, // ADMIN_ADJUST
-          { packPurchase: { expiresAt: { gt: now } } }, // paquetes vigentes
-        ],
+        expiresAt: { gt: now },
+        classesLeft: { gt: 0 },
       },
-      _sum: { delta: true },
+      select: { classesLeft: true },
     });
 
-    const tokens = Math.max(0, agg._sum.delta ?? 0);
+    const tokens = packs.reduce((sum, p) => sum + p.classesLeft, 0);
 
     return NextResponse.json(
       {
