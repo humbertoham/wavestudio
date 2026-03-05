@@ -1,119 +1,195 @@
-// src/app/api/internal/monthly-renewal/route.ts
+// src/app/api/auth/register/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { TokenReason, Affiliation } from "@prisma/client";
+import { registerSchema } from "@/lib/zod";
+import { hash } from "@/lib/hash";
+import { Affiliation } from "@prisma/client";
 
 export const runtime = "nodejs";
 
-export async function GET() {
-  if (process.env.VERCEL !== "1") {
-    return NextResponse.json({ ok: false }, { status: 401 });
-  }
+/** Helpers */
+function cleanStr(v: unknown) {
+  return typeof v === "string" ? v.trim() : "";
+}
+function cleanEmail(v: unknown) {
+  return cleanStr(v).toLowerCase();
+}
+function cleanPhone(v: unknown) {
+  const digits = String(v ?? "").replace(/\D+/g, "");
+  return digits.slice(0, 20);
+}
+function parseAffiliation(v: unknown): Affiliation {
+  const map: Record<string, Affiliation> = {
+    NONE: Affiliation.NONE,
+    WELLHUB: Affiliation.WELLHUB,
+    TOTALPASS: Affiliation.TOTALPASS,
+    none: Affiliation.NONE,
+    wellhub: Affiliation.WELLHUB,
+    totalpass: Affiliation.TOTALPASS,
+  };
+  const key = typeof v === "string" ? v : "NONE";
+  return map[key] ?? Affiliation.NONE;
+}
+function parseDOB(v: unknown): Date | undefined {
+  const s = cleanStr(v);
+  if (!s) return undefined;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return undefined;
+  const [_, y, mo, d] = m;
+  const dt = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
+  if (isNaN(dt.getTime())) return undefined;
+  const today = new Date();
+  if (dt > today) return undefined;
+  return dt;
+}
 
-  const now = new Date();
+// Packs internos (no visibles)
+const WELLHUB_PACK_ID = "corp_wellhub_monthly";
+const TOTALPASS_PACK_ID = "corp_totalpass_monthly";
 
-  if (now.getUTCDate() !== 1) {
-    return NextResponse.json(
-      { ok: false, message: "Solo puede ejecutarse el día 1" },
-      { status: 400 }
-    );
-  }
+async function ensureCorporatePacks() {
+  await prisma.pack.upsert({
+    where: { id: WELLHUB_PACK_ID },
+    update: {
+      name: "Wellhub Mensual (Interno)",
+      classes: 15,
+      price: 0,
+      validityDays: 31,
+      isActive: true,
+      isVisible: false,
+      oncePerUser: false,
+      classesLabel: "15 clases",
+    },
+    create: {
+      id: WELLHUB_PACK_ID,
+      name: "Wellhub Mensual (Interno)",
+      classes: 15,
+      price: 0,
+      validityDays: 31,
+      isActive: true,
+      isVisible: false,
+      oncePerUser: false,
+      classesLabel: "15 clases",
+    },
+  });
 
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
+  await prisma.pack.upsert({
+    where: { id: TOTALPASS_PACK_ID },
+    update: {
+      name: "TotalPass Mensual (Interno)",
+      classes: 10,
+      price: 0,
+      validityDays: 31,
+      isActive: true,
+      isVisible: false,
+      oncePerUser: false,
+      classesLabel: "10 clases",
+    },
+    create: {
+      id: TOTALPASS_PACK_ID,
+      name: "TotalPass Mensual (Interno)",
+      classes: 10,
+      price: 0,
+      validityDays: 31,
+      isActive: true,
+      isVisible: false,
+      oncePerUser: false,
+      classesLabel: "10 clases",
+    },
+  });
+}
 
-  const firstDay = new Date(Date.UTC(year, month, 1));
-  const nextMonth = new Date(Date.UTC(year, month + 1, 1));
+function nextMonthStartUTC(from = new Date()) {
+  const y = from.getUTCFullYear();
+  const m = from.getUTCMonth();
+  return new Date(Date.UTC(y, m + 1, 1)); // inicio del próximo mes UTC
+}
 
-  // Evita doble ejecución
-  const alreadyRun = await prisma.tokenLedger.findFirst({
-    where: {
-      reason: TokenReason.CORPORATE_MONTHLY,
-      createdAt: {
-        gte: firstDay,
-        lt: nextMonth,
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+
+    // 1) Validación base con tu Zod (name/email/password)
+    const parsed = registerSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "INVALID" }, { status: 400 });
+    }
+
+    // 2) Normalización
+    const name = cleanStr(parsed.data.name);
+    const email = cleanEmail(parsed.data.email);
+    const password = cleanStr(parsed.data.password);
+
+    // 3) Campos extra
+    const dateOfBirth = parseDOB(body?.dateOfBirth);
+    const phone = cleanPhone(body?.phone);
+    const emergencyPhone = cleanPhone(body?.emergencyPhone);
+    const affiliation = parseAffiliation(body?.affiliation);
+
+    // 4) Checar duplicado
+    const exists = await prisma.user.findUnique({ where: { email } });
+    if (exists) {
+      return NextResponse.json({ error: "EMAIL_IN_USE" }, { status: 409 });
+    }
+
+    // 5) Crear usuario
+    const passwordHash = await hash(password);
+
+    const user = await prisma.user.create({
+      data: {
+        name,
+        email,
+        passwordHash,
+        dateOfBirth: dateOfBirth ?? undefined,
+        phone: phone ? phone : undefined,
+        emergencyPhone: emergencyPhone ? emergencyPhone : undefined,
+        affiliation,
       },
-    },
-  });
-
-  if (alreadyRun) {
-    return NextResponse.json({
-      ok: false,
-      message: "Ya ejecutado este mes",
+      select: { id: true, email: true },
     });
-  }
 
-  const users = await prisma.user.findMany({
-    where: {
-      affiliation: { in: [Affiliation.WELLHUB, Affiliation.TOTALPASS] },
-    },
-  });
+    // ✅ 6) Si es corporate, asignar saldo REAL como PackPurchase (y ledger como auditoría)
+    if (
+      affiliation === Affiliation.WELLHUB ||
+      affiliation === Affiliation.TOTALPASS
+    ) {
+      await ensureCorporatePacks();
 
-  for (const user of users) {
-    await prisma.$transaction(async (tx) => {
-      // 🔹 Balance total actual
-      const totalAgg = await tx.tokenLedger.aggregate({
-        where: { userId: user.id },
-        _sum: { delta: true },
-      });
+      const monthlyAmount = affiliation === Affiliation.WELLHUB ? 15 : 10;
+      const packId =
+        affiliation === Affiliation.WELLHUB ? WELLHUB_PACK_ID : TOTALPASS_PACK_ID;
 
-      const totalBalance = totalAgg._sum.delta ?? 0;
+      const expiresAt = nextMonthStartUTC(new Date()); // expira al iniciar el próximo mes UTC
 
-      // 🔹 Total otorgado por corporate en toda la historia
-      const corporateAgg = await tx.tokenLedger.aggregate({
-        where: {
-          userId: user.id,
-          reason: TokenReason.CORPORATE_MONTHLY,
-        },
-        _sum: { delta: true },
-      });
-
-      const totalCorporateGranted = corporateAgg._sum.delta ?? 0;
-
-      // 🔹 Total comprado por packs
-      const packAgg = await tx.tokenLedger.aggregate({
-        where: {
-          userId: user.id,
-          reason: TokenReason.PURCHASE_CREDIT,
-        },
-        _sum: { delta: true },
-      });
-
-      const totalPackGranted = packAgg._sum.delta ?? 0;
-
-      // 🔹 Estimación saldo corporativo restante
-      const estimatedCorporateBalance = Math.max(
-        0,
-        totalBalance - totalPackGranted
-      );
-
-      // 🔥 Restar solo el remanente corporativo
-      if (estimatedCorporateBalance > 0) {
-        await tx.tokenLedger.create({
-          data: {
-            userId: user.id,
-            delta: -estimatedCorporateBalance,
-            reason: TokenReason.ADMIN_ADJUST,
-          },
-        });
-      }
-
-      // 🔹 Asignar nuevos créditos del mes
-      const monthlyAmount =
-        user.affiliation === Affiliation.WELLHUB ? 15 : 10;
-
-      await tx.tokenLedger.create({
+      const purchase = await prisma.packPurchase.create({
         data: {
           userId: user.id,
+          packId,
+          classesLeft: monthlyAmount,
+          expiresAt,
+        },
+        select: { id: true },
+      });
+
+      await prisma.tokenLedger.create({
+        data: {
+          userId: user.id,
+          packPurchaseId: purchase.id,
           delta: monthlyAmount,
-          reason: TokenReason.CORPORATE_MONTHLY,
+          reason: "CORPORATE_MONTHLY",
         },
       });
-    });
-  }
+    }
 
-  return NextResponse.json({
-    ok: true,
-    renewedUsers: users.length,
-  });
+    return NextResponse.json(user, { status: 201 });
+  } catch (err: any) {
+    if (
+      err?.code === "P2002" &&
+      Array.isArray(err?.meta?.target) &&
+      err.meta.target.includes("email")
+    ) {
+      return NextResponse.json({ error: "EMAIL_IN_USE" }, { status: 409 });
+    }
+    return NextResponse.json({ error: "INTERNAL_ERROR" }, { status: 500 });
+  }
 }
