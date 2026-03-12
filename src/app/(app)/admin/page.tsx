@@ -722,20 +722,7 @@ function PacksSection() {
           onChange={(e) => setCreating((f) => ({ ...f, classesLabel: e.target.value }))}
         />
 
-        <select
-          className="input"
-          value={creating.highlight ?? ""}
-          onChange={(e) =>
-            setCreating((f) => ({
-              ...f,
-              highlight: e.target.value === "" ? "" : (e.target.value as HighlightOpt),
-            }))
-          }
-        >
-          <option value="">Sin highlight</option>
-          <option value="popular">Popular</option>
-          <option value="best">Best</option>
-        </select>
+      
 
         {/* Descripción multilinea (ocupa toda la fila) */}
         <textarea
@@ -859,6 +846,7 @@ function EditablePackRow({
       price: draft.price, // el backend redondea a int
       validityDays: draft.validityDays,
       isActive: draft.isActive,
+      oncePerUser: draft.oncePerUser, // 👈 FALTA ESTO
       classesLabel:
         draft.classesLabel === ""
           ? null // permite limpiar a null
@@ -1014,6 +1002,7 @@ function EditablePackRow({
                       validityDays: item.validityDays,
                       isActive: item.isActive,
                       classesLabel: item.classesLabel ?? "",
+                      oncePerUser: item.oncePerUser ?? false,
                       highlight:
                         item.highlight && typeof item.highlight === "string"
                           ? (item.highlight.toLowerCase() as HighlightOpt)
@@ -1055,26 +1044,7 @@ function EditablePackRow({
                 />
               </div>
 
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">
-                  Highlight
-                </label>
-                <select
-                  className="input w-full"
-                  value={draft.highlight ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      highlight:
-                        e.target.value === "" ? "" : (e.target.value as HighlightOpt),
-                    }))
-                  }
-                >
-                  <option value="">Sin highlight</option>
-                  <option value="popular">Popular</option>
-                  <option value="best">Best</option>
-                </select>
-              </div>
+           
                     <div>
   <label className="block text-xs text-gray-500 mb-1">
     Restricción

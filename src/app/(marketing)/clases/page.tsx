@@ -442,7 +442,11 @@ function SessionCard({
     return null;
   }, [s.status, s.spots]);
 
+
+  const isPast = new Date(s.startsAtISO).getTime() < Date.now();
+
   const canBook =
+  !isPast &&
   s.spots > 0 &&
   s.time !== "—" &&
   s.status !== "CANCELLED" &&
@@ -524,6 +528,14 @@ const handleCardClick = () => {
     onClick={(e) => e.stopPropagation()}
   >
     Clase cancelada
+  </button>
+) : isPast ? (
+  <button
+    className="btn-outline h-9 w-full justify-center text-sm"
+    disabled
+    onClick={(e) => e.stopPropagation()}
+  >
+    No disponible
   </button>
 ) : canBook ? (
   <button
