@@ -1,14 +1,19 @@
-// src/app/api/bookings/[id]/cancel/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+
 import { getAuth } from "@/lib/auth";
+import {
+  createSingleSeatBookingWithDebit,
+  isManagedBookingError,
+} from "@/lib/class-booking";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const CANCEL_WINDOW_MIN = 240; // 4 horas reales
+const CANCEL_WINDOW_MIN = 240;
 
-function j(status: number, body: any) {
+function j(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
 
@@ -42,28 +47,24 @@ export async function PATCH(
 
     if (!booking) return j(404, { code: "NOT_FOUND" });
     if (booking.userId !== auth.sub) return j(403, { code: "FORBIDDEN" });
-    if (booking.status !== "ACTIVE")
+    if (booking.status !== "ACTIVE") {
       return j(409, { code: "ALREADY_CANCELED" });
+    }
 
     const minutesUntilStart = Math.floor(
       (booking.class.date.getTime() - Date.now()) / 60000
     );
-
     const isLateCancel = minutesUntilStart < CANCEL_WINDOW_MIN;
-
-    const costPerSeat = booking.class.creditCost ?? 1;
     const seatsReleased = booking.quantity ?? 1;
-    const refundTokens = seatsReleased * costPerSeat;
 
     const result = await prisma.$transaction(
       async (tx) => {
-        // 1️⃣ Marcar booking cancelado
         const updated = await tx.booking.update({
           where: { id: booking.id },
           data: {
             status: "CANCELED",
             canceledAt: new Date(),
-            refundToken: !isLateCancel, // true solo si hubo reembolso
+            refundToken: !isLateCancel,
           },
           include: {
             class: {
@@ -80,73 +81,94 @@ export async function PATCH(
           },
         });
 
-        // 2️⃣ Si NO es cancelación tardía → devolver tokens
-  if (!isLateCancel) {
+        if (!isLateCancel) {
+          const alreadyRefunded = await tx.tokenLedger.findFirst({
+            where: {
+              bookingId: booking.id,
+              reason: "CANCEL_REFUND",
+            },
+          });
 
-  const alreadyRefunded = await tx.tokenLedger.findFirst({
-    where: {
-      bookingId: booking.id,
-      reason: "CANCEL_REFUND",
-    },
-  });
+          if (!alreadyRefunded) {
+            const debits = await tx.tokenLedger.findMany({
+              where: {
+                bookingId: booking.id,
+                reason: "BOOKING_DEBIT",
+              },
+            });
 
-  if (!alreadyRefunded) {
+            for (const debit of debits) {
+              if (debit.packPurchaseId) {
+                await tx.packPurchase.update({
+                  where: { id: debit.packPurchaseId },
+                  data: {
+                    classesLeft: { increment: Math.abs(debit.delta) },
+                  },
+                });
+              }
 
-    const debits = await tx.tokenLedger.findMany({
-      where: {
-        bookingId: booking.id,
-        reason: "BOOKING_DEBIT",
-      },
-    });
+              await tx.tokenLedger.create({
+                data: {
+                  userId: booking.userId!,
+                  packPurchaseId: debit.packPurchaseId,
+                  bookingId: booking.id,
+                  delta: Math.abs(debit.delta),
+                  reason: "CANCEL_REFUND",
+                },
+              });
+            }
+          }
+        }
 
-    for (const d of debits) {
-      if (d.packPurchaseId) {
-        await tx.packPurchase.update({
-          where: { id: d.packPurchaseId },
-          data: {
-            classesLeft: { increment: Math.abs(d.delta) },
-          },
-        });
-      }
-
-      await tx.tokenLedger.create({
-        data: {
-          userId: booking.userId!,
-          packPurchaseId: d.packPurchaseId,
-          bookingId: booking.id,
-          delta: Math.abs(d.delta),
-          reason: "CANCEL_REFUND",
-        },
-      });
-    }
-  }
-}
-
-        // 3️⃣ Liberar cupos (promover waitlist si existe)
         for (let i = 0; i < seatsReleased; i++) {
           const next = await tx.waitlist.findFirst({
             where: { classId: booking.classId },
-            orderBy: { position: "asc" },
+            orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+            select: {
+              id: true,
+              userId: true,
+            },
           });
 
           if (!next) break;
 
-          await tx.booking.create({
-            data: {
-              userId: next.userId,
+          try {
+            await createSingleSeatBookingWithDebit(tx, {
               classId: booking.classId,
-              quantity: 1,
-            },
-          });
+              userId: next.userId,
+            });
 
-          await tx.waitlist.delete({
-            where: { id: next.id },
-          });
+            await tx.waitlist.delete({
+              where: { id: next.id },
+            });
+          } catch (error) {
+            if (
+              isManagedBookingError(error) &&
+              error.code === "USER_ALREADY_BOOKED"
+            ) {
+              await tx.waitlist.delete({
+                where: { id: next.id },
+              });
+              i -= 1;
+              continue;
+            }
+
+            if (
+              isManagedBookingError(error) &&
+              (error.code === "NO_CREDITS_AVAILABLE" ||
+                error.code === "CLASS_ALREADY_STARTED" ||
+                error.code === "CLASS_FULL")
+            ) {
+              break;
+            }
+
+            throw error;
+          }
         }
 
         return updated;
       },
-      { isolationLevel: "Serializable" }
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
 
     return j(200, {
@@ -155,7 +177,7 @@ export async function PATCH(
       createdAt: result.createdAt,
       canceledAt: result.canceledAt,
       quantity: booking.quantity,
-      lateCancel: isLateCancel, // 👈 importante para el frontend
+      lateCancel: isLateCancel,
       class: {
         id: result.class.id,
         title: result.class.title,
@@ -166,8 +188,8 @@ export async function PATCH(
         instructor: result.class.instructor,
       },
     });
-  } catch (e) {
-    console.error(e);
+  } catch (error) {
+    console.error(error);
     return j(500, { code: "INTERNAL" });
   }
 }

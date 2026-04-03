@@ -262,6 +262,13 @@ export async function POST(req: Request) {
           });
         }
 
+        await tx.waitlist.deleteMany({
+          where: {
+            classId,
+            userId: auth.sub,
+          },
+        });
+
         return { bookingId: booking.id };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }

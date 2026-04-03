@@ -1,0 +1,169 @@
+import { NextRequest, NextResponse } from "next/server";
+import { BookingStatus, Prisma } from "@prisma/client";
+
+import { getAuthFromRequest } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+type Ctx = { params: Promise<{ id: string }> };
+type WaitlistJoinErrorCode =
+  | "CLASS_NOT_FOUND"
+  | "CLASS_CANCELED"
+  | "CLASS_ALREADY_STARTED"
+  | "ALREADY_BOOKED"
+  | "ALREADY_WAITLISTED"
+  | "CLASS_HAS_SPOTS";
+
+function j(status: number, body: unknown) {
+  return NextResponse.json(body, { status });
+}
+
+function fail(code: WaitlistJoinErrorCode): never {
+  throw { code } as { code: WaitlistJoinErrorCode };
+}
+
+function errorResponse(error: unknown) {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+  ) {
+    switch ((error as { code: WaitlistJoinErrorCode }).code) {
+      case "CLASS_NOT_FOUND":
+        return j(404, {
+          error: "CLASS_NOT_FOUND",
+          message: "La clase no existe.",
+        });
+      case "CLASS_CANCELED":
+        return j(409, {
+          error: "CLASS_CANCELED",
+          message: "La clase está cancelada.",
+        });
+      case "CLASS_ALREADY_STARTED":
+        return j(409, {
+          error: "CLASS_ALREADY_STARTED",
+          message: "La clase ya comenzó y no acepta lista de espera.",
+        });
+      case "ALREADY_BOOKED":
+        return j(409, {
+          error: "ALREADY_BOOKED",
+          message: "Ya tienes una reserva activa para esta clase.",
+        });
+      case "ALREADY_WAITLISTED":
+        return j(409, {
+          error: "ALREADY_WAITLISTED",
+          message: "Ya estás en lista de espera.",
+        });
+      case "CLASS_HAS_SPOTS":
+        return j(409, {
+          error: "CLASS_HAS_SPOTS",
+          message: "La clase todavía tiene lugares disponibles.",
+        });
+    }
+  }
+
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002"
+  ) {
+    return j(409, {
+      error: "ALREADY_WAITLISTED",
+      message: "Ya estás en lista de espera.",
+    });
+  }
+
+  console.error("POST /api/classes/[id]/waitlist error:", error);
+
+  return j(500, {
+    error: "INTERNAL_ERROR",
+    message: "No se pudo agregar a la lista de espera.",
+  });
+}
+
+export async function POST(req: NextRequest, ctx: Ctx) {
+  const auth = await getAuthFromRequest(req);
+  if (!auth?.sub) {
+    return j(401, {
+      error: "UNAUTHENTICATED",
+      message: "Necesitas iniciar sesión para entrar a la lista de espera.",
+    });
+  }
+
+  const { id: classId } = await ctx.params;
+
+  try {
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const klass = await tx.class.findUnique({
+          where: { id: classId },
+          include: {
+            bookings: {
+              where: { status: BookingStatus.ACTIVE },
+              select: { quantity: true, userId: true },
+            },
+          },
+        });
+
+        if (!klass) fail("CLASS_NOT_FOUND");
+        if (klass.isCanceled) fail("CLASS_CANCELED");
+        if (klass.date.getTime() <= Date.now()) fail("CLASS_ALREADY_STARTED");
+
+        const alreadyBooked = klass.bookings.some(
+          (booking) => booking.userId === auth.sub
+        );
+        if (alreadyBooked) fail("ALREADY_BOOKED");
+
+        const existingEntry = await tx.waitlist.findUnique({
+          where: {
+            userId_classId: {
+              userId: auth.sub,
+              classId,
+            },
+          },
+          select: { id: true },
+        });
+
+        if (existingEntry) fail("ALREADY_WAITLISTED");
+
+        const usedSpots = klass.bookings.reduce(
+          (sum, booking) => sum + (booking.quantity ?? 1),
+          0
+        );
+        if (usedSpots < klass.capacity) fail("CLASS_HAS_SPOTS");
+
+        const positionData = await tx.waitlist.aggregate({
+          where: { classId },
+          _max: { position: true },
+        });
+
+        const position = (positionData._max.position ?? 0) + 1;
+
+        return tx.waitlist.create({
+          data: {
+            classId,
+            userId: auth.sub,
+            position,
+          },
+          select: {
+            id: true,
+            position: true,
+          },
+        });
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      }
+    );
+
+    return NextResponse.json({
+      ok: true,
+      entryId: result.id,
+      position: result.position,
+    });
+  } catch (error: unknown) {
+    return errorResponse(error);
+  }
+}

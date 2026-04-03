@@ -30,7 +30,7 @@ const FEATURES = [
   {
     icon: FiActivity,
     title: "2 Tipos de Clases",
-    desc: "Bootcamp & Hatha Yoga",
+    desc: "Funcional & Barre",
   },
   {
     icon: FiCalendar,

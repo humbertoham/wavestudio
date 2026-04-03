@@ -2,33 +2,32 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion, cubicBezier } from "framer-motion";
 import {
   FiArrowLeft,
+  FiEdit2,
+  FiMessageCircle,
+  FiSlash,
   FiTrash2,
   FiUserPlus,
-  FiSlash,
-  FiEdit2,
   FiX,
 } from "react-icons/fi";
-
-
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
 const MX_LOCALE: Intl.LocalesArgument = "es-MX";
+const CANCEL_WINDOW_MIN = 240;
 
-/* ======================
-   Types
-   ====================== */
+type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
 
 type UserLite = {
   id: string;
   name: string;
-  credits: number;
-  affiliation?: "NONE" | "WELLHUB" | "TOTALPASS";
+  email: string;
+  phone?: string | null;
+  affiliation?: Affiliation;
 };
 
 type InstructorLite = {
@@ -40,20 +39,37 @@ type ClassApi = {
   id: string;
   title: string;
   focus: string;
-  date: string; // ISO (Class.date)
+  date: string;
   durationMin: number;
   capacity: number;
   isCanceled: boolean;
   instructor: { id?: string; name: string };
   instructorId?: string;
-
   bookings: {
     id: string;
     quantity: number;
     status?: "ACTIVE" | "CANCELED";
-    attended?: boolean; // <- si no existe en backend, vendrá undefined
-    user: { id: string; name: string; email: string; affiliation?: "NONE" | "WELLHUB" | "TOTALPASS"; } | null; // null si invitado (solo si lo soportas)
-    guestName?: string; // si manejas invitados sin user
+    attended?: boolean;
+    canceledAt?: string | null;
+    user: {
+      id: string;
+      name: string;
+      email: string;
+      phone?: string | null;
+      affiliation?: Affiliation;
+    } | null;
+    guestName?: string | null;
+  }[];
+  waitlist: {
+    id: string;
+    position: number;
+    user: {
+      id: string;
+      name: string;
+      email: string;
+      phone?: string | null;
+      affiliation?: Affiliation;
+    };
   }[];
 };
 
@@ -64,82 +80,182 @@ type AttendeeRow = {
   isGuest: boolean;
   attended: boolean;
   quantity: number;
-  affiliation?: "NONE" | "WELLHUB" | "TOTALPASS";
+  affiliation: Affiliation;
+};
+
+type CanceledRow = {
+  bookingId: string;
+  name: string;
+  email?: string;
+  phone?: string | null;
+  affiliation: Affiliation;
+  canceledAt?: string | null;
+};
+
+type WaitlistRow = {
+  entryId: string;
+  userId: string;
+  name: string;
+  email?: string;
+  phone?: string | null;
+  affiliation: Affiliation;
+  position: number;
 };
 
 function fmtDateTimeMX(iso: string) {
-  const d = new Date(iso);
-  const date = new Intl.DateTimeFormat(MX_LOCALE, {
-    timeZone: MX_TZ,
-    weekday: "short",
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  })
-    .format(d)
-    .replace(".", "");
-  const time = new Intl.DateTimeFormat(MX_LOCALE, {
-    timeZone: MX_TZ,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  }).format(d);
-  return { date, time };
+  const date = new Date(iso);
+  return {
+    date: new Intl.DateTimeFormat(MX_LOCALE, {
+      timeZone: MX_TZ,
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    })
+      .format(date)
+      .replace(".", ""),
+    time: new Intl.DateTimeFormat(MX_LOCALE, {
+      timeZone: MX_TZ,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    }).format(date),
+  };
 }
 
 function hhmmFromISOInMX(iso: string) {
-  const d = new Date(iso);
-  const parts = new Intl.DateTimeFormat("en-GB", {
+  return new Intl.DateTimeFormat("en-GB", {
     timeZone: MX_TZ,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  }).format(d);
-  return parts; // "HH:MM"
+  }).format(new Date(iso));
 }
 
-/* ======================
-   Edit Modal
-   ====================== */
+function fmtTimeMX(iso: string) {
+  return new Intl.DateTimeFormat(MX_LOCALE, {
+    timeZone: MX_TZ,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date(iso));
+}
+
+function isLateCanceledBooking(classDateIso: string, canceledAt?: string | null) {
+  if (!canceledAt) return false;
+
+  const classTime = new Date(classDateIso).getTime();
+  const canceledTime = new Date(canceledAt).getTime();
+
+  if (Number.isNaN(classTime) || Number.isNaN(canceledTime)) return false;
+
+  const minutesBeforeClass = Math.floor((classTime - canceledTime) / 60000);
+  return minutesBeforeClass < CANCEL_WINDOW_MIN;
+}
+
+function getErrorMessage(payload: unknown, fallback: string) {
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "message" in payload &&
+    typeof (payload as { message?: unknown }).message === "string"
+  ) {
+    return (payload as { message: string }).message;
+  }
+
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "error" in payload &&
+    typeof (payload as { error?: unknown }).error === "string"
+  ) {
+    return (payload as { error: string }).error;
+  }
+
+  return fallback;
+}
+
+async function readErrorMessage(res: Response, fallback: string) {
+  const payload = await res.json().catch(() => null);
+  return getErrorMessage(payload, fallback);
+}
+
+function affiliationBadgeClasses(affiliation: Affiliation) {
+  if (affiliation === "WELLHUB") return "bg-pink-100 text-pink-700";
+  if (affiliation === "TOTALPASS") return "bg-green-100 text-green-700";
+  return "";
+}
+
+function AffiliationBadge({ affiliation }: { affiliation: Affiliation }) {
+  if (affiliation === "NONE") return null;
+
+  return (
+    <span
+      className={`rounded px-2 py-0.5 text-xs ${affiliationBadgeClasses(
+        affiliation
+      )}`}
+    >
+      {affiliation}
+    </span>
+  );
+}
+
+function formatPhoneLabel(phone?: string | null) {
+  return phone?.trim() || "Sin telefono";
+}
+
+function toWhatsAppHref(phone?: string | null) {
+  const digits = (phone ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+
+  const normalized = digits.startsWith("00") ? digits.slice(2) : digits;
+  const withCountryCode =
+    normalized.length === 10 ? `52${normalized}` : normalized;
+
+  if (withCountryCode.length < 11) return null;
+
+  return `https://wa.me/${withCountryCode}`;
+}
 
 type EditModalProps = {
   open: boolean;
   onClose: () => void;
   cls: ClassApi;
   instructors: InstructorLite[];
-  onSaved: (next: ClassApi) => void;
+  onSaved: () => Promise<void> | void;
 };
 
-function EditClassModal({ open, onClose, cls, instructors, onSaved }: EditModalProps) {
+function EditClassModal({
+  open,
+  onClose,
+  cls,
+  instructors,
+  onSaved,
+}: EditModalProps) {
   const [mounted, setMounted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
   const [title, setTitle] = useState(cls.title);
   const [focus, setFocus] = useState(cls.focus);
   const [instructorId, setInstructorId] = useState(
     cls.instructorId || cls.instructor?.id || ""
   );
   const [timeHHMM, setTimeHHMM] = useState(hhmmFromISOInMX(cls.date));
-
   const [durationMin, setDurationMin] = useState(cls.durationMin);
-const [capacity, setCapacity] = useState(cls.capacity);
-
-
+  const [capacity, setCapacity] = useState(cls.capacity);
 
   useEffect(() => setMounted(true), []);
 
- useEffect(() => {
-  if (!open) return;
-  setErr(null);
-  setTitle(cls.title);
-  setFocus(cls.focus);
-  setInstructorId(cls.instructorId || cls.instructor?.id || "");
-  setTimeHHMM(hhmmFromISOInMX(cls.date));
-  setDurationMin(cls.durationMin);
-  setCapacity(cls.capacity);
-}, [open, cls]);
-
+  useEffect(() => {
+    if (!open) return;
+    setErr(null);
+    setTitle(cls.title);
+    setFocus(cls.focus);
+    setInstructorId(cls.instructorId || cls.instructor?.id || "");
+    setTimeHHMM(hhmmFromISOInMX(cls.date));
+    setDurationMin(cls.durationMin);
+    setCapacity(cls.capacity);
+  }, [open, cls]);
 
   if (!open || !mounted) return null;
 
@@ -153,65 +269,61 @@ const [capacity, setCapacity] = useState(cls.capacity);
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-  title: title.trim(),
-  focus: focus.trim(),
-  instructorId: instructorId || null,
-  time: timeHHMM,
-  durationMin,
-  capacity,
-}),
-
+          title: title.trim(),
+          focus: focus.trim(),
+          instructorId: instructorId || null,
+          time: timeHHMM,
+          durationMin,
+          capacity,
+        }),
       });
 
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j?.error || `HTTP ${res.status}`);
+        throw new Error(await readErrorMessage(res, "No se pudo guardar."));
       }
 
-      // esperamos que el backend regrese la clase actualizada
-      const next = (await res.json().catch(() => null)) as ClassApi | null;
-      if (next) onSaved(next);
+      await onSaved();
       onClose();
-    } catch (e: any) {
-      setErr(e?.message || "No se pudo guardar.");
+    } catch (error: unknown) {
+      setErr(error instanceof Error ? error.message : "No se pudo guardar.");
     } finally {
       setBusy(false);
     }
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-end justify-center md:items-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <motion.div
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1, transition: { duration: 0.2, ease: EASE } }}
-        className="relative w-full md:w-[640px] rounded-t-2xl md:rounded-2xl bg-[color:var(--color-card)] p-5 shadow-xl"
+        className="relative w-full rounded-t-2xl bg-[color:var(--color-card)] p-5 shadow-xl md:w-[640px] md:rounded-2xl"
       >
         <div className="flex items-center gap-2">
           <h3 className="font-display text-lg font-bold">Modificar clase</h3>
-          <button className="ml-auto btn-outline h-9 px-3" onClick={onClose}>
+          <button className="btn-outline ml-auto h-9 px-3" onClick={onClose}>
             <FiX /> Cerrar
           </button>
         </div>
 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <div>
-            <label className="text-sm font-semibold">Título</label>
+            <label className="text-sm font-semibold">Titulo</label>
             <input
               className="input mt-2"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Título de la clase"
+              placeholder="Titulo de la clase"
             />
           </div>
 
           <div>
-            <label className="text-sm font-semibold">Descripción / Focus</label>
+            <label className="text-sm font-semibold">Descripcion / Focus</label>
             <input
               className="input mt-2"
               value={focus}
               onChange={(e) => setFocus(e.target.value)}
-              placeholder="Descripción"
+              placeholder="Descripcion"
             />
           </div>
 
@@ -223,14 +335,14 @@ const [capacity, setCapacity] = useState(cls.capacity);
               onChange={(e) => setInstructorId(e.target.value)}
             >
               <option value="">Selecciona coach</option>
-              {instructors.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.name}
+              {instructors.map((instructor) => (
+                <option key={instructor.id} value={instructor.id}>
+                  {instructor.name}
                 </option>
               ))}
             </select>
             <p className="mt-1 text-xs text-muted-foreground">
-              Esto cambia el coach (instructor) de la clase.
+              Esto cambia el coach de la clase.
             </p>
           </div>
 
@@ -243,41 +355,40 @@ const [capacity, setCapacity] = useState(cls.capacity);
               onChange={(e) => setTimeHHMM(e.target.value)}
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              Restricción: no cambia la fecha, solo la hora.
+              Solo cambia la hora, no la fecha.
             </p>
           </div>
+
           <div>
-  <label className="text-sm font-semibold">Duración (minutos)</label>
-  <input
-    type="number"
-    min={15}
-    step={5}
-    className="input mt-2"
-    value={durationMin}
-    onChange={(e) => setDurationMin(Number(e.target.value))}
-  />
-</div>
+            <label className="text-sm font-semibold">Duracion (minutos)</label>
+            <input
+              type="number"
+              min={15}
+              step={5}
+              className="input mt-2"
+              value={durationMin}
+              onChange={(e) => setDurationMin(Number(e.target.value))}
+            />
+          </div>
 
-<div>
-  <label className="text-sm font-semibold">Cupo máximo</label>
-  <input
-    type="number"
-    min={1}
-    className="input mt-2"
-    value={capacity}
-    onChange={(e) => setCapacity(Number(e.target.value))}
-  />
-  <p className="mt-1 text-xs text-muted-foreground">
-    No puede ser menor a los spots ya ocupados.
-  </p>
-</div>
-
+          <div>
+            <label className="text-sm font-semibold">Cupo maximo</label>
+            <input
+              type="number"
+              min={1}
+              className="input mt-2"
+              value={capacity}
+              onChange={(e) => setCapacity(Number(e.target.value))}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              No puede ser menor a los lugares ya ocupados.
+            </p>
+          </div>
         </div>
 
         {err && <div className="mt-4 text-sm text-red-600">{err}</div>}
 
-        <div className="mt-6 flex gap-2 justify-end">
-         
+        <div className="mt-6 flex justify-end gap-2">
           <button className="btn-primary h-10 px-4" onClick={save} disabled={busy}>
             {busy ? "Guardando..." : "Guardar cambios"}
           </button>
@@ -288,41 +399,39 @@ const [capacity, setCapacity] = useState(cls.capacity);
   );
 }
 
-/* ======================
-   Page
-   ====================== */
-
 export default function ClassAdminPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
 
   const [cls, setCls] = useState<ClassApi | null>(null);
-  const [users, setUsers] = useState<UserLite[]>([]);
   const [instructors, setInstructors] = useState<InstructorLite[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  const [userSearch, setUserSearch] = useState("");
-
-  const [selectedUserId, setSelectedUserId] = useState("");
-  const [guestName, setGuestName] = useState("");
-
-  const [editOpen, setEditOpen] = useState(false);
 
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<UserLite[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
-  /* ======================
-     Load data
-     ====================== */
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [selectedUser, setSelectedUser] = useState<UserLite | null>(null);
+  const [guestName, setGuestName] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+
   async function reload() {
     if (!id) return;
+
     const res = await fetch(`/api/classes/${id}`, {
       credentials: "include",
       cache: "no-store",
     });
-    if (!res.ok) throw new Error("CLASS_LOAD_FAILED");
-    const data = (await res.json()) as ClassApi;
-    setCls(data);
+
+    if (!res.ok) {
+      throw new Error(await readErrorMessage(res, "No se pudo cargar la clase."));
+    }
+
+    setCls((await res.json()) as ClassApi);
   }
 
   useEffect(() => {
@@ -332,49 +441,118 @@ export default function ClassAdminPage() {
       try {
         await reload();
 
-        const [u, ins] = await Promise.all([
-          fetch("/api/admin/users", { credentials: "include" }),
-          fetch("/api/admin/instructors", { credentials: "include" }),
-        ]);
+        const instructorsRes = await fetch("/api/admin/instructors", {
+          credentials: "include",
+        });
 
-        if (u.ok) {
-          const j = await u.json().catch(() => ({}));
-          setUsers(j.items ?? j);
+        if (instructorsRes.ok) {
+          const payload = await instructorsRes.json().catch(() => ({}));
+          setInstructors(payload.items ?? payload);
         }
-        if (ins.ok) {
-          const j = await ins.json().catch(() => ({}));
-          setInstructors(j.items ?? j);
-        }
-      } catch (e) {
-        alert("No se pudo cargar la clase.");
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "No se pudo cargar la clase.");
       } finally {
         setLoading(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  /* ======================
-     Derived
-     ====================== */
-  const attendees: AttendeeRow[] = useMemo(() => {
-    if (!cls) return [];
-    const active = cls.bookings.filter((b) => (b.status ?? "ACTIVE") === "ACTIVE");
+  useEffect(() => {
+    if (!userDropdownOpen) return;
 
-    return active.map((b) => ({
-      bookingId: b.id,
-      name: b.user?.name ?? b.guestName ?? "Invitado",
-      email: b.user?.email,
-      isGuest: !b.user,
-      attended: !!b.attended,
-      quantity: b.quantity ?? 1,
-      affiliation: b.user?.affiliation ?? "NONE",
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      try {
+        setSearchLoading(true);
+        setSearchError(null);
+
+        const params = new URLSearchParams({
+          q: userSearch.trim(),
+          limit: "20",
+        });
+
+        const res = await fetch(`/api/admin/users/search?${params.toString()}`, {
+          credentials: "include",
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          throw new Error(await readErrorMessage(res, "No se pudo buscar usuarios."));
+        }
+
+        const payload = (await res.json().catch(() => ({ items: [] }))) as {
+          items?: UserLite[];
+        };
+
+        setSearchResults(payload.items ?? []);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setSearchResults([]);
+        setSearchError(
+          error instanceof Error ? error.message : "No se pudo buscar usuarios."
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setSearchLoading(false);
+        }
+      }
+    }, 300);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [userDropdownOpen, userSearch]);
+
+  const attendees = useMemo<AttendeeRow[]>(() => {
+    const bookings = cls?.bookings ?? [];
+
+    return bookings
+      .filter((booking) => (booking.status ?? "ACTIVE") === "ACTIVE")
+      .map((booking) => ({
+        bookingId: booking.id,
+        name: booking.user?.name ?? booking.guestName ?? "Invitado",
+        email: booking.user?.email,
+        isGuest: !booking.user,
+        attended: !!booking.attended,
+        quantity: booking.quantity ?? 1,
+        affiliation: booking.user?.affiliation ?? "NONE",
+      }));
+  }, [cls]);
+
+  const canceledBookings = useMemo<CanceledRow[]>(() => {
+    const bookings = cls?.bookings ?? [];
+
+    return bookings
+      .filter((booking) => booking.status === "CANCELED")
+      .map((booking) => ({
+        bookingId: booking.id,
+        name: booking.user?.name ?? booking.guestName ?? "Invitado",
+        email: booking.user?.email,
+        phone: booking.user?.phone ?? null,
+        affiliation: booking.user?.affiliation ?? "NONE",
+        canceledAt: booking.canceledAt ?? null,
+      }));
+  }, [cls]);
+
+  const waitlistEntries = useMemo<WaitlistRow[]>(() => {
+    const waitlist = cls?.waitlist ?? [];
+
+    return waitlist.map((entry) => ({
+      entryId: entry.id,
+      userId: entry.user.id,
+      name: entry.user.name,
+      email: entry.user.email,
+      phone: entry.user.phone ?? null,
+      affiliation: entry.user.affiliation ?? "NONE",
+      position: entry.position,
     }));
   }, [cls]);
 
-  const usedSpots = useMemo(() => {
-    return attendees.reduce((acc, a) => acc + (a.quantity || 1), 0);
-  }, [attendees]);
+  const usedSpots = useMemo(
+    () => attendees.reduce((sum, attendee) => sum + (attendee.quantity || 1), 0),
+    [attendees]
+  );
 
   const spotsLeft = useMemo(() => {
     if (!cls) return 0;
@@ -383,74 +561,60 @@ export default function ClassAdminPage() {
 
   const dateInfo = useMemo(() => (cls ? fmtDateTimeMX(cls.date) : null), [cls]);
 
-  const filteredUsers = useMemo(() => {
-  const q = userSearch.trim().toLowerCase();
-  if (!q) return users.slice(0, 20); // limita si no hay búsqueda
+  async function toggleAttendance(attendee: AttendeeRow) {
+    setBusy(attendee.bookingId);
 
-  return users.filter(u =>
-    u.name.toLowerCase().includes(q)
-  ).slice(0, 20);
-}, [users, userSearch]);
-
-  /* ======================
-     Actions
-     ====================== */
-
-  async function toggleAttendance(a: AttendeeRow) {
-    // ⚠️ requiere soporte backend (campo attended o tabla)
-    setBusy(a.bookingId);
     try {
-      const res = await fetch(`/api/admin/bookings/${a.bookingId}/attendance`, {
+      const res = await fetch(`/api/admin/bookings/${attendee.bookingId}/attendance`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ attended: !a.attended }),
+        body: JSON.stringify({ attended: !attendee.attended }),
       });
+
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j?.error || `HTTP ${res.status}`);
+        throw new Error(await readErrorMessage(res, "No se pudo marcar asistencia."));
       }
 
       setCls((prev) =>
         prev
           ? {
               ...prev,
-              bookings: prev.bookings.map((b) =>
-                b.id === a.bookingId ? { ...b, attended: !a.attended } : b
+              bookings: prev.bookings.map((booking) =>
+                booking.id === attendee.bookingId
+                  ? { ...booking, attended: !attendee.attended }
+                  : booking
               ),
             }
           : prev
       );
-    } catch (e: any) {
-      alert(e?.message || "No se pudo marcar asistencia.");
+    } catch (error) {
+      alert(
+        error instanceof Error ? error.message : "No se pudo marcar asistencia."
+      );
     } finally {
       setBusy(null);
     }
   }
 
-  async function removeAttendee(a: AttendeeRow) {
-    if (!confirm("¿Eliminar usuario de la clase?")) return;
+  async function removeAttendee(attendee: AttendeeRow) {
+    if (!confirm("Eliminar usuario de la clase?")) return;
 
-    setBusy(a.bookingId);
+    setBusy(attendee.bookingId);
+
     try {
-      // ✅ este endpoint debe: eliminar booking + reembolsar 1 crédito (si aplica)
-      const res = await fetch(`/api/admin/bookings/${a.bookingId}`, {
+      const res = await fetch(`/api/admin/bookings/${attendee.bookingId}`, {
         method: "DELETE",
         credentials: "include",
       });
+
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j?.error || `HTTP ${res.status}`);
+        throw new Error(await readErrorMessage(res, "No se pudo eliminar."));
       }
 
-      // update optimista
-      setCls((prev) =>
-        prev
-          ? { ...prev, bookings: prev.bookings.filter((b) => b.id !== a.bookingId) }
-          : prev
-      );
-    } catch (e: any) {
-      alert(e?.message || "No se pudo eliminar.");
+      await reload();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "No se pudo eliminar.");
     } finally {
       setBusy(null);
     }
@@ -458,9 +622,13 @@ export default function ClassAdminPage() {
 
   async function addUser() {
     if (!selectedUserId) return;
-    if (spotsLeft <= 0) return alert("No hay spots disponibles.");
+    if (spotsLeft <= 0) {
+      alert("No hay lugares disponibles.");
+      return;
+    }
 
     setBusy("ADD_USER");
+
     try {
       const res = await fetch(`/api/admin/classes/${id}/add-user`, {
         method: "POST",
@@ -470,26 +638,31 @@ export default function ClassAdminPage() {
       });
 
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        // tu backend debería devolver "NO_CREDITS" si no tiene créditos
-        throw new Error(j?.error || `HTTP ${res.status}`);
+        throw new Error(await readErrorMessage(res, "No se pudo agregar el usuario."));
       }
 
       setSelectedUserId("");
+      setSelectedUser(null);
+      setUserSearch("");
       await reload();
-    } catch (e: any) {
-      alert(e?.message || "No se pudo agregar el usuario.");
+    } catch (error) {
+      alert(
+        error instanceof Error ? error.message : "No se pudo agregar el usuario."
+      );
     } finally {
       setBusy(null);
     }
   }
 
   async function addGuest() {
-    // ⚠️ requiere soporte backend para invitados (schema actual no lo permite con Booking.userId requerido)
     if (!guestName.trim()) return;
-    if (spotsLeft <= 0) return alert("No hay spots disponibles.");
+    if (spotsLeft <= 0) {
+      alert("No hay lugares disponibles.");
+      return;
+    }
 
     setBusy("ADD_GUEST");
+
     try {
       const res = await fetch(`/api/admin/classes/${id}/add-guest`, {
         method: "POST",
@@ -499,14 +672,51 @@ export default function ClassAdminPage() {
       });
 
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j?.error || `HTTP ${res.status}`);
+        throw new Error(await readErrorMessage(res, "No se pudo agregar invitado."));
       }
 
       setGuestName("");
       await reload();
-    } catch (e: any) {
-      alert(e?.message || "No se pudo agregar invitado.");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "No se pudo agregar invitado.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function promoteWaitlist(entry: WaitlistRow) {
+    if (spotsLeft <= 0) {
+      alert("No hay lugares disponibles.");
+      return;
+    }
+
+    setBusy(`PROMOTE_${entry.entryId}`);
+
+    try {
+      const res = await fetch(
+        `/api/admin/classes/${id}/waitlist/${entry.entryId}/promote`,
+        {
+          method: "POST",
+          credentials: "include",
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(
+          await readErrorMessage(
+            res,
+            "No se pudo agregar el usuario desde la lista de espera."
+          )
+        );
+      }
+
+      await reload();
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "No se pudo agregar el usuario desde la lista de espera."
+      );
     } finally {
       setBusy(null);
     }
@@ -519,9 +729,11 @@ export default function ClassAdminPage() {
       alert("Debes eliminar primero a los usuarios inscritos.");
       return;
     }
-    if (!confirm("¿Cancelar esta clase?")) return;
+
+    if (!confirm("Cancelar esta clase?")) return;
 
     setBusy("CANCEL");
+
     try {
       const res = await fetch(`/api/admin/classes/${id}/cancel`, {
         method: "PATCH",
@@ -529,22 +741,21 @@ export default function ClassAdminPage() {
       });
 
       if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j?.error || `HTTP ${res.status}`);
+        throw new Error(await readErrorMessage(res, "No se pudo cancelar."));
       }
 
       await reload();
-    } catch (e: any) {
-      alert(e?.message || "No se pudo cancelar.");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "No se pudo cancelar.");
     } finally {
       setBusy(null);
     }
   }
 
-  /* ======================
-     Render
-     ====================== */
-  if (loading) return <div className="section container-app">Cargando…</div>;
+  if (loading) {
+    return <div className="section container-app">Cargando...</div>;
+  }
+
   if (!cls) return null;
 
   return (
@@ -557,13 +768,12 @@ export default function ClassAdminPage() {
           <FiArrowLeft /> Volver
         </Link>
 
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0, transition: { duration: 0.35, ease: EASE } }}
           className="mt-6 card p-6"
         >
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
               <h1 className="font-display text-2xl font-bold">
                 {cls.title}
@@ -573,17 +783,17 @@ export default function ClassAdminPage() {
               </h1>
 
               <p className="text-muted-foreground">
-                {cls.focus} · Coach: {cls.instructor?.name}
+                {cls.focus} - Coach: {cls.instructor?.name}
               </p>
 
               {dateInfo && (
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {dateInfo.date} · {dateInfo.time} · {cls.durationMin} min
+                  {dateInfo.date} - {dateInfo.time} - {cls.durationMin} min
                 </p>
               )}
 
               <p className="mt-1 text-sm">
-                Cupo: {usedSpots}/{cls.capacity} ·{" "}
+                Cupo: {usedSpots}/{cls.capacity} -{" "}
                 <span className="font-semibold">{spotsLeft} disponibles</span>
               </p>
             </div>
@@ -600,12 +810,11 @@ export default function ClassAdminPage() {
               <button
                 className="btn-outline h-10 px-4 text-red-600"
                 onClick={cancelClass}
-                disabled={false}
                 title={
                   attendees.length > 0
                     ? "Elimina primero a los usuarios inscritos"
                     : cls.isCanceled
-                    ? "Ya está cancelada"
+                    ? "Ya esta cancelada"
                     : "Cancelar clase"
                 }
               >
@@ -615,63 +824,65 @@ export default function ClassAdminPage() {
           </div>
         </motion.div>
 
-        {/* Attendees */}
         <section className="mt-8">
-          <h2 className="font-display text-xl font-bold mb-4">Usuarios en clase</h2>
+          <h2 className="mb-4 font-display text-xl font-bold">Usuarios en clase</h2>
 
           <div className="grid gap-3">
-            {attendees.map((a) => (
-              <div key={a.bookingId} className="card p-4 flex justify-between items-center">
+            {attendees.map((attendee) => (
+              <div
+                key={attendee.bookingId}
+                className="card flex items-center justify-between gap-4 p-4"
+              >
                 <div className="min-w-0">
-                 <p className="font-semibold truncate flex items-center gap-2">
-  {a.name}
+                  <p className="flex items-center gap-2 truncate font-semibold">
+                    {attendee.name}
+                    {attendee.isGuest && (
+                      <span className="rounded bg-gray-200 px-2 py-0.5 text-xs">
+                        Invitado
+                      </span>
+                    )}
+                    <AffiliationBadge affiliation={attendee.affiliation} />
+                  </p>
 
-  {a.isGuest && (
-    <span className="text-xs px-2 py-0.5 rounded bg-gray-200">
-      Invitado
-    </span>
-  )}
+                  {attendee.email && (
+                    <p className="truncate text-xs text-muted-foreground">
+                      {attendee.email}
+                    </p>
+                  )}
 
-  {a.affiliation === "WELLHUB" && (
-    <span className="text-xs px-2 py-0.5 rounded bg-pink-100 text-pink-700">
-      WELLHUB
-    </span>
-  )}
-
-  {a.affiliation === "TOTALPASS" && (
-    <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">
-      TOTALPASS
-    </span>
-  )}
-</p>
-                  {a.email && <p className="text-xs text-muted-foreground truncate">{a.email}</p>}
-                  {a.quantity > 1 && (
-                    <p className="text-xs text-muted-foreground">Plazas: {a.quantity}</p>
+                  {attendee.quantity > 1 && (
+                    <p className="text-xs text-muted-foreground">
+                      Plazas: {attendee.quantity}
+                    </p>
                   )}
                 </div>
 
                 <div className="flex items-center gap-3">
-                  {/* Asistencia */}
                   <label className="inline-flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={a.attended}
-                      onChange={() => toggleAttendance(a)}
-                      disabled={busy === a.bookingId}
+                      checked={attendee.attended}
+                      onChange={() => toggleAttendance(attendee)}
+                      disabled={busy === attendee.bookingId}
                       className="h-5 w-5 accent-green-600"
                       title="Marcar asistencia"
                     />
-                    <span className={a.attended ? "text-green-600 font-semibold" : "text-muted-foreground"}>
-                      {a.attended ? "Asistió" : "No asistió"}
+                    <span
+                      className={
+                        attendee.attended
+                          ? "font-semibold text-green-600"
+                          : "text-muted-foreground"
+                      }
+                    >
+                      {attendee.attended ? "Asistio" : "No asistio"}
                     </span>
                   </label>
 
-                  {/* Eliminar */}
                   <button
-                    onClick={() => removeAttendee(a)}
+                    onClick={() => removeAttendee(attendee)}
                     className="icon-btn text-red-600"
-                    disabled={busy === a.bookingId}
-                    title="Eliminar de clase (reembolsa 1 crédito)"
+                    disabled={busy === attendee.bookingId}
+                    title="Eliminar de clase"
                   >
                     <FiTrash2 />
                   </button>
@@ -687,89 +898,254 @@ export default function ClassAdminPage() {
           </div>
         </section>
 
-        {/* Add users */}
-        <section className="mt-10">
-          <h2 className="font-display text-xl font-bold mb-4">Agregar usuario</h2>
+        <section className="mt-8">
+          <h2 className="mb-4 font-display text-xl font-bold">
+            Usuarios que cancelaron
+          </h2>
 
-          <div className="card p-5 grid gap-4 sm:grid-cols-2">
-            {/* Usuario registrado */}
-           <div className="relative">
-  <p className="font-semibold mb-2">Usuario registrado</p>
+          <div className="grid gap-3">
+            {canceledBookings.map((booking) => {
+              const whatsappHref = toWhatsAppHref(booking.phone);
+              const hasPenalty =
+                (booking.affiliation === "WELLHUB" ||
+                  booking.affiliation === "TOTALPASS") &&
+                isLateCanceledBooking(cls.date, booking.canceledAt);
+              const canceledTime = booking.canceledAt
+                ? fmtTimeMX(booking.canceledAt)
+                : null;
 
-  {/* Trigger */}
-  <button
-    type="button"
-    onClick={() => setUserDropdownOpen((p) => !p)}
-    disabled={cls.isCanceled || spotsLeft <= 0 || busy !== null}
-    className="input w-full flex justify-between items-center"
-  >
-    <span className="truncate">
-      {selectedUserId
-        ? users.find((u) => u.id === selectedUserId)?.name
-        : "Seleccionar usuario"}
-    </span>
-    <span className="text-xs opacity-60">▼</span>
-  </button>
+              return (
+                <div
+                  key={booking.bookingId}
+                  className="card flex flex-col justify-between gap-4 p-4 md:flex-row md:items-center"
+                >
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-2 font-semibold">
+                      <span className="truncate">{booking.name}</span>
+                      <AffiliationBadge affiliation={booking.affiliation} />
+                    </p>
 
-  {/* Dropdown */}
-  {userDropdownOpen && (
-    <div className="absolute z-20 mt-2 w-full rounded-xl border bg-white shadow-lg">
-      <div className="p-2">
-        <input
-          className="input"
-          placeholder="Buscar usuario..."
-          value={userSearch}
-          onChange={(e) => setUserSearch(e.target.value)}
-          autoFocus
-        />
-      </div>
+                    {booking.email && (
+                      <p className="truncate text-xs text-muted-foreground">
+                        {booking.email}
+                      </p>
+                    )}
 
-      <div className="max-h-48 overflow-y-auto">
-        {filteredUsers.length === 0 && (
-          <div className="px-3 py-2 text-sm text-muted-foreground">
-            Sin resultados
+                    {canceledTime && (
+                      <p className="text-xs text-muted-foreground">
+                        {"Cancel\u00F3:"} {canceledTime}
+                      </p>
+                    )}
+
+                    {hasPenalty && (
+                      <p className="text-xs font-semibold text-red-600">
+                        {"Debe $100 de penalizaci\u00F3n"}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="btn-outline h-10 px-4"
+                      disabled={!whatsappHref || busy !== null}
+                      onClick={() => {
+                        if (whatsappHref) {
+                          window.open(whatsappHref, "_blank", "noopener,noreferrer");
+                        }
+                      }}
+                    >
+                      <FiMessageCircle /> WhatsApp
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {!canceledBookings.length && (
+              <div className="card p-6 text-center text-muted-foreground">
+                No hay usuarios que cancelaron.
+              </div>
+            )}
           </div>
-        )}
+        </section>
 
-        {filteredUsers.map((u) => (
-          <button
-            key={u.id}
-            type="button"
-            onClick={() => {
-              setSelectedUserId(u.id);
-              setUserSearch("");
-              setUserDropdownOpen(false);
-            }}
-            disabled={u.credits < 1}
-            className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex justify-between items-center ${
-              u.credits < 1 ? "opacity-50 cursor-not-allowed" : ""
-            }`}
-          >
-            <span>{u.name}</span>
-            <span className="text-xs opacity-60">
-              {u.credits} créditos
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
-  )}
+        <section className="mt-8">
+          <h2 className="mb-4 font-display text-xl font-bold">Lista de espera</h2>
 
-  {/* Add button */}
-  <button
-    className="btn-primary mt-3 w-full"
-    onClick={addUser}
-    disabled={
-      !selectedUserId || cls.isCanceled || spotsLeft <= 0 || busy !== null
-    }
-  >
-    <FiUserPlus /> Agregar
-  </button>
-</div>
+          <div className="grid gap-3">
+            {waitlistEntries.map((entry) => {
+              const whatsappHref = toWhatsAppHref(entry.phone);
+              const isPromoting = busy === `PROMOTE_${entry.entryId}`;
 
-            {/* Invitado */}
+              return (
+                <div
+                  key={entry.entryId}
+                  className="card flex flex-col justify-between gap-4 p-4 md:flex-row md:items-center"
+                >
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-2 font-semibold">
+                      <span>#{entry.position}</span>
+                      <span className="truncate">{entry.name}</span>
+                      <span className="text-sm font-normal text-muted-foreground">
+                        {formatPhoneLabel(entry.phone)}
+                      </span>
+                      <AffiliationBadge affiliation={entry.affiliation} />
+                    </p>
+
+                    {entry.email && (
+                      <p className="truncate text-xs text-muted-foreground">
+                        {entry.email}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="btn-outline h-10 px-4"
+                      disabled={!whatsappHref || busy !== null}
+                      onClick={() => {
+                        if (whatsappHref) {
+                          window.open(whatsappHref, "_blank", "noopener,noreferrer");
+                        }
+                      }}
+                    >
+                      <FiMessageCircle /> WhatsApp
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn-primary h-10 px-4"
+                      disabled={
+                        cls.isCanceled || spotsLeft <= 0 || (busy !== null && !isPromoting)
+                      }
+                      onClick={() => promoteWaitlist(entry)}
+                    >
+                      <FiUserPlus />
+                      {isPromoting ? " Agregando..." : " Agregar a clase"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {!waitlistEntries.length && (
+              <div className="card p-6 text-center text-muted-foreground">
+                No hay usuarios en lista de espera.
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <h2 className="mb-4 font-display text-xl font-bold">Agregar usuario</h2>
+
+          <div className="card grid gap-4 p-5 sm:grid-cols-2">
+            <div className="relative">
+              <p className="mb-2 font-semibold">Usuario registrado</p>
+
+              <button
+                type="button"
+                onClick={() => setUserDropdownOpen((open) => !open)}
+                disabled={cls.isCanceled || spotsLeft <= 0 || busy !== null}
+                className="input flex w-full items-center justify-between"
+              >
+                <span className="min-w-0 text-left">
+                  {selectedUser ? (
+                    <span className="block">
+                      <span className="block truncate font-medium">
+                        {selectedUser.name}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {selectedUser.email}
+                        {selectedUser.phone ? ` - ${selectedUser.phone}` : ""}
+                      </span>
+                    </span>
+                  ) : (
+                    "Seleccionar usuario"
+                  )}
+                </span>
+                <span className="ml-3 text-xs opacity-60">v</span>
+              </button>
+
+              {userDropdownOpen && (
+                <div className="absolute z-20 mt-2 w-full rounded-xl border bg-[color:var(--color-card)] shadow-lg">
+                  <div className="p-2">
+                    <input
+                      className="input"
+                      placeholder="Buscar por nombre, correo o telefono"
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      autoFocus
+                    />
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Se muestran hasta 20 resultados.
+                    </p>
+                  </div>
+
+                  <div className="max-h-64 overflow-y-auto border-t">
+                    {searchLoading && (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        Buscando...
+                      </div>
+                    )}
+
+                    {!searchLoading && searchError && (
+                      <div className="px-3 py-2 text-sm text-red-600">
+                        {searchError}
+                      </div>
+                    )}
+
+                    {!searchLoading && !searchError && searchResults.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        Sin resultados
+                      </div>
+                    )}
+
+                    {!searchLoading &&
+                      !searchError &&
+                      searchResults.map((user) => (
+                        <button
+                          key={user.id}
+                          type="button"
+                          className="flex w-full items-start justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-[color:var(--color-muted)]"
+                          onClick={() => {
+                            setSelectedUserId(user.id);
+                            setSelectedUser(user);
+                            setUserSearch("");
+                            setUserDropdownOpen(false);
+                          }}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium">
+                              {user.name}
+                            </span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {user.email}
+                              {user.phone ? ` - ${user.phone}` : ""}
+                            </span>
+                          </span>
+                          <AffiliationBadge affiliation={user.affiliation ?? "NONE"} />
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              <button
+                className="btn-primary mt-3 w-full"
+                onClick={addUser}
+                disabled={
+                  !selectedUserId || cls.isCanceled || spotsLeft <= 0 || busy !== null
+                }
+              >
+                <FiUserPlus /> Agregar
+              </button>
+            </div>
+
             <div>
-              <p className="font-semibold mb-2">Invitado</p>
+              <p className="mb-2 font-semibold">Invitado</p>
               <input
                 className="input"
                 placeholder="Nombre del invitado"
@@ -780,12 +1156,12 @@ export default function ClassAdminPage() {
               <button
                 className="btn-outline mt-3 w-full"
                 onClick={addGuest}
-                disabled={!guestName.trim() || cls.isCanceled || spotsLeft <= 0 || busy !== null}
+                disabled={
+                  !guestName.trim() || cls.isCanceled || spotsLeft <= 0 || busy !== null
+                }
               >
                 <FiUserPlus /> Agregar invitado
               </button>
-
-            
             </div>
           </div>
         </section>
@@ -797,7 +1173,7 @@ export default function ClassAdminPage() {
           onClose={() => setEditOpen(false)}
           cls={cls}
           instructors={instructors}
-          onSaved={(next) => setCls(next)}
+          onSaved={reload}
         />
       )}
     </section>

@@ -3,17 +3,30 @@ import { Prisma } from "@prisma/client";
 
 import { createSingleSeatBookingWithDebit, isManagedBookingError } from "@/lib/class-booking";
 
-import { prisma, requireAdmin } from "../../../_utils";
+import { prisma, requireAdmin } from "../../../../../_utils";
 
 export const runtime = "nodejs";
 
-type Ctx = { params: Promise<{ id: string }> };
+type Ctx = { params: Promise<{ id: string; entryId: string }> };
+type PromoteWaitlistError = { code: "WAITLIST_ENTRY_NOT_FOUND" };
 
 function j(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
 
 function errorResponse(error: unknown) {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as PromoteWaitlistError).code === "WAITLIST_ENTRY_NOT_FOUND"
+  ) {
+    return j(404, {
+      error: "WAITLIST_ENTRY_NOT_FOUND",
+      message: "La entrada de lista de espera ya no existe.",
+    });
+  }
+
   if (isManagedBookingError(error)) {
     switch (error.code) {
       case "CLASS_NOT_FOUND":
@@ -29,7 +42,7 @@ function errorResponse(error: unknown) {
       case "CLASS_FULL":
         return j(409, {
           error: error.code,
-          message: "No hay lugares disponibles en la clase.",
+          message: "No hay lugares disponibles para agregar a este usuario.",
         });
       case "USER_ALREADY_BOOKED":
         return j(409, {
@@ -49,11 +62,14 @@ function errorResponse(error: unknown) {
     }
   }
 
-  console.error("POST /api/admin/classes/[id]/add-user error:", error);
+  console.error(
+    "POST /api/admin/classes/[id]/waitlist/[entryId]/promote error:",
+    error
+  );
 
   return j(500, {
     error: "INTERNAL_ERROR",
-    message: "No se pudo agregar el usuario a la clase.",
+    message: "No se pudo agregar el usuario desde la lista de espera.",
   });
 }
 
@@ -61,33 +77,34 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const auth = await requireAdmin(req);
   if (auth) return auth;
 
-  const { id: classId } = await ctx.params;
-  const { userId } = await req.json();
-
-  if (!userId || typeof userId !== "string") {
-    return j(400, {
-      error: "MISSING_USER_ID",
-      message: "Debes seleccionar un usuario.",
-    });
-  }
+  const { id: classId, entryId } = await ctx.params;
 
   try {
     const result = await prisma.$transaction(
       async (tx) => {
-        const booking = await createSingleSeatBookingWithDebit(tx, {
-          classId,
-          userId,
-          allowPastStart: true,
-        });
-
-        await tx.waitlist.deleteMany({
-          where: {
-            classId,
-            userId,
+        const entry = await tx.waitlist.findUnique({
+          where: { id: entryId },
+          select: {
+            id: true,
+            classId: true,
+            userId: true,
           },
         });
 
-        return booking;
+        if (!entry || entry.classId !== classId) {
+          throw { code: "WAITLIST_ENTRY_NOT_FOUND" } satisfies PromoteWaitlistError;
+        }
+
+        // Delete first so a concurrent admin cannot promote the same row twice.
+        await tx.waitlist.delete({
+          where: { id: entry.id },
+        });
+
+        return createSingleSeatBookingWithDebit(tx, {
+          classId,
+          userId: entry.userId,
+          allowPastStart: true,
+        });
       },
       {
         isolationLevel: Prisma.TransactionIsolationLevel.Serializable,

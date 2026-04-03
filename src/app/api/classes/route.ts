@@ -1,32 +1,17 @@
-// /src/app/api/classes/route.ts
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAdmin, getAuth } from "@/lib/auth";
-import { classCreateSchema } from "@/lib/zod";
 import { BookingStatus } from "@prisma/client";
+
+import { getAuth, requireAdmin } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { classCreateSchema } from "@/lib/zod";
 
 export const runtime = "nodejs";
 
 /**
  * GET /api/classes?from=ISO&to=ISO&focus=...
- *
- * Respuesta (ApiSession[]):
- * {
- *   id: string;
- *   title: string;
- *   focus?: string | null;
- *   coach: string;
- *   startsAt: string;
- *   durationMin: number;
- *   capacity?: number | null;
- *   booked?: number | null;
- *   isFull?: boolean | null;
- *   isCanceled?: boolean;
- *   userHasBooking?: boolean;
- * }
  */
 export async function GET(req: Request) {
-  const auth = await getAuth(); // 👈 detectar usuario actual
+  const auth = await getAuth();
   const userId = auth?.sub ?? null;
 
   const { searchParams } = new URL(req.url);
@@ -34,22 +19,28 @@ export async function GET(req: Request) {
   const to = searchParams.get("to");
   const focus = searchParams.get("focus") ?? undefined;
 
-let gte = from ? new Date(from) : new Date();
-if (isNaN(gte.getTime())) gte = new Date();
+  let gte = from ? new Date(from) : new Date();
+  if (Number.isNaN(gte.getTime())) gte = new Date();
 
-let lt: Date | undefined = undefined;
-if (to) {
-  const toDate = new Date(to);
-  if (!isNaN(toDate.getTime())) lt = toDate;
-}
+  let lt: Date | undefined;
+  if (to) {
+    const toDate = new Date(to);
+    if (!Number.isNaN(toDate.getTime())) lt = toDate;
+  }
 
+  const where: {
+    date: {
+      gte: Date;
+      lt?: Date;
+    };
+    focus?: string;
+  } = {
+    date: {
+      gte,
+      ...(lt ? { lt } : {}),
+    },
+  };
 
- const where: any = {
-  date: {
-    gte,
-    ...(lt ? { lt } : {}),
-  },
-};
   if (focus) where.focus = focus;
 
   const classes = await prisma.class.findMany({
@@ -59,21 +50,30 @@ if (to) {
       bookings: {
         where: { status: BookingStatus.ACTIVE },
         select: {
-          id: true,  
+          id: true,
           quantity: true,
-          userId: true, // 👈 necesario para detectar booking propio
+          userId: true,
         },
+      },
+      waitlist: {
+        where: {
+          userId: userId ?? "__anonymous__",
+        },
+        select: {
+          id: true,
+        },
+        take: 1,
       },
     },
     orderBy: { date: "asc" },
   });
 
-  const payload = classes.map((c) => {
-    const capacity: number | null = c.capacity ?? null;
+  const payload = classes.map((klass) => {
+    const capacity = klass.capacity ?? null;
 
-    const booked: number | null = Array.isArray(c.bookings)
-      ? c.bookings.reduce(
-          (sum: number, b) => sum + (b.quantity ?? 0),
+    const booked = Array.isArray(klass.bookings)
+      ? klass.bookings.reduce(
+          (sum, booking) => sum + (booking.quantity ?? 0),
           0
         )
       : null;
@@ -85,28 +85,34 @@ if (to) {
 
     const userHasBooking =
       userId != null
-        ? c.bookings.some((b) => b.userId === userId)
+        ? klass.bookings.some((booking) => booking.userId === userId)
         : false;
 
     const userBooking =
-  userId != null
-    ? c.bookings.find((b) => b.userId === userId)
-    : undefined;
+      userId != null
+        ? klass.bookings.find((booking) => booking.userId === userId)
+        : undefined;
 
+    const userWaitlistEntry =
+      userId != null && klass.waitlist.length > 0
+        ? klass.waitlist[0]
+        : undefined;
 
     return {
-      id: c.id,
-      title: c.title ?? "Clase",
-      focus: c.focus ?? null,
-      coach: c.instructor?.name ?? "—",
-      startsAt: c.date.toISOString(),
-      durationMin: c.durationMin ?? 60,
+      id: klass.id,
+      title: klass.title ?? "Clase",
+      focus: klass.focus ?? null,
+      coach: klass.instructor?.name ?? "-",
+      startsAt: klass.date.toISOString(),
+      durationMin: klass.durationMin ?? 60,
       capacity,
       booked,
       isFull,
-      isCanceled: c.isCanceled ?? false,
-      userHasBooking, // 👈 NUEVO
-      bookingId: userBooking?.id ?? null, // 👈 ESTA LÍNEA
+      isCanceled: klass.isCanceled ?? false,
+      userHasBooking,
+      bookingId: userBooking?.id ?? null,
+      userOnWaitlist: !!userWaitlistEntry,
+      waitlistEntryId: userWaitlistEntry?.id ?? null,
     };
   });
 
@@ -121,7 +127,7 @@ if (to) {
  */
 export async function POST(req: Request) {
   try {
-    requireAdmin();
+    await requireAdmin();
 
     const body = await req.json();
     const parsed = classCreateSchema.safeParse(body);
@@ -140,14 +146,11 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json(cls, { status: 201 });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : "INTERNAL";
     const code =
-      e.message === "UNAUTHORIZED"
-        ? 401
-        : e.message === "FORBIDDEN"
-        ? 403
-        : 500;
+      message === "UNAUTHORIZED" ? 401 : message === "FORBIDDEN" ? 403 : 500;
 
-    return NextResponse.json({ error: e.message }, { status: code });
+    return NextResponse.json({ error: message }, { status: code });
   }
 }

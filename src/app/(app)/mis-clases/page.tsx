@@ -18,6 +18,7 @@ const MX_TZ = "America/Mexico_City";
 const CANCEL_WINDOW_MIN = 240; // 4h
 
 type BookingStatus = "ACTIVE" | "CANCELED";
+type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
 
 type Instructor = {
   id: string;
@@ -71,6 +72,7 @@ export default function MyClassesPage() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [lateCancelBooking, setLateCancelBooking] = useState<Booking | null>(null);
+  const [affiliation, setAffiliation] = useState<Affiliation>("NONE");
 
   const [packs, setPacks] = useState<PackPurchase[] | null>(null);
   const [packsError, setPacksError] = useState<string | null>(null);
@@ -101,6 +103,42 @@ export default function MyClassesPage() {
         setItems([]);
       }
     })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/users/me/tokens", {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          credentials: "include",
+        });
+
+        if (!res.ok) return;
+
+        const data = (await res.json().catch(() => ({}))) as {
+          affiliation?: Affiliation;
+        };
+
+        if (!mounted) return;
+
+        if (
+          data.affiliation === "NONE" ||
+          data.affiliation === "WELLHUB" ||
+          data.affiliation === "TOTALPASS"
+        ) {
+          setAffiliation(data.affiliation);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+
     return () => {
       mounted = false;
     };
@@ -263,6 +301,7 @@ export default function MyClassesPage() {
                         idx={idx}
                         onCancel={() => cancelBooking(b)}
                         busy={busyId === b.id}
+                        affiliation={affiliation}
                       />
                     ))
                   ) : (
@@ -283,6 +322,7 @@ export default function MyClassesPage() {
                       booking={b}
                       idx={idx}
                       muted
+                      affiliation={affiliation}
                     />
                   ))}
                 </div>
@@ -378,6 +418,7 @@ export default function MyClassesPage() {
       {lateCancelBooking && (
   <LateCancelModal
     booking={lateCancelBooking}
+    affiliation={affiliation}
     onClose={() => setLateCancelBooking(null)}
     onConfirm={async () => {
       await cancelBooking(lateCancelBooking);
@@ -400,12 +441,14 @@ export default function MyClassesPage() {
     muted = false,
     onCancel,
     busy = false,
+    affiliation,
   }: {
     booking: Booking;
     idx: number;
     muted?: boolean;
     onCancel?: () => void;
     busy?: boolean;
+    affiliation: Affiliation;
   }) {
     const cls = booking.class;
     const canceled = booking.status === "CANCELED";
@@ -414,6 +457,8 @@ export default function MyClassesPage() {
     const refundTokens = spots * cost;
     const start = new Date(cls.date);
     const lateCancel = minutesUntil(start) < CANCEL_WINDOW_MIN;
+    const hasPenalty =
+      affiliation === "WELLHUB" || affiliation === "TOTALPASS";
     return (
       <motion.div
         initial={{ opacity: 0, y: 18, scale: 0.98 }}
@@ -476,7 +521,9 @@ export default function MyClassesPage() {
     {busy
   ? "Cancelando..."
   : lateCancel
-  ? "Cancelar (sin reembolso)"
+  ? hasPenalty
+    ? "Cancelar ($100 penalización)"
+    : "Cancelar (sin reembolso)"
   : `Cancelar (${refundTokens})`}
 
   </button>
@@ -489,15 +536,20 @@ export default function MyClassesPage() {
   }
 }
 
-function LateCancelModal({
+function LateCancelModalLegacy({
   booking,
+  affiliation,
   onClose,
   onConfirm,
 }: {
   booking: Booking;
+  affiliation: Affiliation;
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const hasPenalty =
+    affiliation === "WELLHUB" || affiliation === "TOTALPASS";
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -534,6 +586,70 @@ function LateCancelModal({
             onClick={onClose}
             className="btn-outline h-10"
           >
+            Volver
+          </button>
+
+          <button
+            onClick={onConfirm}
+            className="h-10 px-4 rounded-md bg-red-600 text-white hover:bg-red-700 transition"
+          >
+            Confirmar cancelación
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function LateCancelModal({
+  booking,
+  affiliation,
+  onClose,
+  onConfirm,
+}: {
+  booking: Booking;
+  affiliation: Affiliation;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const hasPenalty =
+    affiliation === "WELLHUB" || affiliation === "TOTALPASS";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+    >
+      <motion.div
+        initial={{ scale: 0.95, y: 20, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        transition={{ duration: 0.25 }}
+        className="card w-full max-w-md p-6"
+      >
+        <h3 className="font-display text-xl font-bold">
+          Cancelación tardía
+        </h3>
+
+        <p className="mt-3 text-sm text-muted-foreground">
+          Estás cancelando la clase:
+        </p>
+
+        <p className="mt-1 font-semibold">
+          {booking.class.title} · {booking.class.focus}
+        </p>
+
+        <p className="mt-4 text-sm text-red-600">
+          Faltan menos de 4 horas.
+          <br />
+          {hasPenalty
+            ? "Si cancelas esta clase se te cobrará una penalización de $100 pesos."
+            : "Si cancelas tu clase no se te regresarán los créditos por nuestras políticas de cancelación."}
+        </p>
+
+        <div className="mt-6 flex justify-end gap-3">
+          <button onClick={onClose} className="btn-outline h-10">
             Volver
           </button>
 

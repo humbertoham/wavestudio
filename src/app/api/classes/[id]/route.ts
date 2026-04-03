@@ -22,26 +22,28 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     include: {
       instructor: true,
       bookings: {
-        where: { status: "ACTIVE" },
+        orderBy: [{ createdAt: "desc" }],
         include: {
           user: {
             select: {
               id: true,
               name: true,
               email: true,
+              phone: true,
               affiliation: true,
             },
           },
         },
       },
       waitlist: {
-        orderBy: { position: "asc" },
+        orderBy: [{ position: "asc" }, { createdAt: "asc" }],
         include: {
           user: {
             select: {
               id: true,
               name: true,
               email: true,
+              phone: true,
               affiliation: true,
             },
           },
