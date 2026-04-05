@@ -77,6 +77,7 @@ type AttendeeRow = {
   bookingId: string;
   name: string;
   email?: string;
+  phone?: string | null;
   isGuest: boolean;
   attended: boolean;
   quantity: number;
@@ -513,6 +514,7 @@ export default function ClassAdminPage() {
         bookingId: booking.id,
         name: booking.user?.name ?? booking.guestName ?? "Invitado",
         email: booking.user?.email,
+        phone: booking.user?.phone ?? null,
         isGuest: !booking.user,
         attended: !!booking.attended,
         quantity: booking.quantity ?? 1,
@@ -744,7 +746,7 @@ export default function ClassAdminPage() {
         throw new Error(await readErrorMessage(res, "No se pudo cancelar."));
       }
 
-      await reload();
+      window.location.reload();
     } catch (error) {
       alert(error instanceof Error ? error.message : "No se pudo cancelar.");
     } finally {
@@ -828,67 +830,85 @@ export default function ClassAdminPage() {
           <h2 className="mb-4 font-display text-xl font-bold">Usuarios en clase</h2>
 
           <div className="grid gap-3">
-            {attendees.map((attendee) => (
-              <div
-                key={attendee.bookingId}
-                className="card flex items-center justify-between gap-4 p-4"
-              >
-                <div className="min-w-0">
-                  <p className="flex items-center gap-2 truncate font-semibold">
-                    {attendee.name}
-                    {attendee.isGuest && (
-                      <span className="rounded bg-gray-200 px-2 py-0.5 text-xs">
-                        Invitado
-                      </span>
+            {attendees.map((attendee) => {
+              const whatsappHref = toWhatsAppHref(attendee.phone);
+
+              return (
+                <div
+                  key={attendee.bookingId}
+                  className="card flex flex-col justify-between gap-4 p-4 md:flex-row md:items-center"
+                >
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-2 font-semibold">
+                      <span className="truncate">{attendee.name}</span>
+                      {attendee.isGuest && (
+                        <span className="rounded bg-gray-200 px-2 py-0.5 text-xs">
+                          Invitado
+                        </span>
+                      )}
+                      <AffiliationBadge affiliation={attendee.affiliation} />
+                    </p>
+
+                    {attendee.email && (
+                      <p className="truncate text-xs text-muted-foreground">
+                        {attendee.email}
+                      </p>
                     )}
-                    <AffiliationBadge affiliation={attendee.affiliation} />
-                  </p>
 
-                  {attendee.email && (
-                    <p className="truncate text-xs text-muted-foreground">
-                      {attendee.email}
-                    </p>
-                  )}
+                    {attendee.quantity > 1 && (
+                      <p className="text-xs text-muted-foreground">
+                        Plazas: {attendee.quantity}
+                      </p>
+                    )}
+                  </div>
 
-                  {attendee.quantity > 1 && (
-                    <p className="text-xs text-muted-foreground">
-                      Plazas: {attendee.quantity}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <label className="inline-flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={attendee.attended}
-                      onChange={() => toggleAttendance(attendee)}
-                      disabled={busy === attendee.bookingId}
-                      className="h-5 w-5 accent-green-600"
-                      title="Marcar asistencia"
-                    />
-                    <span
-                      className={
-                        attendee.attended
-                          ? "font-semibold text-green-600"
-                          : "text-muted-foreground"
-                      }
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="btn-outline h-10 px-4"
+                      disabled={!whatsappHref || busy !== null}
+                      onClick={() => {
+                        if (whatsappHref) {
+                          window.open(whatsappHref, "_blank", "noopener,noreferrer");
+                        }
+                      }}
+                      title={formatPhoneLabel(attendee.phone)}
                     >
-                      {attendee.attended ? "Asistio" : "No asistio"}
-                    </span>
-                  </label>
+                      <FiMessageCircle /> WhatsApp
+                    </button>
 
-                  <button
-                    onClick={() => removeAttendee(attendee)}
-                    className="icon-btn text-red-600"
-                    disabled={busy === attendee.bookingId}
-                    title="Eliminar de clase"
-                  >
-                    <FiTrash2 />
-                  </button>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={attendee.attended}
+                        onChange={() => toggleAttendance(attendee)}
+                        disabled={busy === attendee.bookingId}
+                        className="h-5 w-5 accent-green-600"
+                        title="Marcar asistencia"
+                      />
+                      <span
+                        className={
+                          attendee.attended
+                            ? "font-semibold text-green-600"
+                            : "text-muted-foreground"
+                        }
+                      >
+                        {attendee.attended ? "Asistio" : "No asistio"}
+                      </span>
+                    </label>
+
+                    <button
+                      onClick={() => removeAttendee(attendee)}
+                      className="icon-btn text-red-600"
+                      disabled={busy === attendee.bookingId}
+                      title="Eliminar de clase"
+                    >
+                      <FiTrash2 />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             {!attendees.length && (
               <div className="card p-6 text-center text-muted-foreground">

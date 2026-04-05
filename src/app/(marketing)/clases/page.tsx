@@ -434,7 +434,9 @@ type SessionCardProps = {
   s: Session;
   onOpenReserve: (session: Session) => void;
   onCancelBooking: (session: Session) => void;
-  onJoinWaitlist: (session: Session) => void;
+  onOpenWaitlistConfirm: (session: Session) => void;
+  onLeaveWaitlist: (session: Session) => void;
+  cancelBusyId: string | null;
   waitlistBusyId: string | null;
   isAdmin: boolean;
 };
@@ -443,7 +445,9 @@ function SessionCard({
   s,
   onOpenReserve,
   onCancelBooking,
-  onJoinWaitlist,
+  onOpenWaitlistConfirm,
+  onLeaveWaitlist,
+  cancelBusyId,
   waitlistBusyId,
   isAdmin,
 }: SessionCardProps) {
@@ -468,6 +472,7 @@ function SessionCard({
   }, [s.status, s.spots]);
 
   const isPast = new Date(s.startsAtISO).getTime() < Date.now();
+  const isCancelBusy = cancelBusyId === s.id;
   const isWaitlistBusy = waitlistBusyId === s.id;
 
   const canBook =
@@ -544,12 +549,13 @@ function SessionCard({
 
             <button
               className="btn-outline h-9 w-full justify-center border-red-400 text-sm text-red-600"
+              disabled={isCancelBusy}
               onClick={(e) => {
                 e.stopPropagation();
                 onCancelBooking(s);
               }}
             >
-              Cancelar reserva
+              {isCancelBusy ? "Cancelando..." : "Cancelar reserva"}
             </button>
           </div>
         ) : s.status === "CANCELLED" ? (
@@ -585,20 +591,33 @@ function SessionCard({
             </div>
 
             {s.userOnWaitlist ? (
-              <button
-                className="btn-outline h-9 w-full justify-center border-green-400 text-sm text-green-600"
-                disabled
-                onClick={(e) => e.stopPropagation()}
-              >
-                Ya estas en lista de espera
-              </button>
+              <>
+                <button
+                  className="btn-outline h-9 w-full justify-center border-green-400 text-sm text-green-600"
+                  disabled
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Ya estas en la lista de espera
+                </button>
+
+                <button
+                  className="btn-outline h-9 w-full justify-center border-red-400 text-sm text-red-600"
+                  disabled={isWaitlistBusy}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onLeaveWaitlist(s);
+                  }}
+                >
+                  {isWaitlistBusy ? "Saliendo..." : "Salir de la lista de espera"}
+                </button>
+              </>
             ) : (
               <button
                 className="btn-outline h-9 w-full justify-center text-sm"
                 disabled={!canJoinWaitlist || isWaitlistBusy}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onJoinWaitlist(s);
+                  onOpenWaitlistConfirm(s);
                 }}
               >
                 {isWaitlistBusy ? "Agregando..." : "Entrar a lista de espera"}
@@ -624,7 +643,9 @@ type DayColumnProps = {
   index: number;
   onOpenReserve: (session: Session) => void;
   onCancelBooking: (session: Session) => void;
-  onJoinWaitlist: (session: Session) => void;
+  onOpenWaitlistConfirm: (session: Session) => void;
+  onLeaveWaitlist: (session: Session) => void;
+  cancelBusyId: string | null;
   waitlistBusyId: string | null;
 };
 
@@ -633,7 +654,9 @@ function DayColumn({
   index,
   onOpenReserve,
   onCancelBooking,
-  onJoinWaitlist,
+  onOpenWaitlistConfirm,
+  onLeaveWaitlist,
+  cancelBusyId,
   waitlistBusyId,
 }: DayColumnProps) {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -666,7 +689,9 @@ function DayColumn({
               s={session}
               onOpenReserve={onOpenReserve}
               onCancelBooking={onCancelBooking}
-              onJoinWaitlist={onJoinWaitlist}
+              onOpenWaitlistConfirm={onOpenWaitlistConfirm}
+              onLeaveWaitlist={onLeaveWaitlist}
+              cancelBusyId={cancelBusyId}
               waitlistBusyId={waitlistBusyId}
               isAdmin={isAdmin}
             />
@@ -691,7 +716,10 @@ export default function ClassesPage() {
   const [lateCancelSession, setLateCancelSession] = useState<Session | null>(null);
   const [reserveOpen, setReserveOpen] = useState(false);
   const [reserveSession, setReserveSession] = useState<Session | null>(null);
+  const [cancelBusyId, setCancelBusyId] = useState<string | null>(null);
   const [waitlistBusyId, setWaitlistBusyId] = useState<string | null>(null);
+  const [waitlistConfirmSession, setWaitlistConfirmSession] =
+    useState<Session | null>(null);
 
   function openReserve(session: Session) {
     if (!isAuthed) {
@@ -708,10 +736,19 @@ export default function ClassesPage() {
     setReserveOpen(true);
   }
 
-  async function joinWaitlist(session: Session) {
+  function openWaitlistConfirm(session: Session) {
     if (!isAuthed) {
       window.location.href = "/login";
       return;
+    }
+
+    setWaitlistConfirmSession(session);
+  }
+
+  async function joinWaitlist(session: Session) {
+    if (!isAuthed) {
+      window.location.href = "/login";
+      return false;
     }
 
     setWaitlistBusyId(session.id);
@@ -728,6 +765,8 @@ export default function ClassesPage() {
         );
       }
 
+      const data = await res.json().catch(() => ({}));
+
       setDays((prev) =>
         prev?.map((day) => ({
           ...day,
@@ -736,6 +775,55 @@ export default function ClassesPage() {
               ? {
                   ...item,
                   userOnWaitlist: true,
+                  waitlistEntryId:
+                    typeof data.entryId === "string" ? data.entryId : item.waitlistEntryId,
+                }
+              : item
+          ),
+        })) ?? prev
+      );
+      return true;
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "No se pudo agregar a la lista de espera."
+      );
+      return false;
+    } finally {
+      setWaitlistBusyId(null);
+    }
+  }
+
+  async function leaveWaitlist(session: Session) {
+    if (!isAuthed) {
+      window.location.href = "/login";
+      return;
+    }
+
+    setWaitlistBusyId(session.id);
+
+    try {
+      const res = await fetch(`/api/classes/${session.id}/waitlist`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          await readErrorMessage(res, "No se pudo salir de la lista de espera.")
+        );
+      }
+
+      setDays((prev) =>
+        prev?.map((day) => ({
+          ...day,
+          sessions: day.sessions.map((item) =>
+            item.id === session.id
+              ? {
+                  ...item,
+                  userOnWaitlist: false,
+                  waitlistEntryId: null,
                 }
               : item
           ),
@@ -745,7 +833,7 @@ export default function ClassesPage() {
       alert(
         error instanceof Error
           ? error.message
-          : "No se pudo agregar a la lista de espera."
+          : "No se pudo salir de la lista de espera."
       );
     } finally {
       setWaitlistBusyId(null);
@@ -753,6 +841,8 @@ export default function ClassesPage() {
   }
 
   async function handleCancel(session: Session) {
+    if (cancelBusyId === session.id) return;
+
     const start = new Date(session.startsAtISO);
     const minutesUntil = Math.floor((start.getTime() - Date.now()) / 60000);
 
@@ -765,39 +855,52 @@ export default function ClassesPage() {
   }
 
   async function executeCancel(session: Session) {
-    if (!session.bookingId) return;
+    if (!session.bookingId || cancelBusyId === session.id) return false;
 
-    const res = await fetch(`/api/bookings/${session.bookingId}/cancel`, {
-      method: "PATCH",
-    });
+    setCancelBusyId(session.id);
+    let shouldResetBusy = true;
 
-    if (!res.ok) return;
+    try {
+      const res = await fetch(`/api/bookings/${session.bookingId}/cancel`, {
+        method: "PATCH",
+      });
 
-    const data = await res.json();
+      if (!res.ok) return false;
 
-    setDays((prev) =>
-      prev?.map((day) => ({
-        ...day,
-        sessions: day.sessions.map((item) => {
-          if (item.id !== session.id) return item;
+      const data = await res.json();
 
-          const newBooked = Math.max(0, (item.booked ?? 1) - 1);
-          const cap = item.capacity ?? 0;
-          const newSpots = cap ? cap - newBooked : 0;
+      setDays((prev) =>
+        prev?.map((day) => ({
+          ...day,
+          sessions: day.sessions.map((item) => {
+            if (item.id !== session.id) return item;
 
-          return {
-            ...item,
-            userHasBooking: false,
-            bookingId: undefined,
-            booked: newBooked,
-            spots: newSpots,
-          };
-        }),
-      })) ?? prev
-    );
+            const newBooked = Math.max(0, (item.booked ?? 1) - 1);
+            const cap = item.capacity ?? 0;
+            const newSpots = cap ? cap - newBooked : 0;
 
-    if (!data.lateCancel) {
-      setTokens((current) => current + 1);
+            return {
+              ...item,
+              userHasBooking: false,
+              bookingId: undefined,
+              booked: newBooked,
+              spots: newSpots,
+            };
+          }),
+        })) ?? prev
+      );
+
+      if (!data.lateCancel) {
+        setTokens((current) => current + 1);
+      }
+
+      shouldResetBusy = false;
+      window.location.reload();
+      return true;
+    } finally {
+      if (shouldResetBusy) {
+        setCancelBusyId(null);
+      }
     }
   }
 
@@ -938,7 +1041,9 @@ export default function ClassesPage() {
                   index={index}
                   onOpenReserve={openReserve}
                   onCancelBooking={handleCancel}
-                  onJoinWaitlist={joinWaitlist}
+                  onOpenWaitlistConfirm={openWaitlistConfirm}
+                  onLeaveWaitlist={leaveWaitlist}
+                  cancelBusyId={cancelBusyId}
                   waitlistBusyId={waitlistBusyId}
                 />
               ))
@@ -1012,11 +1117,31 @@ export default function ClassesPage() {
       {lateCancelSession && (
         <LateCancelModal
           session={lateCancelSession}
+          busy={cancelBusyId === lateCancelSession.id}
           affiliation={affiliation}
           onClose={() => setLateCancelSession(null)}
           onConfirm={async () => {
             await executeCancel(lateCancelSession);
             setLateCancelSession(null);
+          }}
+        />
+      )}
+
+      {waitlistConfirmSession && (
+        <WaitlistConfirmModal
+          busy={waitlistBusyId === waitlistConfirmSession.id}
+          onClose={() => {
+            if (waitlistBusyId !== waitlistConfirmSession.id) {
+              setWaitlistConfirmSession(null);
+            }
+          }}
+          onConfirm={async () => {
+            const joined = await joinWaitlist(waitlistConfirmSession);
+            if (joined) {
+              setWaitlistConfirmSession((current) =>
+                current?.id === waitlistConfirmSession.id ? null : current
+              );
+            }
           }}
         />
       )}
@@ -1030,6 +1155,53 @@ export default function ClassesPage() {
         onBooked={handleBooked}
       />
     </section>
+  );
+}
+
+function WaitlistConfirmModal({
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => Promise<void> | void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center md:items-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="waitlist-modal-title"
+        initial={{ y: 30, opacity: 0 }}
+        animate={{ y: 0, opacity: 1, transition: { duration: 0.25, ease: EASE } }}
+        className="relative w-full rounded-t-2xl bg-[color:var(--color-card)] p-5 shadow-xl md:w-[520px] md:rounded-2xl"
+      >
+        <h3 id="waitlist-modal-title" className="font-display text-lg font-bold">
+          ¿Clase llena? Únete a la waitlist
+        </h3>
+
+        <p className="mt-3 whitespace-pre-line text-sm text-muted-foreground">
+          {"Si se libera un lugar, se asignará automáticamente en orden de lista.\nEs importante estar pendiente, ya que al asignarse tu lugar quedará confirmado.\nPuedes salirte de la waitlist en cualquier momento."}
+        </p>
+
+        <div className="mt-5 flex gap-2">
+          <button
+            className="btn-primary h-10 px-4"
+            onClick={onConfirm}
+            disabled={busy}
+            autoFocus
+          >
+            {busy ? "Agregando..." : "Aceptar"}
+          </button>
+          <button className="btn-outline h-10 px-4" onClick={onClose} disabled={busy}>
+            Cancelar
+          </button>
+        </div>
+      </motion.div>
+    </div>
   );
 }
 
@@ -1083,11 +1255,13 @@ function LateCancelModalLegacy({
 
 function LateCancelModal({
   session,
+  busy,
   affiliation,
   onClose,
   onConfirm,
 }: {
   session: Session;
+  busy: boolean;
   affiliation: Affiliation | null;
   onClose: () => void;
   onConfirm: () => void;
@@ -1103,25 +1277,31 @@ function LateCancelModal({
         transition={{ duration: 0.2 }}
         className="card w-full max-w-md p-6"
       >
-        <h3 className="font-display text-xl font-bold">Cancelacion tardia</h3>
+        <h3 className="font-display text-xl font-bold">
+          Ups, estás fuera del tiempo de cancelación 
+        </h3>
+
 
         <p className="mt-4 text-sm text-red-600">
-          Faltan menos de 4 horas.
+          Faltan menos de 4 horas para la clase.
           <br />
           {hasPenalty
-            ? "Se te cobrará una penalización de $100 pesos."
-            : "Si cancelas tu clase no se te regresaran los creditos por nuestras politicas de cancelacion."}
+            ? "Esta reserva genera un cargo de $100 por cancelación tardía."
+            : "Este crédito no podrá recuperarse debido a la cancelación tardía."}
+            <br/>
+            Gracias por ayudarnos a respetar los espacios de cada clase!
         </p>
 
         <div className="mt-6 flex justify-end gap-3">
-          <button onClick={onClose} className="btn-outline h-10">
+          <button onClick={onClose} className="btn-outline h-10" disabled={busy}>
             Volver
           </button>
           <button
             onClick={onConfirm}
+            disabled={busy}
             className="h-10 rounded-md bg-red-600 px-4 text-white hover:bg-red-700"
           >
-            Confirmar cancelacion
+            {busy ? "Cancelando..." : "Confirmar cancelacion"}
           </button>
         </div>
       </motion.div>

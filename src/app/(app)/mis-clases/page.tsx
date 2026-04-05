@@ -629,7 +629,7 @@ function LateCancelModal({
         className="card w-full max-w-md p-6"
       >
         <h3 className="font-display text-xl font-bold">
-          Cancelación tardía
+          Ups, estás fuera del tiempo de cancelación 
         </h3>
 
         <p className="mt-3 text-sm text-muted-foreground">
@@ -641,11 +641,13 @@ function LateCancelModal({
         </p>
 
         <p className="mt-4 text-sm text-red-600">
-          Faltan menos de 4 horas.
+          Faltan menos de 4 horas para la clase.
           <br />
           {hasPenalty
-            ? "Si cancelas esta clase se te cobrará una penalización de $100 pesos."
-            : "Si cancelas tu clase no se te regresarán los créditos por nuestras políticas de cancelación."}
+            ? "Esta reserva genera un cargo de $100 por cancelación tardía."
+            : "Este crédito no podrá recuperarse debido a la cancelación tardía."}
+            <br/>
+            Gracias por ayudarnos a respetar los espacios de cada clase!
         </p>
 
         <div className="mt-6 flex justify-end gap-3">

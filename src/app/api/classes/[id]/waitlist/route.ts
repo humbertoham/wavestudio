@@ -167,3 +167,40 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return errorResponse(error);
   }
 }
+
+export async function DELETE(req: NextRequest, ctx: Ctx) {
+  const auth = await getAuthFromRequest(req);
+  if (!auth?.sub) {
+    return j(401, {
+      error: "UNAUTHENTICATED",
+      message: "Necesitas iniciar sesion para salir de la lista de espera.",
+    });
+  }
+
+  const { id: classId } = await ctx.params;
+
+  try {
+    const result = await prisma.waitlist.deleteMany({
+      where: {
+        classId,
+        userId: auth.sub,
+      },
+    });
+
+    if (!result.count) {
+      return j(404, {
+        error: "NOT_WAITLISTED",
+        message: "No estabas en la lista de espera.",
+      });
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error: unknown) {
+    console.error("DELETE /api/classes/[id]/waitlist error:", error);
+
+    return j(500, {
+      error: "INTERNAL_ERROR",
+      message: "No se pudo salir de la lista de espera.",
+    });
+  }
+}
