@@ -10,6 +10,7 @@ const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
 const MX_LOCALE: Intl.LocalesArgument = "es-MX";
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
+type NoCreditsModalVariant = "reserve" | "waitlist";
 
 type ApiSession = {
   id: string;
@@ -712,6 +713,8 @@ export default function ClassesPage() {
   const [tokens, setTokens] = useState(0);
   const [isAuthed, setIsAuthed] = useState(false);
   const [showNoCredits, setShowNoCredits] = useState(false);
+  const [noCreditsModalVariant, setNoCreditsModalVariant] =
+    useState<NoCreditsModalVariant>("reserve");
   const [affiliation, setAffiliation] = useState<Affiliation | null>(null);
   const [lateCancelSession, setLateCancelSession] = useState<Session | null>(null);
   const [reserveOpen, setReserveOpen] = useState(false);
@@ -721,6 +724,16 @@ export default function ClassesPage() {
   const [waitlistConfirmSession, setWaitlistConfirmSession] =
     useState<Session | null>(null);
 
+  function openNoCreditsModal(variant: NoCreditsModalVariant) {
+    setNoCreditsModalVariant(variant);
+    setShowNoCredits(true);
+  }
+
+  function closeNoCreditsModal() {
+    setShowNoCredits(false);
+    setNoCreditsModalVariant("reserve");
+  }
+
   function openReserve(session: Session) {
     if (!isAuthed) {
       window.location.href = "/login";
@@ -728,7 +741,7 @@ export default function ClassesPage() {
     }
 
     if (tokens <= 0) {
-      setShowNoCredits(true);
+      openNoCreditsModal("reserve");
       return;
     }
 
@@ -742,12 +755,22 @@ export default function ClassesPage() {
       return;
     }
 
+    if (tokens <= 0) {
+      openNoCreditsModal("waitlist");
+      return;
+    }
+
     setWaitlistConfirmSession(session);
   }
 
   async function joinWaitlist(session: Session) {
     if (!isAuthed) {
       window.location.href = "/login";
+      return false;
+    }
+
+    if (tokens <= 0) {
+      openNoCreditsModal("waitlist");
       return false;
     }
 
@@ -1080,7 +1103,7 @@ export default function ClassesPage() {
         <div className="fixed inset-0 z-40 flex items-end justify-center md:items-center">
           <div
             className="absolute inset-0 bg-black/40"
-            onClick={() => setShowNoCredits(false)}
+            onClick={closeNoCreditsModal}
           />
 
           <motion.div
@@ -1088,17 +1111,27 @@ export default function ClassesPage() {
             animate={{ y: 0, opacity: 1 }}
             className="relative w-full rounded-t-2xl bg-[color:var(--color-card)] p-5 shadow-xl md:w-[420px] md:rounded-2xl"
           >
-            <h3 className="font-display text-lg font-bold">No tienes creditos</h3>
+            <h3 className="font-display text-lg font-bold">
+              {noCreditsModalVariant === "waitlist"
+                ? "Créditos insuficientes"
+                : "No tienes creditos"}
+            </h3>
 
             <p className="mt-2 text-sm text-muted-foreground">
-              Tienes <b>0 creditos</b>. Necesitas al menos <b>1 credito</b> para
-              reservar espacios en una clase.
+              {noCreditsModalVariant === "waitlist" ? (
+                "Créditos insuficientes para unirte a la lista de espera"
+              ) : (
+                <>
+                  Tienes <b>0 creditos</b>. Necesitas al menos <b>1 credito</b> para
+                  reservar espacios en una clase.
+                </>
+              )}
             </p>
 
             <div className="mt-4 flex gap-2">
               <button
                 className="btn-outline h-10 px-4"
-                onClick={() => setShowNoCredits(false)}
+                onClick={closeNoCreditsModal}
               >
                 Cerrar
               </button>
@@ -1107,7 +1140,7 @@ export default function ClassesPage() {
                 href="/precios"
                 className="btn-primary inline-flex h-10 items-center justify-center px-4"
               >
-                Obtener creditos
+                Obtener créditos
               </a>
             </div>
           </motion.div>

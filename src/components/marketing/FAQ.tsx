@@ -25,7 +25,7 @@ const FAQS = [
   },
   {
     q: "¿Puedo cancelar o reagendar una clase?",
-    a: "Sí, siempre que lo hagas con al menos 4 horas de anticipación, así liberamos tu lugar para alguien más de la comunidad.\n\nSi necesitas cancelar con menos de 4 horas, te pedimos por favor que nos avises por Instagram. Y si eres usuario de Wellhub o TotalPass, es muy importante que también canceles o nos contactes en caso de no poder asistir.",
+    a: "Sí, siempre que lo hagas con al menos 4 horas de anticipación, así liberamos tu lugar para alguien más de la comunidad. En caso de cancelación tardía, este crédito no podrá recuperarse. Gracias por ayudarnos a respetar los espacios de cada clase.\n\nSi eres usuario de Wellhub o TotalPass, es muy importante que también canceles o nos contactes en caso de no poder asistir. En estos casos, se aplicará un cargo de $100 pesos por cancelación tardía o no asistencia.",
   },
 ];
 

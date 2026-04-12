@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { FiInstagram, FiPhone, FiMail, FiMapPin } from "react-icons/fi";
+import { FaWhatsapp } from "react-icons/fa";
 
 /** Hook: detecta si el sitio está en dark
  * - Prioriza la clase en <html>. Si hay 'dark', usa dark.
@@ -63,10 +64,7 @@ export default function Footer() {
 </Link>
             </div>
 
-            <p className="max-w-prose text-sm text-muted-foreground">
-              Empoderamiento a través del movimiento consciente al ritmo de la música.
-              Únete a nuestra comunidad y prioriza tu bienestar físico y mental.
-            </p>
+           
 
             <div className="grid gap-4 sm:grid-cols-2">
               {/* Contacto */}
@@ -74,7 +72,7 @@ export default function Footer() {
                 <h4 className="font-display text-sm font-extrabold">Contacto</h4>
                 <ul className="mt-3 space-y-2 text-sm">
                   <li className="flex items-center gap-2 text-muted-foreground">
-                    <FiPhone className="icon" />
+                    <FaWhatsapp className="icon" />
                     <a href="tel:+528128877484" className="hover:underline">
                       +52 812 887 7484
                     </a>

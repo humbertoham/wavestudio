@@ -233,11 +233,11 @@ export default function PricingPage() {
           <h1 className="font-display text-3xl font-extrabold md:text-4xl">
             Paquetes de entrenamiento
           </h1>
+          
           <p className="mt-3 text-muted-foreground">
-            Elige el plan que mejor se adapte a tu ritmo.
-          </p>
-          <p className="mt-3 text-muted-foreground">
-            ✨ 10% OFF pagando en efectivo o transferencia.
+            Puedes pagar en línea de forma rápida y segura desde nuestra página web.
+          </p><p className="mt-3 text-muted-foreground">
+          También puedes pagar por transferencia o efectivo y recibir clases extra en tu paquete.
           </p>
           <p className="mt-3 text-muted-foreground">
            📩 Escríbenos por DM.
