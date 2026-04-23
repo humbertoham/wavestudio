@@ -24,7 +24,13 @@ export async function GET(req: NextRequest) {
 
   const items = await prisma.user.findMany({
     where,
-    select: { id: true, name: true, email: true, dateOfBirth: true }, // ✅ conservado
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      dateOfBirth: true,
+      bookingBlocked: true,
+    }, // ✅ conservado
     orderBy: { createdAt: "desc" },
     take,
   });

@@ -99,6 +99,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         userId,
         expiresAt: { gt: now },
         classesLeft: { gt: 0 },
+        OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
       },
       orderBy: { expiresAt: "asc" },
       select: { id: true, classesLeft: true },

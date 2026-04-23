@@ -9,6 +9,8 @@ import { FiClock, FiUser } from "react-icons/fi";
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
 const MX_LOCALE: Intl.LocalesArgument = "es-MX";
+const BOOKING_BLOCKED_MESSAGE =
+  "Hola, debido a nuestras políticas de cancelación, tus créditos están bloqueados por una cancelación tardía o falta a clase. Para desbloquearlos, es necesario liquidar el monto de $100. Contáctanos por DM para realizar el pago.";
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
 type NoCreditsModalVariant = "reserve" | "waitlist";
 
@@ -257,6 +259,7 @@ type ReserveMenuProps = {
   tokens: number;
   affiliation: string | null;
   onBooked: (qty: number, bookingId: string) => void;
+  onBlocked: () => void;
 };
 
 function ReserveMenu({
@@ -265,6 +268,7 @@ function ReserveMenu({
   session,
   tokens,
   onBooked,
+  onBlocked,
   affiliation,
 }: ReserveMenuProps) {
   const [qty, setQty] = useState(1);
@@ -308,12 +312,18 @@ function ReserveMenu({
       });
 
       if (!res.ok) {
-        throw new Error(
-          await readErrorMessage(
-            res,
-            `No se pudo confirmar la reserva (HTTP ${res.status})`
-          )
+        const message = await readErrorMessage(
+          res,
+          `No se pudo confirmar la reserva (HTTP ${res.status})`
         );
+
+        if (res.status === 403 && message === BOOKING_BLOCKED_MESSAGE) {
+          onBlocked();
+          onClose();
+          return;
+        }
+
+        throw new Error(message);
       }
 
       const data = await res.json();
@@ -712,6 +722,8 @@ export default function ClassesPage() {
   const [error, setError] = useState<string | null>(null);
   const [tokens, setTokens] = useState(0);
   const [isAuthed, setIsAuthed] = useState(false);
+  const [bookingBlocked, setBookingBlocked] = useState(false);
+  const [showBookingBlocked, setShowBookingBlocked] = useState(false);
   const [showNoCredits, setShowNoCredits] = useState(false);
   const [noCreditsModalVariant, setNoCreditsModalVariant] =
     useState<NoCreditsModalVariant>("reserve");
@@ -734,9 +746,18 @@ export default function ClassesPage() {
     setNoCreditsModalVariant("reserve");
   }
 
+  function openBookingBlockedModal() {
+    setShowBookingBlocked(true);
+  }
+
   function openReserve(session: Session) {
     if (!isAuthed) {
       window.location.href = "/login";
+      return;
+    }
+
+    if (bookingBlocked) {
+      openBookingBlockedModal();
       return;
     }
 
@@ -755,6 +776,11 @@ export default function ClassesPage() {
       return;
     }
 
+    if (bookingBlocked) {
+      openBookingBlockedModal();
+      return;
+    }
+
     if (tokens <= 0) {
       openNoCreditsModal("waitlist");
       return;
@@ -766,6 +792,11 @@ export default function ClassesPage() {
   async function joinWaitlist(session: Session) {
     if (!isAuthed) {
       window.location.href = "/login";
+      return false;
+    }
+
+    if (bookingBlocked) {
+      openBookingBlockedModal();
       return false;
     }
 
@@ -783,9 +814,17 @@ export default function ClassesPage() {
       });
 
       if (!res.ok) {
-        throw new Error(
-          await readErrorMessage(res, "No se pudo agregar a la lista de espera.")
+        const message = await readErrorMessage(
+          res,
+          "No se pudo agregar a la lista de espera."
         );
+
+        if (res.status === 403 && message === BOOKING_BLOCKED_MESSAGE) {
+          openBookingBlockedModal();
+          return false;
+        }
+
+        throw new Error(message);
       }
 
       const data = await res.json().catch(() => ({}));
@@ -986,9 +1025,13 @@ export default function ClassesPage() {
 
           setIsAuthed(typeof tk.authenticated === "boolean" ? tk.authenticated : false);
           setTokens(typeof tk.tokens === "number" ? tk.tokens : 0);
+          setBookingBlocked(
+            typeof tk.bookingBlocked === "boolean" ? tk.bookingBlocked : false
+          );
         } else {
           setIsAuthed(false);
           setTokens(0);
+          setBookingBlocked(false);
         }
       } catch (err) {
         console.error(err);
@@ -1147,6 +1190,10 @@ export default function ClassesPage() {
         </div>
       )}
 
+      {showBookingBlocked && (
+        <BookingBlockedModal onClose={() => setShowBookingBlocked(false)} />
+      )}
+
       {lateCancelSession && (
         <LateCancelModal
           session={lateCancelSession}
@@ -1186,6 +1233,7 @@ export default function ClassesPage() {
         tokens={tokens}
         affiliation={affiliation}
         onBooked={handleBooked}
+        onBlocked={openBookingBlockedModal}
       />
     </section>
   );
@@ -1231,6 +1279,37 @@ function WaitlistConfirmModal({
           </button>
           <button className="btn-outline h-10 px-4" onClick={onClose} disabled={busy}>
             Cancelar
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function BookingBlockedModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center md:items-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="booking-blocked-title"
+        initial={{ y: 30, opacity: 0 }}
+        animate={{ y: 0, opacity: 1, transition: { duration: 0.25, ease: EASE } }}
+        className="relative w-full rounded-t-2xl bg-[color:var(--color-card)] p-5 shadow-xl md:w-[520px] md:rounded-2xl"
+      >
+        <h3 id="booking-blocked-title" className="font-display text-lg font-bold">
+          Créditos bloqueados
+        </h3>
+
+        <p className="mt-3 text-sm text-muted-foreground">
+          {BOOKING_BLOCKED_MESSAGE}
+        </p>
+
+        <div className="mt-5 flex justify-end">
+          <button className="btn-outline h-10 px-4" onClick={onClose} autoFocus>
+            Cerrar
           </button>
         </div>
       </motion.div>

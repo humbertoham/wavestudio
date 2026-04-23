@@ -29,6 +29,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       phone: true,
       emergencyPhone: true,
       affiliation: true,
+      bookingBlocked: true,
+      bookingBlockedAt: true,
+      bookingBlockLogs: {
+        orderBy: { createdAt: "desc" },
+        take: 5,
+        select: {
+          id: true,
+          blocked: true,
+          createdAt: true,
+        },
+      },
     },
   });
 
@@ -64,7 +75,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   // ✅ 3️⃣ SALDO REAL DESDE PACKS (TOKENS NO EXPIRADOS)
   const tokenBalance = purchases
-    .filter((p) => p.expiresAt > now && p.classesLeft > 0)
+    .filter(
+      (p) =>
+        p.expiresAt > now &&
+        p.classesLeft > 0 &&
+        (!p.pausedUntil || p.pausedUntil <= now)
+    )
     .reduce((sum, p) => sum + p.classesLeft, 0);
 
   // 4️⃣ Reservas
@@ -107,6 +123,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       createdAt: p.createdAt,
       expiresAt: p.expiresAt,
       classesLeft: p.classesLeft,
+      pausedDays: p.pausedDays,
+      pausedUntil: p.pausedUntil,
+      isPaused: !!p.pausedUntil && p.pausedUntil > now,
       isExpired: p.expiresAt < now,
       pack: p.pack,
       payment: p.payment ?? null,

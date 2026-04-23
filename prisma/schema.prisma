@@ -75,6 +75,8 @@ model User {
   passwordHash  String
   emailVerified DateTime?
   role          Role      @default(USER)
+  bookingBlocked Boolean   @default(false)
+  bookingBlockedAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -85,6 +87,7 @@ model User {
   waitlists     Waitlist[]
   payments      Payment[]
   checkoutLinks CheckoutLink[]
+  bookingBlockLogs BookingBlockLog[]
 
 
   // password reset
@@ -201,6 +204,8 @@ model PackPurchase {
 
   classesLeft Int
   expiresAt   DateTime
+  pausedDays  Int       @default(0)
+  pausedUntil DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -213,6 +218,16 @@ model PackPurchase {
   paymentId String?  @unique // <- necesario para 1–1
 
   @@index([userId, expiresAt])
+}
+
+model BookingBlockLog {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  blocked   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
 
 /**

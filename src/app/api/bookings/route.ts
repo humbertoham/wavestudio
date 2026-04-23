@@ -1,17 +1,24 @@
 // /src/app/api/bookings/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Prisma, BookingStatus, TokenReason } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getAuth } from "@/lib/auth";
+import { getAuthFromRequest } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const BOOKING_BLOCKED_MESSAGE =
+  "Hola, debido a nuestras políticas de cancelación, tus créditos están bloqueados por una cancelación tardía o falta a clase. Para desbloquearlos, es necesario liquidar el monto de $100. Contáctanos por DM para realizar el pago.";
 
 function j(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
 type Body = { classId?: string; quantity?: number };
+
+function methodNotAllowed() {
+  return j(405, { error: "METHOD_NOT_ALLOWED" });
+}
 
 // ✅ SALDO REAL: sumar packs vigentes (classesLeft)
 async function getUserTokenBalance(userId: string) {
@@ -21,6 +28,7 @@ async function getUserTokenBalance(userId: string) {
       userId,
       expiresAt: { gt: now },
       classesLeft: { gt: 0 },
+      OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
     },
     _sum: { classesLeft: true },
   });
@@ -35,9 +43,25 @@ async function getBookedSpots(classId: string) {
   return agg._sum.quantity ?? 0;
 }
 
-export async function POST(req: Request) {
+export async function GET() {
+  return methodNotAllowed();
+}
+
+export async function PUT() {
+  return methodNotAllowed();
+}
+
+export async function PATCH() {
+  return methodNotAllowed();
+}
+
+export async function DELETE() {
+  return methodNotAllowed();
+}
+
+export async function POST(req: NextRequest) {
   try {
-    const auth = await getAuth();
+    const auth = await getAuthFromRequest(req);
     if (!auth?.sub)
       return j(401, {
         error:
@@ -47,24 +71,40 @@ export async function POST(req: Request) {
     // 🔎 Obtener afiliación
     const user = await prisma.user.findUnique({
       where: { id: auth.sub },
-      select: { affiliation: true },
+      select: { affiliation: true, bookingBlocked: true },
     });
 
     if (!user) return j(404, { error: "Usuario no encontrado." });
 
+    if (user.bookingBlocked) {
+      return j(403, {
+        code: "BOOKING_BLOCKED",
+        error: BOOKING_BLOCKED_MESSAGE,
+      });
+    }
+
     const isCorporate =
       user.affiliation === "WELLHUB" || user.affiliation === "TOTALPASS";
 
-    const body = (await req.json().catch(() => ({}))) as Body;
-    const classId = String(body.classId || "").trim();
+    const body = (await req.json().catch(() => null)) as Body | null;
+
+    if (!body || typeof body !== "object") {
+      return j(400, { error: "Body JSON invalido." });
+    }
+
+    const classId = typeof body.classId === "string" ? body.classId.trim() : "";
 
     if (!classId) return j(400, { error: "Falta seleccionar la clase." });
 
-    const quantity = Number.isFinite(body.quantity)
-      ? Math.max(1, Math.floor(body.quantity!))
-      : 1;
+    const quantityValue = body.quantity == null ? 1 : Number(body.quantity);
 
-    if (quantity < 1) return j(400, { error: "Cantidad de lugares inválida." });
+    if (!Number.isFinite(quantityValue)) {
+      return j(400, { error: "Cantidad de lugares invalida." });
+    }
+
+    const quantity = Math.floor(quantityValue);
+
+    if (quantity < 1) return j(400, { error: "Cantidad de lugares invalida." });
 
     // 🔒 BLOQUEO: corporate solo 1 lugar
     if (isCorporate && quantity > 1) {
@@ -144,6 +184,17 @@ export async function POST(req: Request) {
       async (tx) => {
         const now = new Date();
 
+        const userInside = await tx.user.findUnique({
+          where: { id: auth.sub },
+          select: { bookingBlocked: true },
+        });
+
+        if (!userInside || userInside.bookingBlocked) {
+          throw Object.assign(new Error("BOOKING_BLOCKED"), {
+            code: "BOOKING_BLOCKED",
+          });
+        }
+
         // 🔒 Revalidación corporate dentro de tx
         if (isCorporate) {
           const existingInside = await tx.booking.findFirst({
@@ -204,6 +255,7 @@ export async function POST(req: Request) {
             userId: auth.sub,
             expiresAt: { gt: now },
             classesLeft: { gt: 0 },
+            OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
           },
           orderBy: { expiresAt: "asc" },
           select: { id: true, classesLeft: true },
@@ -279,13 +331,19 @@ export async function POST(req: Request) {
       bookingId: result.bookingId,
     });
   } catch (err: any) {
+    if (err?.code === "BOOKING_BLOCKED")
+      return j(403, {
+        code: "BOOKING_BLOCKED",
+        error: BOOKING_BLOCKED_MESSAGE,
+      });
+
     if (err?.code === "CORPORATE_DUPLICATE")
       return j(409, {
         error: "Ya tienes una reserva activa para esta clase.",
       });
 
     if (err?.code === "NOT_ENOUGH_SPOTS")
-      return j(409, {
+      return j(400, {
         error: `Solo quedan ${err.available ?? 0} lugar(es) disponibles.`,
       });
 
@@ -304,7 +362,15 @@ export async function POST(req: Request) {
         error: "Esta clase no está disponible para reservas.",
       });
 
-    console.error("POST /api/bookings error:", err);
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+      console.error("BOOKING ERROR:", {
+        code: err.code,
+        meta: err.meta,
+        message: err.message,
+      });
+    } else {
+      console.error("BOOKING ERROR:", err);
+    }
 
     return j(500, {
       error: "Ocurrió un error al procesar tu reserva. Intenta nuevamente.",

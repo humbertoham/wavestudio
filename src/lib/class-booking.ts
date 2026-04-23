@@ -5,6 +5,7 @@ export type ManagedBookingErrorCode =
   | "CLASS_CANCELED"
   | "CLASS_ALREADY_STARTED"
   | "CLASS_FULL"
+  | "BOOKING_BLOCKED"
   | "USER_ALREADY_BOOKED"
   | "NO_CREDITS_AVAILABLE";
 
@@ -60,6 +61,13 @@ export async function createSingleSeatBookingWithDebit(
 
   if (usedSpots >= cls.capacity) fail("CLASS_FULL");
 
+  const user = await tx.user.findUnique({
+    where: { id: params.userId },
+    select: { bookingBlocked: true },
+  });
+
+  if (!user || user.bookingBlocked) fail("BOOKING_BLOCKED");
+
   const alreadyBooked = await tx.booking.findFirst({
     where: {
       classId: params.classId,
@@ -76,6 +84,7 @@ export async function createSingleSeatBookingWithDebit(
       userId: params.userId,
       classesLeft: { gt: 0 },
       expiresAt: { gt: now },
+      OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
     },
     orderBy: [{ expiresAt: "asc" }, { createdAt: "asc" }],
     select: { id: true },
@@ -87,7 +96,12 @@ export async function createSingleSeatBookingWithDebit(
         userId: params.userId,
         OR: [
           { packPurchaseId: null },
-          { packPurchase: { expiresAt: { gt: now } } },
+          {
+            packPurchase: {
+              expiresAt: { gt: now },
+              OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
+            },
+          },
         ],
       },
       _sum: { delta: true },

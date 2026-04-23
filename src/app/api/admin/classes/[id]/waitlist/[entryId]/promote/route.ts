@@ -44,6 +44,12 @@ function errorResponse(error: unknown) {
           error: error.code,
           message: "No hay lugares disponibles para agregar a este usuario.",
         });
+      case "BOOKING_BLOCKED":
+        return j(403, {
+          error: error.code,
+          message:
+            "Este usuario tiene las reservas bloqueadas y no puede agregarse a clase.",
+        });
       case "USER_ALREADY_BOOKED":
         return j(409, {
           error: error.code,

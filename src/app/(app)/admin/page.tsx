@@ -41,6 +41,34 @@ function toLocalDatetimeMX(iso: string) {
   return `${year}-${month}-${day}T${time}`;
 }
 
+async function readApiMessage(res: Response, fallback: string) {
+  const payload = await res.json().catch(() => null);
+
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "message" in payload &&
+    typeof payload.message === "string"
+  ) {
+    return payload.message;
+  }
+
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "error" in payload &&
+    typeof payload.error === "string"
+  ) {
+    return payload.error;
+  }
+
+  return fallback;
+}
+
+function formatAdminDate(value?: string | null) {
+  return value ? new Date(value).toLocaleString() : "—";
+}
+
 type Instructor = { id: string; name: string; bio?: string | null };
 type ClassItem = {
   id: string; title: string; focus: string; date: string; durationMin: number; capacity: number;
@@ -61,7 +89,13 @@ type Pack = {
   highlight: "POPULAR" | "BEST" | null;
   description: string[] | null;
 };
-type User = { id: string; name: string | null; email: string; dateOfBirth?: string | null };
+type User = {
+  id: string;
+  name: string | null;
+  email: string;
+  dateOfBirth?: string | null;
+  bookingBlocked?: boolean;
+};
 type UserDetails = {
   user: {
     id: string;
@@ -71,6 +105,13 @@ type UserDetails = {
     phone?: string | null;
     emergencyPhone?: string | null;
     affiliation: "NONE" | "WELLHUB" | "TOTALPASS";
+    bookingBlocked: boolean;
+    bookingBlockedAt?: string | null;
+    bookingBlockLogs?: Array<{
+      id: string;
+      blocked: boolean;
+      createdAt: string;
+    }>;
     createdAt: string;
   };
   tokenBalance: number;
@@ -79,6 +120,9 @@ type UserDetails = {
     createdAt: string;
     expiresAt: string;
     classesLeft: number;
+    pausedDays: number;
+    pausedUntil?: string | null;
+    isPaused?: boolean;
     pack: { id: string; name: string; classes: number; validityDays: number; price: number };
     payment?: { id: string; status: "PENDING"|"APPROVED"|"REJECTED"|"REFUNDED"|"CANCELED"|null } | null;
   }>;
@@ -1232,6 +1276,13 @@ function UserInspectorSection() {
 
   const [selectedPackId, setSelectedPackId] = useState("");
   const [buyingPack, setBuyingPack] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const [togglingBlock, setTogglingBlock] = useState(false);
+  const [pauseDaysById, setPauseDaysById] = useState<Record<string, number>>({});
+  const [pausingPackId, setPausingPackId] = useState<string | null>(null);
 
   // 1️⃣ últimos usuarios
   const { data: latestUsers, isLoading: loadingLatest } = useSWR<{ items: User[] }>(
@@ -1265,6 +1316,88 @@ function UserInspectorSection() {
   const list = q.trim() ? searchData?.items : latestUsers?.items;
   const loadingList = q.trim() ? searching : loadingLatest;
 
+  async function updateBookingBlocked(next: boolean) {
+    if (!selectedId) return;
+
+    setTogglingBlock(true);
+    setFeedback(null);
+
+    try {
+      const res = await fetch(`/api/admin/users/${selectedId}/booking-block`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bookingBlocked: next }),
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          await readApiMessage(res, "No se pudo actualizar el bloqueo.")
+        );
+      }
+
+      await mutate();
+      setFeedback({
+        type: "success",
+        text: next ? "Reservas bloqueadas." : "Reservas desbloqueadas.",
+      });
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "No se pudo actualizar el bloqueo.",
+      });
+    } finally {
+      setTogglingBlock(false);
+    }
+  }
+
+  async function pausePurchase(purchaseId: string) {
+    if (!selectedId) return;
+
+    const days = pauseDaysById[purchaseId] ?? 1;
+    if (!Number.isInteger(days) || days < 1 || days > 30) {
+      setFeedback({
+        type: "error",
+        text: "La pausa debe ser de 1 a 30 dias.",
+      });
+      return;
+    }
+
+    setPausingPackId(purchaseId);
+    setFeedback(null);
+
+    try {
+      const res = await fetch(
+        `/api/admin/users/${selectedId}/packs/${purchaseId}/pause`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ days }),
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(await readApiMessage(res, "No se pudo pausar el paquete."));
+      }
+
+      await mutate();
+      setFeedback({
+        type: "success",
+        text: `Paquete pausado por ${days} dia${days === 1 ? "" : "s"}.`,
+      });
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text:
+          error instanceof Error ? error.message : "No se pudo pausar el paquete.",
+      });
+    } finally {
+      setPausingPackId(null);
+    }
+  }
+
   return (
     <Section>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1292,9 +1425,20 @@ function UserInspectorSection() {
                     className={`w-full text-left p-3 hover:bg-[--color-muted] ${
                       selectedId === u.id ? "bg-[--color-muted]" : ""
                     }`}
-                    onClick={() => setSelectedId(u.id)}
+                    onClick={() => {
+                      setSelectedId(u.id);
+                      setFeedback(null);
+                      setTokenDelta(0);
+                    }}
                   >
-                    <div className="font-medium">{u.name ?? "—"}</div>
+                    <div className="flex items-center gap-2 font-medium">
+                      <span>{u.name ?? "—"}</span>
+                      {u.bookingBlocked && (
+                        <span className="rounded bg-red-100 px-2 py-0.5 text-[11px] text-red-700">
+                          Bloqueado
+                        </span>
+                      )}
+                    </div>
                     <div className="text-sm text-muted-foreground">
                       {u.email}
                     </div>
@@ -1339,6 +1483,18 @@ function UserInspectorSection() {
 
           {selectedId && details && (
             <>
+              {feedback && (
+                <div
+                  className={`rounded-[var(--radius)] border p-3 text-sm ${
+                    feedback.type === "success"
+                      ? "border-green-200 bg-green-50 text-green-700"
+                      : "border-red-200 bg-red-50 text-red-700"
+                  }`}
+                >
+                  {feedback.text}
+                </div>
+              )}
+
               {/* PERFIL + TOKENS */}
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="p-4 border rounded-[var(--radius)]">
@@ -1457,6 +1613,60 @@ function UserInspectorSection() {
 
               </div>
 
+              {/* BLOQUEAR RESERVAS */}
+              <div className="p-4 border rounded-[var(--radius)] space-y-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="font-semibold">Reservas</h3>
+                    <p
+                      className="text-sm text-muted-foreground"
+                      title="Bloquea reservas por cancelacion tardia o falta a clase."
+                    >
+                      Bloquear reservas:{" "}
+                      <span className="font-semibold">
+                        {details.user.bookingBlocked ? "SI" : "NO"}
+                      </span>
+                    </p>
+                  </div>
+
+                  <label className="inline-flex cursor-pointer items-center gap-3">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={details.user.bookingBlocked}
+                      disabled={togglingBlock}
+                      onChange={(e) => updateBookingBlocked(e.target.checked)}
+                    />
+                    <span className="relative h-7 w-12 rounded-full bg-gray-300 transition peer-checked:bg-red-600 after:absolute after:left-1 after:top-1 after:h-5 after:w-5 after:rounded-full after:bg-white after:transition peer-checked:after:translate-x-5" />
+                    <span className="text-sm font-medium">
+                      {togglingBlock ? "Guardando..." : details.user.bookingBlocked ? "SI" : "NO"}
+                    </span>
+                  </label>
+                </div>
+
+                {details.user.bookingBlocked && (
+                  <p className="text-xs text-red-600">
+                    Bloqueado desde {formatAdminDate(details.user.bookingBlockedAt)}
+                  </p>
+                )}
+
+                {(details.user.bookingBlockLogs?.length ?? 0) > 0 && (
+                  <div className="border-t pt-3">
+                    <p className="mb-2 text-xs font-semibold text-muted-foreground">
+                      Historial reciente
+                    </p>
+                    <ul className="space-y-1 text-xs text-muted-foreground">
+                      {details.user.bookingBlockLogs?.map((log) => (
+                        <li key={log.id}>
+                          {log.blocked ? "Bloqueado" : "Desbloqueado"} -{" "}
+                          {formatAdminDate(log.createdAt)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
               {/* ASIGNAR PAQUETE */}
               <div className="p-4 border rounded-[var(--radius)] space-y-3">
                 <h3 className="font-semibold">Asignar paquete</h3>
@@ -1518,31 +1728,88 @@ function UserInspectorSection() {
   <h3 className="font-semibold mb-3">Paquetes</h3>
 
   <div className="overflow-x-auto">
-    <table className="min-w-[600px] w-full text-sm border-collapse">
+    <table className="min-w-[900px] w-full text-sm border-collapse">
       <thead className="border-b border-[var(--color-border)] text-left">
         <tr>
           <th>Paquete</th>
           <th>Restantes</th>
           <th>Vence</th>
+          <th>Estado</th>
+          <th>Pausar</th>
         </tr>
       </thead>
       <tbody>
-        {details.purchases.map((p) => (
-          <tr key={p.id} className="border-b border-[var(--color-border)]">
-            <td className="py-2">{p.pack.name}</td>
-            <td className="py-2">{p.classesLeft}</td>
-            <td className="py-2">
-              <span className="whitespace-nowrap">
-                {new Date(p.expiresAt).toLocaleDateString()}
-              </span>
-            </td>
-          </tr>
-        ))}
+        {details.purchases.map((p) => {
+          const pausedUntilDate = p.pausedUntil ? new Date(p.pausedUntil) : null;
+          const isPaused =
+            !!pausedUntilDate && pausedUntilDate.getTime() > Date.now();
+          const isExpired = new Date(p.expiresAt).getTime() <= Date.now();
+          const pauseDays = pauseDaysById[p.id] ?? 1;
+
+          return (
+            <tr key={p.id} className="border-b border-[var(--color-border)]">
+              <td className="py-2">{p.pack.name}</td>
+              <td className="py-2">{p.classesLeft}</td>
+              <td className="py-2">
+                <span className="whitespace-nowrap">
+                  {new Date(p.expiresAt).toLocaleDateString()}
+                </span>
+              </td>
+              <td className="py-2">
+                {isPaused ? (
+                  <span className="rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">
+                    Pausado hasta {pausedUntilDate?.toLocaleDateString()}
+                  </span>
+                ) : isExpired ? (
+                  <span className="text-xs font-medium text-red-600">
+                    Expirado
+                  </span>
+                ) : (
+                  <span className="text-xs font-medium text-green-600">
+                    Activo
+                  </span>
+                )}
+                {p.pausedDays > 0 && (
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {p.pausedDays} dia{p.pausedDays === 1 ? "" : "s"} pausados
+                  </div>
+                )}
+              </td>
+              <td className="py-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    className="input w-20"
+                    value={pauseDays}
+                    onChange={(e) =>
+                      setPauseDaysById((current) => ({
+                        ...current,
+                        [p.id]: Number(e.target.value),
+                      }))
+                    }
+                    disabled={pausingPackId === p.id}
+                  />
+                  <button
+                    className="btn btn-outline whitespace-nowrap"
+                    disabled={
+                      pausingPackId === p.id || pauseDays < 1 || pauseDays > 30
+                    }
+                    onClick={() => pausePurchase(p.id)}
+                  >
+                    {pausingPackId === p.id ? "Pausando..." : "Pausar paquete"}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          );
+        })}
 
         {details.purchases.length === 0 && (
           <tr>
             <td
-              colSpan={3}
+              colSpan={5}
               className="py-3 text-center text-muted-foreground"
             >
               Sin paquetes

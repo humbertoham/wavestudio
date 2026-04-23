@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:clean": "node scripts/clean-next-dev.mjs && next dev --turbopack",
+    "dev:no-turbo": "node scripts/clean-next-dev.mjs && next dev",
     "postinstall": "prisma generate",
     "build": "prisma generate && next build",
     "start": "next start"

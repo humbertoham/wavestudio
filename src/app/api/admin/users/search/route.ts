@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
       email: true,
       phone: true,
       affiliation: true,
+      bookingBlocked: true,
     },
     orderBy: q
       ? [{ name: "asc" }, { createdAt: "desc" }]

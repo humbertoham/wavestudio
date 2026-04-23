@@ -29,6 +29,8 @@ export async function GET() {
       createdAt: true,
       expiresAt: true,
       classesLeft: true,
+      pausedDays: true,
+      pausedUntil: true,
       pack: {
         select: {
           id: true,
@@ -47,6 +49,8 @@ export async function GET() {
     createdAt: p.createdAt.toISOString(),
     expiresAt: p.expiresAt.toISOString(),
     classesLeft: p.classesLeft,
+    pausedDays: p.pausedDays,
+    pausedUntil: p.pausedUntil?.toISOString() ?? null,
     pack: {
       id: p.pack.id,
       name: p.pack.name,

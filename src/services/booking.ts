@@ -9,6 +9,13 @@ export async function reserveClass(opts: {
   const quantity = Math.max(1, opts.quantity ?? 1);
 
   return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({
+      where: { id: opts.userId },
+      select: { bookingBlocked: true },
+    });
+
+    if (!user || user.bookingBlocked) throw new Error("BOOKING_BLOCKED");
+
     const cls = await tx.class.findUnique({
       where: { id: opts.classId },
       select: {
@@ -39,6 +46,7 @@ export async function reserveClass(opts: {
         userId: opts.userId,
         expiresAt: { gt: now },
         classesLeft: { gte: cost },
+        OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
       },
       orderBy: [{ expiresAt: "asc" }, { createdAt: "asc" }],
     });

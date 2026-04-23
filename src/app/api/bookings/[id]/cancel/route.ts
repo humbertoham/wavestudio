@@ -144,7 +144,8 @@ export async function PATCH(
           } catch (error) {
             if (
               isManagedBookingError(error) &&
-              error.code === "USER_ALREADY_BOOKED"
+              (error.code === "USER_ALREADY_BOOKED" ||
+                error.code === "BOOKING_BLOCKED")
             ) {
               await tx.waitlist.delete({
                 where: { id: next.id },

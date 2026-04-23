@@ -7,6 +7,9 @@ import { prisma } from "@/lib/prisma";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const BOOKING_BLOCKED_MESSAGE =
+  "Hola, debido a nuestras políticas de cancelación, tus créditos están bloqueados por una cancelación tardía o falta a clase. Para desbloquearlos, es necesario liquidar el monto de $100. Contáctanos por DM para realizar el pago.";
+
 type Ctx = { params: Promise<{ id: string }> };
 type WaitlistJoinErrorCode =
   | "CLASS_NOT_FOUND"
@@ -93,6 +96,25 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
 
   const { id: classId } = await ctx.params;
+
+  const user = await prisma.user.findUnique({
+    where: { id: auth.sub },
+    select: { bookingBlocked: true },
+  });
+
+  if (!user) {
+    return j(404, {
+      error: "USER_NOT_FOUND",
+      message: "Usuario no encontrado.",
+    });
+  }
+
+  if (user.bookingBlocked) {
+    return j(403, {
+      error: "BOOKING_BLOCKED",
+      message: BOOKING_BLOCKED_MESSAGE,
+    });
+  }
 
   try {
     const result = await prisma.$transaction(
