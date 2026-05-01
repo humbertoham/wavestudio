@@ -1,14 +1,14 @@
 // src/app/api/users/me/tokens/route.ts
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getAuthOrDevFallback, getUserIdFromRequest } from "@/lib/auth";
+import { getAuthFromRequest } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await getAuthOrDevFallback(req);
-    const userId = auth?.sub || (await getUserIdFromRequest(req));
+    const auth = await getAuthFromRequest(req);
+    const userId = auth?.sub ?? null;
 
     // ❌ NO LOGUEADO
     if (!userId) {

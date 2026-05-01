@@ -7,7 +7,7 @@ import { verifyToken, type JWTPayload } from "./jwt";
  * Este archivo funciona en:
  *  - RSC/SSR (Node, usando cookies() de next/headers)
  *  - Edge/Route Handlers (leyendo cookies desde NextRequest o headers de Request)
- *  - Con fallback de DEV: header x-user-id o query ?userId=
+ *  - Con fallback solo en desarrollo: header x-user-id o query ?userId=
  *
  * Modelo de payload esperado por tu JWT:
  * interface JWTPayload {
@@ -19,6 +19,7 @@ import { verifyToken, type JWTPayload } from "./jwt";
  */
 
 type AnyReq = NextRequest | Request | undefined | null;
+const DEV_AUTH_FALLBACK_ENABLED = process.env.NODE_ENV === "development";
 
 // ───────────────────────────────────────────────────────────────────────────────
 // Lectura de cookies de forma segura en Node/Edge
@@ -126,7 +127,7 @@ export async function getAuthFromRequest(req: AnyReq): Promise<JWTPayload | null
 }
 
 /**
- * Fallback para DEV: obtiene userId aunque no exista sesión válida.
+ * Fallback solo para desarrollo: obtiene userId aunque no exista sesión válida.
  * Orden:
  * 1) JWT válido (cookie o bearer) ⇒ payload.sub
  * 2) Header "x-user-id"
@@ -136,6 +137,8 @@ export async function getUserIdFromRequest(req: AnyReq): Promise<string | null> 
   // 1) Sesión real
   const auth = await getAuthFromRequest(req);
   if (auth?.sub) return auth.sub;
+
+  if (!DEV_AUTH_FALLBACK_ENABLED) return null;
 
   // 2) DEV fallback: header
   const headerId = req?.headers.get("x-user-id") ?? null;
@@ -182,6 +185,8 @@ export async function isAdmin(req?: AnyReq): Promise<boolean> {
 export async function getAuthOrDevFallback(req: AnyReq): Promise<JWTPayload | null> {
   const auth = await getAuthFromRequest(req);
   if (auth) return auth;
+
+  if (!DEV_AUTH_FALLBACK_ENABLED) return null;
 
   const devId = await getUserIdFromRequest(req);
   if (devId) {

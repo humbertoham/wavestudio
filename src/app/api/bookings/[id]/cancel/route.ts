@@ -17,6 +17,33 @@ function j(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
 
+function isRetryableTransactionError(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2034"
+  );
+}
+
+type CancelResult = {
+  id: string;
+  status: string;
+  createdAt: Date;
+  canceledAt: Date | null;
+  class: {
+    id: string;
+    title: string;
+    focus: string;
+    date: Date;
+    durationMin: number;
+    creditCost: number | null;
+    instructor: {
+      id: string;
+      name: string;
+    };
+  };
+  refundedCredits: number;
+};
+
 export async function PATCH(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string }> }
@@ -41,7 +68,6 @@ export async function PATCH(
             instructor: { select: { id: true, name: true } },
           },
         },
-        packPurchase: { select: { id: true } },
       },
     });
 
@@ -51,126 +77,176 @@ export async function PATCH(
       return j(409, { code: "ALREADY_CANCELED" });
     }
 
+    if (booking.class.date.getTime() <= Date.now()) {
+      return j(409, {
+        code: "CLASS_ALREADY_STARTED",
+        message: "La clase ya comenzo y no puede cancelarse.",
+      });
+    }
+
     const minutesUntilStart = Math.floor(
       (booking.class.date.getTime() - Date.now()) / 60000
     );
     const isLateCancel = minutesUntilStart < CANCEL_WINDOW_MIN;
     const seatsReleased = booking.quantity ?? 1;
 
-    const result = await prisma.$transaction(
-      async (tx) => {
-        const updated = await tx.booking.update({
-          where: { id: booking.id },
-          data: {
-            status: "CANCELED",
-            canceledAt: new Date(),
-            refundToken: !isLateCancel,
-          },
-          include: {
-            class: {
-              select: {
-                id: true,
-                title: true,
-                focus: true,
-                date: true,
-                durationMin: true,
-                creditCost: true,
-                instructor: { select: { id: true, name: true } },
+    let result: CancelResult | null = null;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        result = await prisma.$transaction(
+          async (tx) => {
+            const updated = await tx.booking.update({
+              where: { id: booking.id },
+              data: {
+                status: "CANCELED",
+                canceledAt: new Date(),
+                refundToken: !isLateCancel,
               },
-            },
-          },
-        });
-
-        if (!isLateCancel) {
-          const alreadyRefunded = await tx.tokenLedger.findFirst({
-            where: {
-              bookingId: booking.id,
-              reason: "CANCEL_REFUND",
-            },
-          });
-
-          if (!alreadyRefunded) {
-            const debits = await tx.tokenLedger.findMany({
-              where: {
-                bookingId: booking.id,
-                reason: "BOOKING_DEBIT",
+              include: {
+                class: {
+                  select: {
+                    id: true,
+                    title: true,
+                    focus: true,
+                    date: true,
+                    durationMin: true,
+                    creditCost: true,
+                    instructor: { select: { id: true, name: true } },
+                  },
+                },
               },
             });
 
-            for (const debit of debits) {
-              if (debit.packPurchaseId) {
-                await tx.packPurchase.update({
-                  where: { id: debit.packPurchaseId },
-                  data: {
-                    classesLeft: { increment: Math.abs(debit.delta) },
-                  },
-                });
-              }
+            let refundedCredits = 0;
 
-              await tx.tokenLedger.create({
-                data: {
-                  userId: booking.userId!,
-                  packPurchaseId: debit.packPurchaseId,
+            if (!isLateCancel) {
+              const alreadyRefunded = await tx.tokenLedger.findFirst({
+                where: {
                   bookingId: booking.id,
-                  delta: Math.abs(debit.delta),
                   reason: "CANCEL_REFUND",
                 },
               });
+
+              if (!alreadyRefunded) {
+                const debits = await tx.tokenLedger.findMany({
+                  where: {
+                    bookingId: booking.id,
+                    reason: "BOOKING_DEBIT",
+                  },
+                });
+
+                for (const debit of debits) {
+                  const refundAmount = Math.abs(debit.delta);
+                  refundedCredits += refundAmount;
+
+                  if (debit.packPurchaseId) {
+                    await tx.packPurchase.update({
+                      where: { id: debit.packPurchaseId },
+                      data: {
+                        classesLeft: { increment: refundAmount },
+                      },
+                    });
+                  }
+
+                  await tx.tokenLedger.create({
+                    data: {
+                      userId: booking.userId!,
+                      packPurchaseId: debit.packPurchaseId,
+                      bookingId: booking.id,
+                      delta: refundAmount,
+                      reason: "CANCEL_REFUND",
+                    },
+                  });
+                }
+              }
             }
-          }
-        }
 
-        for (let i = 0; i < seatsReleased; i++) {
-          const next = await tx.waitlist.findFirst({
-            where: { classId: booking.classId },
-            orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-            select: {
-              id: true,
-              userId: true,
-            },
-          });
-
-          if (!next) break;
-
-          try {
-            await createSingleSeatBookingWithDebit(tx, {
-              classId: booking.classId,
-              userId: next.userId,
+            const waitlistEntries = await tx.waitlist.findMany({
+              where: { classId: booking.classId },
+              orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+              select: {
+                id: true,
+                userId: true,
+              },
             });
 
-            await tx.waitlist.delete({
-              where: { id: next.id },
-            });
-          } catch (error) {
-            if (
-              isManagedBookingError(error) &&
-              (error.code === "USER_ALREADY_BOOKED" ||
-                error.code === "BOOKING_BLOCKED")
-            ) {
-              await tx.waitlist.delete({
-                where: { id: next.id },
-              });
-              i -= 1;
-              continue;
+            let promotedSeats = 0;
+
+            for (const entry of waitlistEntries) {
+              if (promotedSeats >= seatsReleased) break;
+
+              try {
+                await createSingleSeatBookingWithDebit(tx, {
+                  classId: booking.classId,
+                  userId: entry.userId,
+                });
+
+                await tx.waitlist.delete({
+                  where: { id: entry.id },
+                });
+
+                promotedSeats += 1;
+              } catch (error) {
+                if (
+                  isManagedBookingError(error) &&
+                  error.code === "NO_CREDITS_AVAILABLE"
+                ) {
+                  continue;
+                }
+
+                if (
+                  isManagedBookingError(error) &&
+                  (error.code === "USER_ALREADY_BOOKED" ||
+                    error.code === "USER_NOT_FOUND" ||
+                    error.code === "BOOKING_BLOCKED")
+                ) {
+                  await tx.waitlist.delete({
+                    where: { id: entry.id },
+                  });
+                  continue;
+                }
+
+                if (
+                  isManagedBookingError(error) &&
+                  (error.code === "CLASS_ALREADY_STARTED" ||
+                    error.code === "CLASS_FULL")
+                ) {
+                  break;
+                }
+
+                throw error;
+              }
             }
 
-            if (
-              isManagedBookingError(error) &&
-              (error.code === "NO_CREDITS_AVAILABLE" ||
-                error.code === "CLASS_ALREADY_STARTED" ||
-                error.code === "CLASS_FULL")
-            ) {
-              break;
-            }
+            return {
+              id: updated.id,
+              status: updated.status,
+              createdAt: updated.createdAt,
+              canceledAt: updated.canceledAt,
+              class: updated.class,
+              refundedCredits,
+            };
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
 
-            throw error;
-          }
+        break;
+      } catch (error) {
+        if (isRetryableTransactionError(error) && attempt < 2) {
+          continue;
         }
 
-        return updated;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+        throw error;
+      }
+    }
+
+    if (!result) {
+      return j(409, {
+        code: "REQUEST_CONFLICT",
+        message: "La clase cambiÃ³ mientras se cancelaba la reserva. Intenta nuevamente.",
+      });
+    }
 
     return j(200, {
       id: result.id,
@@ -179,6 +255,7 @@ export async function PATCH(
       canceledAt: result.canceledAt,
       quantity: booking.quantity,
       lateCancel: isLateCancel,
+      refundedCredits: result.refundedCredits,
       class: {
         id: result.class.id,
         title: result.class.title,
@@ -190,7 +267,14 @@ export async function PATCH(
       },
     });
   } catch (error) {
-    console.error(error);
+    if (isRetryableTransactionError(error)) {
+      return j(409, {
+        code: "REQUEST_CONFLICT",
+        message: "La clase cambiÃ³ mientras se cancelaba la reserva. Intenta nuevamente.",
+      });
+    }
+
+    console.error("PATCH /api/bookings/[id]/cancel error:", error);
     return j(500, { code: "INTERNAL" });
   }
 }

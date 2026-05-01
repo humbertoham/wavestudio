@@ -1,5 +1,6 @@
 // src/app/api/checkout-links/route.ts
 import { NextResponse } from "next/server";
+import { getAuthFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { MercadoPagoConfig, Preference } from "mercadopago";
 
@@ -45,7 +46,14 @@ function isProdInitPoint(url: string | undefined) {
 
 export async function POST(req: Request) {
   try {
-    const { packId, userId } = await req.json();
+    const auth = await getAuthFromRequest(req);
+    if (!auth?.sub) return j(401, { error: "UNAUTHORIZED" });
+
+    const body = await req.json().catch(() => null);
+    const packId =
+      body && typeof body === "object" && typeof body.packId === "string"
+        ? body.packId.trim()
+        : "";
 
     // ── Validaciones básicas
     if (!packId) return j(400, { error: "PACK_ID_REQUIRED" });
@@ -53,10 +61,40 @@ export async function POST(req: Request) {
     const token = process.env.MP_ACCESS_TOKEN;
     if (!token) return j(500, { error: "MP_ACCESS_TOKEN_MISSING" });
 
-    const pack = await prisma.pack.findUnique({ where: { id: packId } });
+    const pack = await prisma.pack.findUnique({
+      where: { id: packId },
+      select: {
+        id: true,
+        name: true,
+        classes: true,
+        price: true,
+        validityDays: true,
+        classesLabel: true,
+        isActive: true,
+        isVisible: true,
+        oncePerUser: true,
+      },
+    });
     if (!pack) return j(404, { error: "PACK_NOT_FOUND" });
+    if (!pack.isActive || !pack.isVisible) {
+      return j(409, { error: "PACK_NOT_AVAILABLE" });
+    }
     if (typeof pack.price !== "number" || pack.price <= 0) {
       return j(400, { error: "INVALID_PACK_PRICE", detail: pack.price });
+    }
+
+    if (pack.oncePerUser) {
+      const existingPurchase = await prisma.packPurchase.findFirst({
+        where: {
+          userId: auth.sub,
+          packId: pack.id,
+        },
+        select: { id: true },
+      });
+
+      if (existingPurchase) {
+        return j(409, { error: "PACK_ALREADY_PURCHASED" });
+      }
     }
 
     // ── Base URL (forzamos dominio público HTTPS en prod)
@@ -92,7 +130,7 @@ export async function POST(req: Request) {
         code: crypto.randomUUID().slice(0, 8),
         status: "CREATED",
         packId,
-        userId: userId ?? null,
+        userId: auth.sub,
         successUrl: backUrls.success,
         failureUrl: backUrls.failure,
         pendingUrl: backUrls.pending,
@@ -105,7 +143,7 @@ export async function POST(req: Request) {
         status: "PENDING",
         amount: pack.price,
         currency: "MXN",
-        userId: userId ?? null,
+        userId: auth.sub,
         checkoutLink: { connect: { id: link.id } },
       },
     });
@@ -116,7 +154,7 @@ export async function POST(req: Request) {
 
     // external_reference ÚNICO y no vacío (requisito de MP)
     const externalRef = [
-      userId ?? "anon",
+      auth.sub,
       packId,
       payment.id,
       crypto.randomUUID(),
@@ -136,10 +174,12 @@ export async function POST(req: Request) {
       back_urls: backUrls,
       external_reference: externalRef, // ✅ obligatorio
       metadata: {
-        userId: userId ?? null,
+        userId: auth.sub,
         packId,
         paymentId: payment.id,
         checkoutLinkId: link.id,
+        packClasses: pack.classes,
+        packValidityDays: pack.validityDays,
       },
       notification_url: `${baseUrl}/api/webhooks/mercadopago`,
       auto_return: "approved",

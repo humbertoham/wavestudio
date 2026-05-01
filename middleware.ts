@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
-const PUBLIC_PATHS = ["/", "/login", "/register", "/clases"]; // ajusta
 const ADMIN_PATH = "/admin";
 const secret = new TextEncoder().encode(process.env.JWT_SECRET!);
 

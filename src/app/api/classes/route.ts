@@ -105,6 +105,7 @@ export async function GET(req: Request) {
       coach: klass.instructor?.name ?? "-",
       startsAt: klass.date.toISOString(),
       durationMin: klass.durationMin ?? 60,
+      creditCost: Math.max(1, klass.creditCost ?? 1),
       capacity,
       booked,
       isFull,

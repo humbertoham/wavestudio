@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
+import {
+  createBookingWithCreditCheck,
+  isManagedBookingError,
+} from "@/lib/class-booking";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -14,12 +19,28 @@ const bodySchema = z.object({
   classId: z.string().min(1),
 });
 
+type AdminBookingErrorCode =
+  | "CLASS_NOT_FOUND"
+  | "USER_NOT_FOUND"
+  | "BOOKING_BLOCKED"
+  | "CLASS_CANCELED"
+  | "CLASS_IN_PAST"
+  | "CLASS_FULL"
+  | "ALREADY_ENROLLED";
+
 function json(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
 
 function methodNotAllowed() {
   return json(405, { error: "METHOD_NOT_ALLOWED" });
+}
+
+function isRetryableTransactionError(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2034"
+  );
 }
 
 export async function GET() {
@@ -49,77 +70,115 @@ export async function POST(req: NextRequest) {
 
     const { userId, classId } = parsed.data;
 
-    const [klass, user] = await Promise.all([
-      prisma.class.findUnique({
-        where: { id: classId },
-        select: {
-          id: true,
-          date: true,
-          capacity: true,
-          isCanceled: true,
-        },
-      }),
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-          id: true,
-          bookingBlocked: true,
-        },
-      }),
-    ]);
+    let booking:
+      | {
+          id: string;
+          class: {
+            id: string;
+            title: string;
+            date: Date;
+          };
+          user: {
+            id: string;
+            email: string;
+          } | null;
+        }
+      | null = null;
 
-    if (!klass) return json(404, { error: "CLASS_NOT_FOUND" });
-    if (!user) return json(404, { error: "USER_NOT_FOUND" });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        booking = await prisma.$transaction(
+          async (tx) => {
+            const created = await createBookingWithCreditCheck(tx, {
+              classId,
+              userId,
+              quantity: 1,
+            });
 
-    if (user.bookingBlocked) {
-      return json(403, {
-        code: "BOOKING_BLOCKED",
-        error: BOOKING_BLOCKED_MESSAGE,
+            const fullBooking = await tx.booking.findUnique({
+              where: { id: created.id },
+              include: {
+                class: { select: { id: true, title: true, date: true } },
+                user: { select: { id: true, email: true } },
+              },
+            });
+
+            if (!fullBooking) {
+              throw new Error("BOOKING_CREATE_FAILED");
+            }
+
+            return fullBooking;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
+
+        break;
+      } catch (error) {
+        if (isRetryableTransactionError(error) && attempt < 2) {
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    if (!booking) {
+      return json(409, {
+        error: "CONCURRENT_MODIFICATION",
+        message: "La clase cambiÃ³ mientras guardÃ¡bamos la reserva. Intenta nuevamente.",
       });
     }
-
-    if (klass.isCanceled) return json(409, { error: "CLASS_CANCELED" });
-    if (klass.date.getTime() <= Date.now()) {
-      return json(409, { error: "CLASS_IN_PAST" });
-    }
-
-    const activeCount = await prisma.booking.count({
-      where: { classId, status: "ACTIVE" },
-    });
-
-    if (activeCount >= klass.capacity) {
-      return json(400, { error: "CLASS_FULL" });
-    }
-
-    const existing = await prisma.booking.findFirst({
-      where: {
-        userId,
-        classId,
-        status: "ACTIVE",
-      },
-      select: { id: true },
-    });
-
-    if (existing) return json(409, { error: "ALREADY_ENROLLED" });
-
-    const booking = await prisma.booking.create({
-      data: {
-        userId,
-        classId,
-        status: "ACTIVE",
-      },
-      include: {
-        class: { select: { id: true, title: true, date: true } },
-        user: { select: { id: true, email: true } },
-      },
-    });
 
     return NextResponse.json(
       { ok: true, booking },
       { status: 201, headers: { "Cache-Control": "no-store" } }
     );
   } catch (error: unknown) {
-    console.error("BOOKING ERROR:", error);
+    const code = isManagedBookingError(error)
+      ? error.code
+      : typeof error === "object" && error !== null && "code" in error
+        ? (error as { code?: unknown }).code
+        : null;
+
+    switch (code) {
+      case "CLASS_NOT_FOUND":
+        return json(404, { error: "CLASS_NOT_FOUND" });
+      case "USER_NOT_FOUND":
+        return json(404, { error: "USER_NOT_FOUND" });
+      case "BOOKING_BLOCKED":
+        return json(403, {
+          code: "BOOKING_BLOCKED",
+          error: BOOKING_BLOCKED_MESSAGE,
+        });
+      case "CLASS_CANCELED":
+        return json(409, { error: "CLASS_CANCELED" });
+      case "CLASS_ALREADY_STARTED":
+      case "CLASS_IN_PAST":
+        return json(409, { error: "CLASS_IN_PAST" });
+      case "CLASS_FULL":
+        return json(409, { error: "CLASS_FULL" });
+      case "USER_ALREADY_BOOKED":
+      case "ALREADY_ENROLLED":
+        return json(409, { error: "ALREADY_ENROLLED" });
+      case "NO_CREDITS_AVAILABLE":
+        return json(409, { error: "NO_CREDITS_AVAILABLE" });
+    }
+
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return json(409, { error: "ALREADY_ENROLLED" });
+    }
+
+    if (isRetryableTransactionError(error)) {
+      return json(409, {
+        error: "CONCURRENT_MODIFICATION",
+        message: "La clase cambiÃ³ mientras guardÃ¡bamos la reserva. Intenta nuevamente.",
+      });
+    }
+
+    console.error("POST /api/admin/booking error:", error);
     return json(500, { error: "INTERNAL_ERROR" });
   }
 }

@@ -24,6 +24,7 @@ export async function GET() {
         oncePerUser: true,
       },
     },
+    distinct: ["packId"],
     select: {
       packId: true,
     },

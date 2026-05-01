@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { NextRequest, NextResponse } from "next/server";
+import { prisma, requireAdmin } from "../_utils";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,8 +8,11 @@ function j(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
+    const auth = await requireAdmin(req);
+    if (auth) return auth;
+
     const { searchParams } = new URL(req.url);
     const monthParam = searchParams.get("month"); // formato: 2026-02
 

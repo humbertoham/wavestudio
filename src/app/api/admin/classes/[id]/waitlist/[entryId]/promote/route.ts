@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
-import { createSingleSeatBookingWithDebit, isManagedBookingError } from "@/lib/class-booking";
+import { createBookingWithCreditCheck, isManagedBookingError } from "@/lib/class-booking";
 
 import { prisma, requireAdmin } from "../../../../../_utils";
 
@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string; entryId: string }> };
 type PromoteWaitlistError = { code: "WAITLIST_ENTRY_NOT_FOUND" };
+const MAX_SERIALIZABLE_RETRIES = 3;
 
 function j(status: number, body: unknown) {
   return NextResponse.json(body, { status });
@@ -44,6 +45,11 @@ function errorResponse(error: unknown) {
           error: error.code,
           message: "No hay lugares disponibles para agregar a este usuario.",
         });
+      case "USER_NOT_FOUND":
+        return j(404, {
+          error: error.code,
+          message: "El usuario ya no existe.",
+        });
       case "BOOKING_BLOCKED":
         return j(403, {
           error: error.code,
@@ -68,6 +74,17 @@ function errorResponse(error: unknown) {
     }
   }
 
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2034"
+  ) {
+    return j(409, {
+      error: "CONCURRENT_MODIFICATION",
+      message:
+        "La clase cambio mientras se promovia la waitlist. Intenta de nuevo.",
+    });
+  }
+
   console.error(
     "POST /api/admin/classes/[id]/waitlist/[entryId]/promote error:",
     error
@@ -86,41 +103,56 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   const { id: classId, entryId } = await ctx.params;
 
   try {
-    const result = await prisma.$transaction(
-      async (tx) => {
-        const entry = await tx.waitlist.findUnique({
-          where: { id: entryId },
-          select: {
-            id: true,
-            classId: true,
-            userId: true,
+    for (let attempt = 1; attempt <= MAX_SERIALIZABLE_RETRIES; attempt += 1) {
+      try {
+        const result = await prisma.$transaction(
+          async (tx) => {
+            const entry = await tx.waitlist.findUnique({
+              where: { id: entryId },
+              select: {
+                id: true,
+                classId: true,
+                userId: true,
+              },
+            });
+
+            if (!entry || entry.classId !== classId) {
+              throw { code: "WAITLIST_ENTRY_NOT_FOUND" } satisfies PromoteWaitlistError;
+            }
+
+            // Delete first so a concurrent admin cannot promote the same row twice.
+            await tx.waitlist.delete({
+              where: { id: entry.id },
+            });
+
+            return createBookingWithCreditCheck(tx, {
+              classId,
+              userId: entry.userId,
+              quantity: 1,
+              allowPastStart: true,
+            });
           },
-        });
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          }
+        );
 
-        if (!entry || entry.classId !== classId) {
-          throw { code: "WAITLIST_ENTRY_NOT_FOUND" } satisfies PromoteWaitlistError;
+        return NextResponse.json({
+          ok: true,
+          bookingId: result.id,
+        });
+      } catch (error) {
+        const retryable =
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2034";
+
+        if (!retryable || attempt === MAX_SERIALIZABLE_RETRIES) {
+          throw error;
         }
-
-        // Delete first so a concurrent admin cannot promote the same row twice.
-        await tx.waitlist.delete({
-          where: { id: entry.id },
-        });
-
-        return createSingleSeatBookingWithDebit(tx, {
-          classId,
-          userId: entry.userId,
-          allowPastStart: true,
-        });
-      },
-      {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
       }
-    );
+    }
 
-    return NextResponse.json({
-      ok: true,
-      bookingId: result.id,
-    });
+    throw new Error("UNREACHABLE");
   } catch (error) {
     return errorResponse(error);
   }

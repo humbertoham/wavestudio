@@ -1,26 +1,28 @@
 // /src/app/api/bookings/route.ts
+import { BookingStatus, Prisma, TokenReason } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
-import { Prisma, BookingStatus, TokenReason } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+
 import { getAuthFromRequest } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const BOOKING_BLOCKED_MESSAGE =
-  "Hola, debido a nuestras políticas de cancelación, tus créditos están bloqueados por una cancelación tardía o falta a clase. Para desbloquearlos, es necesario liquidar el monto de $100. Contáctanos por DM para realizar el pago.";
+  "Hola, debido a nuestras politicas de cancelacion, tus creditos estan bloqueados por una cancelacion tardia o falta a clase. Para desbloquearlos, es necesario liquidar el monto de $100. Contactanos por DM para realizar el pago.";
+
+const MAX_SERIALIZABLE_RETRIES = 3;
+
+type Body = { classId?: string; quantity?: number };
 
 function j(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
-type Body = { classId?: string; quantity?: number };
-
 function methodNotAllowed() {
   return j(405, { error: "METHOD_NOT_ALLOWED" });
 }
 
-// ✅ SALDO REAL: sumar packs vigentes (classesLeft)
 async function getUserTokenBalance(userId: string) {
   const now = new Date();
   const agg = await prisma.packPurchase.aggregate({
@@ -32,6 +34,7 @@ async function getUserTokenBalance(userId: string) {
     },
     _sum: { classesLeft: true },
   });
+
   return agg._sum.classesLeft ?? 0;
 }
 
@@ -40,7 +43,16 @@ async function getBookedSpots(classId: string) {
     where: { classId, status: BookingStatus.ACTIVE },
     _sum: { quantity: true },
   });
+
   return agg._sum.quantity ?? 0;
+}
+
+function alreadyBookedResponse() {
+  return j(409, {
+    success: false,
+    error: "ALREADY_BOOKED",
+    message: "Ya tienes una reserva activa para esta clase.",
+  });
 }
 
 export async function GET() {
@@ -62,19 +74,21 @@ export async function DELETE() {
 export async function POST(req: NextRequest) {
   try {
     const auth = await getAuthFromRequest(req);
-    if (!auth?.sub)
+    if (!auth?.sub) {
       return j(401, {
         error:
-          "No tienes sesión activa. Por favor inicia sesión para continuar.",
+          "No tienes sesion activa. Por favor inicia sesion para continuar.",
       });
+    }
 
-    // 🔎 Obtener afiliación
     const user = await prisma.user.findUnique({
       where: { id: auth.sub },
       select: { affiliation: true, bookingBlocked: true },
     });
 
-    if (!user) return j(404, { error: "Usuario no encontrado." });
+    if (!user) {
+      return j(404, { error: "Usuario no encontrado." });
+    }
 
     if (user.bookingBlocked) {
       return j(403, {
@@ -87,26 +101,25 @@ export async function POST(req: NextRequest) {
       user.affiliation === "WELLHUB" || user.affiliation === "TOTALPASS";
 
     const body = (await req.json().catch(() => null)) as Body | null;
-
     if (!body || typeof body !== "object") {
       return j(400, { error: "Body JSON invalido." });
     }
 
     const classId = typeof body.classId === "string" ? body.classId.trim() : "";
-
-    if (!classId) return j(400, { error: "Falta seleccionar la clase." });
+    if (!classId) {
+      return j(400, { error: "Falta seleccionar la clase." });
+    }
 
     const quantityValue = body.quantity == null ? 1 : Number(body.quantity);
-
     if (!Number.isFinite(quantityValue)) {
       return j(400, { error: "Cantidad de lugares invalida." });
     }
 
     const quantity = Math.floor(quantityValue);
+    if (quantity < 1) {
+      return j(400, { error: "Cantidad de lugares invalida." });
+    }
 
-    if (quantity < 1) return j(400, { error: "Cantidad de lugares invalida." });
-
-    // 🔒 BLOQUEO: corporate solo 1 lugar
     if (isCorporate && quantity > 1) {
       return j(403, {
         error:
@@ -114,24 +127,19 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 🔒 BLOQUEO: corporate no puede reservar la misma clase 2 veces
-    if (isCorporate) {
-      const existing = await prisma.booking.findFirst({
-        where: {
-          userId: auth.sub,
-          classId,
-          status: BookingStatus.ACTIVE,
-        },
-      });
+    const existing = await prisma.booking.findFirst({
+      where: {
+        userId: auth.sub,
+        classId,
+        status: BookingStatus.ACTIVE,
+      },
+      select: { id: true },
+    });
 
-      if (existing) {
-        return j(409, {
-          error: "Ya tienes una reserva activa para esta clase.",
-        });
-      }
+    if (existing) {
+      return alreadyBookedResponse();
     }
 
-    // 1️⃣ Obtener clase
     const klass = await prisma.class.findUnique({
       where: { id: classId },
       select: {
@@ -143,224 +151,295 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    if (!klass) return j(404, { error: "La clase no existe o fue eliminada." });
+    if (!klass) {
+      return j(404, { error: "La clase no existe o fue eliminada." });
+    }
 
-    if (klass.isCanceled) return j(409, { error: "Esta clase fue cancelada." });
+    if (klass.isCanceled) {
+      return j(409, { error: "Esta clase fue cancelada." });
+    }
 
-    if (klass.date.getTime() <= Date.now())
+    if (klass.date.getTime() <= Date.now()) {
       return j(409, {
-        error: "La clase ya comenzó y no puede ser reservada.",
+        error: "La clase ya comenzo y no puede ser reservada.",
       });
+    }
 
     const perSeatCost = Math.max(1, klass.creditCost ?? 1);
     const neededTokens = perSeatCost * quantity;
 
-    // 2️⃣ Validaciones rápidas (fuera de TX)
-    const [alreadyBooked, tokenBalance] = await Promise.all([
+    const [alreadyBookedSpots, tokenBalance] = await Promise.all([
       getBookedSpots(classId),
       getUserTokenBalance(auth.sub),
     ]);
 
     const capacity = klass.capacity ?? 0;
-    const available = Math.max(0, capacity - alreadyBooked);
+    const available = Math.max(0, capacity - alreadyBookedSpots);
 
-    if (available <= 0)
+    if (available <= 0) {
       return j(409, {
-        error: "Esta clase ya está llena. Intenta con otra sesión.",
+        error: "Esta clase ya esta llena. Intenta con otra sesion.",
       });
+    }
 
-    if (quantity > available)
+    if (quantity > available) {
       return j(409, {
         error: `Solo quedan ${available} lugar(es) disponibles.`,
       });
+    }
 
-    if (tokenBalance < neededTokens)
+    if (tokenBalance < neededTokens) {
       return j(402, {
-        error: `No tienes créditos suficientes. Necesitas ${neededTokens} y actualmente tienes ${tokenBalance}.`,
+        error: `No tienes creditos suficientes. Necesitas ${neededTokens} y actualmente tienes ${tokenBalance}.`,
       });
+    }
 
-    // 3️⃣ Transacción blindada
-    const result = await prisma.$transaction(
-      async (tx) => {
-        const now = new Date();
-
-        const userInside = await tx.user.findUnique({
-          where: { id: auth.sub },
-          select: { bookingBlocked: true },
-        });
-
-        if (!userInside || userInside.bookingBlocked) {
-          throw Object.assign(new Error("BOOKING_BLOCKED"), {
-            code: "BOOKING_BLOCKED",
-          });
+    let result:
+      | {
+          bookingId: string;
+          debitedCredits: number;
+          creditCost: number;
         }
+      | null = null;
 
-        // 🔒 Revalidación corporate dentro de tx
-        if (isCorporate) {
-          const existingInside = await tx.booking.findFirst({
-            where: {
-              userId: auth.sub,
-              classId,
-              status: BookingStatus.ACTIVE,
-            },
-          });
+    for (let attempt = 0; attempt < MAX_SERIALIZABLE_RETRIES; attempt += 1) {
+      try {
+        result = await prisma.$transaction(
+          async (tx) => {
+            const now = new Date();
 
-          if (existingInside) {
-            const e: any = new Error("CORPORATE_DUPLICATE");
-            e.code = "CORPORATE_DUPLICATE";
-            throw e;
-          }
-        }
+            const userInside = await tx.user.findUnique({
+              where: { id: auth.sub },
+              select: { bookingBlocked: true },
+            });
 
-        const locked = await tx.class.findUnique({
-          where: { id: classId },
-          select: {
-            capacity: true,
-            creditCost: true,
-            date: true,
-            isCanceled: true,
-          },
-        });
+            if (!userInside || userInside.bookingBlocked) {
+              throw Object.assign(new Error("BOOKING_BLOCKED"), {
+                code: "BOOKING_BLOCKED",
+              });
+            }
 
-        if (!locked || locked.isCanceled)
-          throw Object.assign(new Error(), {
-            code: "CLASS_NOT_BOOKABLE",
-          });
+            const existingInside = await tx.booking.findFirst({
+              where: {
+                userId: auth.sub,
+                classId,
+                status: BookingStatus.ACTIVE,
+              },
+              select: { id: true },
+            });
 
-        if (locked.date.getTime() <= Date.now())
-          throw Object.assign(new Error(), {
-            code: "CLASS_ALREADY_STARTED",
-          });
+            if (existingInside) {
+              throw Object.assign(new Error("ALREADY_BOOKED"), {
+                code: "ALREADY_BOOKED",
+              });
+            }
 
-        const againBookedAgg = await tx.booking.aggregate({
-          where: { classId, status: BookingStatus.ACTIVE },
-          _sum: { quantity: true },
-        });
+            const locked = await tx.class.findUnique({
+              where: { id: classId },
+              select: {
+                capacity: true,
+                creditCost: true,
+                date: true,
+                isCanceled: true,
+              },
+            });
 
-        const sumBooked = againBookedAgg._sum.quantity ?? 0;
-        const cap = locked.capacity ?? 0;
-        const spotsLeft = Math.max(0, cap - sumBooked);
+            if (!locked || locked.isCanceled) {
+              throw Object.assign(new Error("CLASS_NOT_BOOKABLE"), {
+                code: "CLASS_NOT_BOOKABLE",
+              });
+            }
 
-        if (spotsLeft < quantity)
-          throw Object.assign(new Error(), {
-            code: "NOT_ENOUGH_SPOTS",
-            available: spotsLeft,
-          });
+            if (locked.date.getTime() <= Date.now()) {
+              throw Object.assign(new Error("CLASS_ALREADY_STARTED"), {
+                code: "CLASS_ALREADY_STARTED",
+              });
+            }
 
-        const totalCost = quantity * perSeatCost;
+            const againBookedAgg = await tx.booking.aggregate({
+              where: { classId, status: BookingStatus.ACTIVE },
+              _sum: { quantity: true },
+            });
 
-        // ✅ Obtener packs vigentes (ordenados por expiración)
-        const packs = await tx.packPurchase.findMany({
-          where: {
-            userId: auth.sub,
-            expiresAt: { gt: now },
-            classesLeft: { gt: 0 },
-            OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
-          },
-          orderBy: { expiresAt: "asc" },
-          select: { id: true, classesLeft: true },
-        });
+            const sumBooked = againBookedAgg._sum.quantity ?? 0;
+            const cap = locked.capacity ?? 0;
+            const spotsLeft = Math.max(0, cap - sumBooked);
 
-        const currTokens = packs.reduce((sum, p) => sum + p.classesLeft, 0);
+            if (spotsLeft < quantity) {
+              throw Object.assign(new Error("NOT_ENOUGH_SPOTS"), {
+                code: "NOT_ENOUGH_SPOTS",
+                available: spotsLeft,
+              });
+            }
 
-        if (currTokens < totalCost)
-          throw Object.assign(new Error(), {
-            code: "INSUFFICIENT_TOKENS",
-          });
+            const currentPerSeatCost = Math.max(1, locked.creditCost ?? 1);
+            const totalCost = quantity * currentPerSeatCost;
 
-        // Crear booking
-        const booking = await tx.booking.create({
-          data: {
-            userId: auth.sub,
-            classId,
-            quantity,
-            status: BookingStatus.ACTIVE,
-          },
-          select: { id: true },
-        });
+            const packs = await tx.packPurchase.findMany({
+              where: {
+                userId: auth.sub,
+                expiresAt: { gt: now },
+                classesLeft: { gt: 0 },
+                OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
+              },
+              orderBy: { expiresAt: "asc" },
+              select: { id: true, classesLeft: true },
+            });
 
-        // ✅ Debitar packs (consume primero el que vence antes)
-        let remaining = totalCost;
+            const currentTokens = packs.reduce(
+              (sum, pack) => sum + pack.classesLeft,
+              0
+            );
 
-        for (const pack of packs) {
-          if (remaining <= 0) break;
+            if (currentTokens < totalCost) {
+              throw Object.assign(new Error("INSUFFICIENT_TOKENS"), {
+                code: "INSUFFICIENT_TOKENS",
+              });
+            }
 
-          const use = Math.min(pack.classesLeft, remaining);
+            const booking = await tx.booking.create({
+              data: {
+                userId: auth.sub,
+                classId,
+                quantity,
+                status: BookingStatus.ACTIVE,
+              },
+              select: { id: true },
+            });
 
-          // Decrementar saldo real
-          await tx.packPurchase.update({
-            where: { id: pack.id },
-            data: { classesLeft: { decrement: use } },
-          });
+            let remaining = totalCost;
 
-          // Ledger por pack (historial)
-          await tx.tokenLedger.create({
-            data: {
-              userId: auth.sub,
-              packPurchaseId: pack.id,
-              delta: -use,
-              reason: TokenReason.BOOKING_DEBIT,
+            for (const pack of packs) {
+              if (remaining <= 0) break;
+
+              const use = Math.min(pack.classesLeft, remaining);
+
+              const updatedPack = await tx.packPurchase.updateMany({
+                where: {
+                  id: pack.id,
+                  classesLeft: { gte: use },
+                },
+                data: { classesLeft: { decrement: use } },
+              });
+
+              if (updatedPack.count !== 1) {
+                throw Object.assign(new Error("INSUFFICIENT_TOKENS"), {
+                  code: "INSUFFICIENT_TOKENS",
+                });
+              }
+
+              await tx.tokenLedger.create({
+                data: {
+                  userId: auth.sub,
+                  packPurchaseId: pack.id,
+                  delta: -use,
+                  reason: TokenReason.BOOKING_DEBIT,
+                  bookingId: booking.id,
+                },
+              });
+
+              remaining -= use;
+            }
+
+            if (remaining !== 0) {
+              throw Object.assign(new Error("DEBIT_MISMATCH"), {
+                code: "INSUFFICIENT_TOKENS",
+              });
+            }
+
+            await tx.waitlist.deleteMany({
+              where: {
+                classId,
+                userId: auth.sub,
+              },
+            });
+
+            return {
               bookingId: booking.id,
-            },
-          });
-
-          remaining -= use;
-        }
-
-        // Seguridad extra (no debería pasar)
-        if (remaining !== 0) {
-          throw Object.assign(new Error("DEBIT_MISMATCH"), {
-            code: "INSUFFICIENT_TOKENS",
-          });
-        }
-
-        await tx.waitlist.deleteMany({
-          where: {
-            classId,
-            userId: auth.sub,
+              debitedCredits: totalCost,
+              creditCost: currentPerSeatCost,
+            };
           },
-        });
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
 
-        return { bookingId: booking.id };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+        break;
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2034" &&
+          attempt < MAX_SERIALIZABLE_RETRIES - 1
+        ) {
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    if (!result) {
+      return j(409, {
+        error:
+          "La clase cambio mientras procesabamos tu reserva. Intenta nuevamente.",
+      });
+    }
 
     return j(201, {
       ok: true,
       bookingId: result.bookingId,
+      debitedCredits: result.debitedCredits,
+      creditCost: result.creditCost,
     });
   } catch (err: any) {
-    if (err?.code === "BOOKING_BLOCKED")
+    if (err?.code === "BOOKING_BLOCKED") {
       return j(403, {
         code: "BOOKING_BLOCKED",
         error: BOOKING_BLOCKED_MESSAGE,
       });
+    }
 
-    if (err?.code === "CORPORATE_DUPLICATE")
+    if (err?.code === "USER_NOT_FOUND") {
+      return j(404, { error: "Usuario no encontrado." });
+    }
+
+    if (err?.code === "ALREADY_BOOKED") {
+      return alreadyBookedResponse();
+    }
+
+    if (err?.code === "NOT_ENOUGH_SPOTS") {
       return j(409, {
-        error: "Ya tienes una reserva activa para esta clase.",
-      });
-
-    if (err?.code === "NOT_ENOUGH_SPOTS")
-      return j(400, {
         error: `Solo quedan ${err.available ?? 0} lugar(es) disponibles.`,
       });
+    }
 
-    if (err?.code === "INSUFFICIENT_TOKENS")
+    if (err?.code === "INSUFFICIENT_TOKENS") {
       return j(402, {
-        error: "No tienes créditos suficientes para completar esta reserva.",
+        error: "No tienes creditos suficientes para completar esta reserva.",
       });
+    }
 
-    if (err?.code === "CLASS_ALREADY_STARTED")
+    if (err?.code === "CLASS_ALREADY_STARTED") {
       return j(409, {
-        error: "La clase ya está en curso y no puede ser reservada.",
+        error: "La clase ya esta en curso y no puede ser reservada.",
       });
+    }
 
-    if (err?.code === "CLASS_NOT_BOOKABLE")
+    if (err?.code === "CLASS_NOT_BOOKABLE") {
       return j(409, {
-        error: "Esta clase no está disponible para reservas.",
+        error: "Esta clase no esta disponible para reservas.",
       });
+    }
+
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return alreadyBookedResponse();
+    }
+
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2034") {
+      return j(409, {
+        error:
+          "La clase cambio mientras procesabamos tu reserva. Intenta nuevamente.",
+      });
+    }
 
     if (err instanceof Prisma.PrismaClientKnownRequestError) {
       console.error("BOOKING ERROR:", {
@@ -373,7 +452,7 @@ export async function POST(req: NextRequest) {
     }
 
     return j(500, {
-      error: "Ocurrió un error al procesar tu reserva. Intenta nuevamente.",
+      error: "Ocurrio un error al procesar tu reserva. Intenta nuevamente.",
     });
   }
 }

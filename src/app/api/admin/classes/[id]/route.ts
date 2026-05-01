@@ -51,9 +51,6 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     prisma.waitlist.count({ where: { classId: id } }),
   ]);
 
-  // Si quieres BLOQUEAR el borrado duro cuando existan dependencias,
-  // descomenta este bloque para devolver 409 en lugar de intentar borrar:
-  /*
   if (bookings > 0 || waiters > 0) {
     return j(409, {
       ok: false,
@@ -63,7 +60,6 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
       details: { bookings, waitlist: waiters },
     });
   }
-  */
 
   try {
     // 2) Intento de hard delete (si no hay dependencias, esto pasa sin problema)
@@ -76,19 +72,14 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
       e.code === "P2003" // Foreign key constraint failed
     ) {
       // Soft delete: marcar cancelada para que no aparezca como disponible
-      const updated = await prisma.class.update({
-        where: { id },
-        data: { isCanceled: true },
-      });
-
-      return j(200, {
-        ok: true,
-        hardDeleted: false,
-        softDeleted: true,
+      return j(409, {
+        ok: false,
+        code: "CLASS_HAS_DEPENDENCIES",
         reason: "FOREIGN_KEY_CONSTRAINT",
-        message:
+        legacyMessage:
           "La clase tenía dependencias (reservas/lista de espera). Se marcó como cancelada (isCanceled=true).",
-        class: { id: updated.id, isCanceled: updated.isCanceled },
+        message:
+          "No se puede eliminar la clase porque tiene reservas o lista de espera.",
         dependencies: { bookings, waitlist: waiters },
       });
     }

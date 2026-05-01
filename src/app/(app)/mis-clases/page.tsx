@@ -73,6 +73,7 @@ export default function MyClassesPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [lateCancelBooking, setLateCancelBooking] = useState<Booking | null>(null);
   const [affiliation, setAffiliation] = useState<Affiliation>("NONE");
+  const [nowTs, setNowTs] = useState(() => Date.now());
 
   const [packs, setPacks] = useState<PackPurchase[] | null>(null);
   const [packsError, setPacksError] = useState<string | null>(null);
@@ -175,7 +176,17 @@ export default function MyClassesPage() {
     };
   }, []);
 
-  const now = useMemo(() => new Date(), []);
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowTs(Date.now());
+    }, 60_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  const now = useMemo(() => new Date(nowTs), [nowTs]);
 
   const { upcoming, past } = useMemo(() => {
     const base = { upcoming: [] as Booking[], past: [] as Booking[] };

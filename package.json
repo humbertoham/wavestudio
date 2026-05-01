@@ -6,7 +6,10 @@
     "dev": "next dev --turbopack",
     "dev:clean": "node scripts/clean-next-dev.mjs && next dev --turbopack",
     "dev:no-turbo": "node scripts/clean-next-dev.mjs && next dev",
+    "booking:dedupe:dry": "node scripts/reconcile-active-booking-duplicates.mjs",
+    "booking:dedupe:apply": "node scripts/reconcile-active-booking-duplicates.mjs --execute",
     "postinstall": "prisma generate",
+    "test": "vitest run",
     "build": "prisma generate && next build",
     "start": "next start"
   },
@@ -40,6 +43,7 @@
     "postcss": "^8.5.6",
     "prisma": "^6.16.2",
     "tailwindcss": "^4.1.12",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.5"
   }
 }

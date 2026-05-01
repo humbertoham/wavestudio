@@ -181,14 +181,23 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
         const use = Math.min(pack.classesLeft, remaining);
 
-        await tx.packPurchase.update({
-          where: { id: pack.id },
+        const updated = await tx.packPurchase.updateMany({
+          where: {
+            id: pack.id,
+            classesLeft: { gte: use },
+          },
           data: {
             classesLeft: {
               decrement: use,
             },
           },
         });
+
+        if (updated.count !== 1) {
+          throw Object.assign(new Error("INSUFFICIENT_TOKENS"), {
+            code: "INSUFFICIENT_TOKENS",
+          });
+        }
 
         await tx.tokenLedger.create({
           data: {

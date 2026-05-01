@@ -34,7 +34,7 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      const regRes = await fetch("/api/auth/register", {
+      const regRes = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -53,7 +53,7 @@ export default function RegisterPage() {
         const err = await regRes.json().catch(() => ({}));
         if (regRes.status === 409 || err?.error === "EMAIL_IN_USE")
           throw new Error("Este correo ya está registrado.");
-        if (regRes.status === 400 || err?.error === "INVALID")
+        if (regRes.status === 400 || err?.error === "INVALID" || err?.error === "INVALID_BODY")
           throw new Error("Datos inválidos. Revisa el formulario.");
         throw new Error("No se pudo crear la cuenta.");
       }

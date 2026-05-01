@@ -293,7 +293,10 @@ function ClassesSection() {
     const prev = data;
     mutate({ items: data?.items.filter(i => i.id !== id) ?? [] }, { revalidate: false });
     const res = await fetch(`/api/admin/classes/${id}`, { method:"DELETE" });
-    if (!res.ok) mutate(prev); else mutate();
+    if (!res.ok) {
+      mutate(prev);
+      alert(await readApiMessage(res, "No se pudo eliminar la clase."));
+    } else mutate();
   }
 
   return (

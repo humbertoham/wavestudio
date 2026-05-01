@@ -5,11 +5,15 @@ import { prisma, requireAdmin } from "../_utils";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
-  await requireAdmin(req); // ✅ pasa el request
+  const auth = await requireAdmin(req);
+  if (auth) return auth;
 
   const { searchParams } = new URL(req.url);
   const classId = searchParams.get("classId") ?? undefined;
-  const take = Number(searchParams.get("take") ?? 500);
+  const rawTake = Number(searchParams.get("take") ?? 500);
+  const take = Number.isFinite(rawTake)
+    ? Math.min(Math.max(Math.floor(rawTake), 1), 500)
+    : 500;
 
   const items = await prisma.booking.findMany({
     where: classId ? { classId } : undefined,

@@ -21,6 +21,7 @@ type ApiSession = {
   coach: string;
   startsAt: string;
   durationMin: number;
+  creditCost?: number | null;
   capacity?: number | null;
   booked?: number | null;
   isFull?: boolean | null;
@@ -38,6 +39,7 @@ type Session = {
   time: string;
   coach: string;
   duration: string;
+  creditCost: number;
   isCanceled?: boolean;
   status?: "BOOK" | "FULL" | "CANCELLED";
   startsAtISO: string;
@@ -56,6 +58,12 @@ type Day = {
   dateLabel: string;
   dateKey: string;
   sessions: Session[];
+};
+
+type BookingMutationResult = {
+  qty: number;
+  bookingId: string;
+  debitedCredits: number;
 };
 
 const colVariants: Variants = {
@@ -209,6 +217,7 @@ function toSession(api: ApiSession): Session {
     coach: api.coach,
     time: fmtTimeMX(api.startsAt),
     duration: `${api.durationMin}MIN`,
+    creditCost: Math.max(1, api.creditCost ?? 1),
     status: isCancelled ? "CANCELLED" : full ? "FULL" : undefined,
     isCanceled: isCancelled,
     startsAtISO: api.startsAt,
@@ -258,7 +267,7 @@ type ReserveMenuProps = {
   session: Session | null;
   tokens: number;
   affiliation: string | null;
-  onBooked: (qty: number, bookingId: string) => void;
+  onBooked: (result: BookingMutationResult) => void;
   onBlocked: () => void;
 };
 
@@ -280,7 +289,9 @@ function ReserveMenu({
     affiliation === "WELLHUB" || affiliation === "TOTALPASS";
 
   const maxBySpots = session?.spots ?? 0;
-  const baseMax = Math.max(0, Math.min(maxBySpots, tokens));
+  const creditCost = Math.max(1, session?.creditCost ?? 1);
+  const maxByCredits = Math.floor(tokens / creditCost);
+  const baseMax = Math.max(0, Math.min(maxBySpots, maxByCredits));
   const max = isCorporate ? Math.min(1, baseMax) : baseMax;
 
   useIsomorphicLayoutEffect(() => {
@@ -327,7 +338,15 @@ function ReserveMenu({
       }
 
       const data = await res.json();
-      onBooked(qty, data.bookingId);
+      const debitedCredits =
+        typeof data.debitedCredits === "number"
+          ? data.debitedCredits
+          : qty * creditCost;
+      onBooked({
+        qty,
+        bookingId: data.bookingId,
+        debitedCredits,
+      });
       onClose();
     } catch (error) {
       setErr(error instanceof Error ? error.message : "Error al reservar.");
@@ -362,6 +381,10 @@ function ReserveMenu({
               <div className="text-sm">
                 <span className="font-semibold">Spots disponibles:</span>{" "}
                 {session.spots}
+              </div>
+              <div className="text-sm">
+                <span className="font-semibold">Costo por lugar:</span>{" "}
+                {session.creditCost} credito{session.creditCost === 1 ? "" : "s"}
               </div>
             </div>
 
@@ -407,6 +430,9 @@ function ReserveMenu({
                 </div>
                 <div className="mt-2 text-xs text-muted-foreground">
                   Max. permitido por disponibilidad y saldo: <b>{max}</b>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Total a debitar: <b>{qty * creditCost}</b>
                 </div>
               </div>
 
@@ -652,6 +678,7 @@ function SessionCard({
 type DayColumnProps = {
   day: Day;
   index: number;
+  isAdmin: boolean;
   onOpenReserve: (session: Session) => void;
   onCancelBooking: (session: Session) => void;
   onOpenWaitlistConfirm: (session: Session) => void;
@@ -663,6 +690,7 @@ type DayColumnProps = {
 function DayColumn({
   day,
   index,
+  isAdmin,
   onOpenReserve,
   onCancelBooking,
   onOpenWaitlistConfirm,
@@ -670,14 +698,6 @@ function DayColumn({
   cancelBusyId,
   waitlistBusyId,
 }: DayColumnProps) {
-  const [isAdmin, setIsAdmin] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/admin/whoami", { credentials: "include" })
-      .then((res) => setIsAdmin(res.ok))
-      .catch(() => setIsAdmin(false));
-  }, []);
-
   return (
     <motion.div
       custom={index}
@@ -721,10 +741,12 @@ export default function ClassesPage() {
   const [days, setDays] = useState<Day[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tokens, setTokens] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
   const [bookingBlocked, setBookingBlocked] = useState(false);
   const [showBookingBlocked, setShowBookingBlocked] = useState(false);
   const [showNoCredits, setShowNoCredits] = useState(false);
+  const [noCreditsRequired, setNoCreditsRequired] = useState(1);
   const [noCreditsModalVariant, setNoCreditsModalVariant] =
     useState<NoCreditsModalVariant>("reserve");
   const [affiliation, setAffiliation] = useState<Affiliation | null>(null);
@@ -733,17 +755,23 @@ export default function ClassesPage() {
   const [reserveSession, setReserveSession] = useState<Session | null>(null);
   const [cancelBusyId, setCancelBusyId] = useState<string | null>(null);
   const [waitlistBusyId, setWaitlistBusyId] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
   const [waitlistConfirmSession, setWaitlistConfirmSession] =
     useState<Session | null>(null);
 
-  function openNoCreditsModal(variant: NoCreditsModalVariant) {
+  function openNoCreditsModal(
+    variant: NoCreditsModalVariant,
+    requiredCredits = 1
+  ) {
     setNoCreditsModalVariant(variant);
+    setNoCreditsRequired(requiredCredits);
     setShowNoCredits(true);
   }
 
   function closeNoCreditsModal() {
     setShowNoCredits(false);
     setNoCreditsModalVariant("reserve");
+    setNoCreditsRequired(1);
   }
 
   function openBookingBlockedModal() {
@@ -761,8 +789,9 @@ export default function ClassesPage() {
       return;
     }
 
-    if (tokens <= 0) {
-      openNoCreditsModal("reserve");
+    if (tokens < session.creditCost) {
+      setReserveSession(session);
+      openNoCreditsModal("reserve", session.creditCost);
       return;
     }
 
@@ -781,8 +810,8 @@ export default function ClassesPage() {
       return;
     }
 
-    if (tokens <= 0) {
-      openNoCreditsModal("waitlist");
+    if (tokens < session.creditCost) {
+      openNoCreditsModal("waitlist", session.creditCost);
       return;
     }
 
@@ -800,8 +829,8 @@ export default function ClassesPage() {
       return false;
     }
 
-    if (tokens <= 0) {
-      openNoCreditsModal("waitlist");
+    if (tokens < session.creditCost) {
+      openNoCreditsModal("waitlist", session.creditCost);
       return false;
     }
 
@@ -821,6 +850,11 @@ export default function ClassesPage() {
 
         if (res.status === 403 && message === BOOKING_BLOCKED_MESSAGE) {
           openBookingBlockedModal();
+          return false;
+        }
+
+        if (res.status === 402) {
+          openNoCreditsModal("waitlist", session.creditCost);
           return false;
         }
 
@@ -844,6 +878,7 @@ export default function ClassesPage() {
           ),
         })) ?? prev
       );
+      setReloadTick((current) => current + 1);
       return true;
     } catch (error) {
       alert(
@@ -891,6 +926,7 @@ export default function ClassesPage() {
           ),
         })) ?? prev
       );
+      setReloadTick((current) => current + 1);
     } catch (error) {
       alert(
         error instanceof Error
@@ -927,7 +963,12 @@ export default function ClassesPage() {
         method: "PATCH",
       });
 
-      if (!res.ok) return false;
+      if (!res.ok) {
+        alert(
+          await readErrorMessage(res, "No se pudo cancelar la reserva.")
+        );
+        return false;
+      }
 
       const data = await res.json();
 
@@ -953,11 +994,16 @@ export default function ClassesPage() {
       );
 
       if (!data.lateCancel) {
-        setTokens((current) => current + 1);
+        const refundedCredits =
+          typeof data.refundedCredits === "number"
+            ? data.refundedCredits
+            : session.creditCost;
+        setTokens((current) => current + refundedCredits);
       }
 
+      setCancelBusyId(null);
+      setReloadTick((current) => current + 1);
       shouldResetBusy = false;
-      window.location.reload();
       return true;
     } finally {
       if (shouldResetBusy) {
@@ -965,6 +1011,24 @@ export default function ClassesPage() {
       }
     }
   }
+
+  useEffect(() => {
+    let mounted = true;
+    fetch("/api/admin/whoami", {
+      credentials: "include",
+      cache: "no-store",
+    })
+      .then((res) => {
+        if (mounted) setIsAdmin(res.ok);
+      })
+      .catch(() => {
+        if (mounted) setIsAdmin(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [reloadTick]);
 
   useEffect(() => {
     const from = startOfTodayInMX();
@@ -1040,10 +1104,10 @@ export default function ClassesPage() {
     }
 
     load();
-  }, []);
+  }, [reloadTick]);
 
-  function handleBooked(qty: number, bookingId: string) {
-    setTokens((current) => Math.max(0, current - qty));
+  function handleBooked(result: BookingMutationResult) {
+    setTokens((current) => Math.max(0, current - result.debitedCredits));
 
     if (!reserveSession) return;
 
@@ -1053,7 +1117,7 @@ export default function ClassesPage() {
         sessions: day.sessions.map((session) => {
           if (session.id !== reserveSession.id) return session;
 
-          const newBooked = (session.booked ?? 0) + qty;
+          const newBooked = (session.booked ?? 0) + result.qty;
           const cap = session.capacity ?? 0;
           const newSpots = cap ? Math.max(0, cap - newBooked) : 0;
 
@@ -1062,13 +1126,14 @@ export default function ClassesPage() {
             booked: newBooked,
             spots: newSpots,
             userHasBooking: true,
-            bookingId,
+            bookingId: result.bookingId,
             userOnWaitlist: false,
             waitlistEntryId: null,
           };
         }),
       })) ?? prev
     );
+    setReloadTick((current) => current + 1);
   }
 
   return (
@@ -1105,6 +1170,7 @@ export default function ClassesPage() {
                   key={day.id}
                   day={day}
                   index={index}
+                  isAdmin={isAdmin}
                   onOpenReserve={openReserve}
                   onCancelBooking={handleCancel}
                   onOpenWaitlistConfirm={openWaitlistConfirm}
@@ -1156,17 +1222,26 @@ export default function ClassesPage() {
           >
             <h3 className="font-display text-lg font-bold">
               {noCreditsModalVariant === "waitlist"
-                ? "Créditos insuficientes"
+                ? "Creditos insuficientes"
                 : "No tienes creditos"}
             </h3>
 
             <p className="mt-2 text-sm text-muted-foreground">
               {noCreditsModalVariant === "waitlist" ? (
-                "Créditos insuficientes para unirte a la lista de espera"
+                <>
+                  Necesitas al menos{" "}
+                  <b>
+                    {noCreditsRequired} credito{noCreditsRequired === 1 ? "" : "s"}
+                  </b>{" "}
+                  para unirte a la lista de espera.
+                </>
               ) : (
                 <>
-                  Tienes <b>0 creditos</b>. Necesitas al menos <b>1 credito</b> para
-                  reservar espacios en una clase.
+                  Tienes <b>{tokens} creditos</b>. Necesitas al menos{" "}
+                  <b>
+                    {noCreditsRequired} credito{noCreditsRequired === 1 ? "" : "s"}
+                  </b>{" "}
+                  para reservar espacios en una clase.
                 </>
               )}
             </p>
@@ -1183,7 +1258,7 @@ export default function ClassesPage() {
                 href="/precios"
                 className="btn-primary inline-flex h-10 items-center justify-center px-4"
               >
-                Obtener créditos
+                Obtener creditos
               </a>
             </div>
           </motion.div>

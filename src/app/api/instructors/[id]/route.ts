@@ -1,25 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+
 import { requireAdmin } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function DELETE(_req: NextRequest, ctx: Ctx) {
+export async function DELETE(req: NextRequest, ctx: Ctx) {
   try {
-    // Si tu requireAdmin necesita el request, usa: await requireAdmin(_req);
-    requireAdmin();
+    await requireAdmin(req);
 
-    const { id } = await ctx.params; // 👈 importante: await
-    await prisma.instructor.delete({ where: { id } });
+    const { id } = await ctx.params;
+    await prisma.instructor.update({
+      where: { id },
+      data: { isVisible: false },
+    });
 
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
+    return NextResponse.json(
+      { ok: true },
+      { headers: { "Cache-Control": "no-store" } }
+    );
+  } catch (error: unknown) {
     const code =
-      e?.code === "P2025" ? 404 :
-      e?.message === "UNAUTHORIZED" ? 401 :
-      e?.message === "FORBIDDEN" ? 403 : 500;
-    return NextResponse.json({ error: e?.message || "ERROR" }, { status: code });
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "P2025"
+        ? 404
+        : error instanceof Error && error.message === "UNAUTHORIZED"
+          ? 401
+          : error instanceof Error && error.message === "FORBIDDEN"
+            ? 403
+            : 500;
+
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : code === 404
+          ? "NOT_FOUND"
+          : "ERROR";
+
+    return NextResponse.json({ error: message }, { status: code });
   }
 }

@@ -74,6 +74,21 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 
   const { id } = await ctx.params;
 
+  const [bookings, waitlist] = await Promise.all([
+    prisma.booking.count({ where: { classId: id, status: "ACTIVE" } }),
+    prisma.waitlist.count({ where: { classId: id } }),
+  ]);
+
+  if (bookings > 0 || waitlist > 0) {
+    return NextResponse.json(
+      {
+        code: "CLASS_HAS_DEPENDENCIES",
+        details: { bookings, waitlist },
+      },
+      { status: 409 }
+    );
+  }
+
   try {
     await prisma.class.delete({
       where: { id },
@@ -86,6 +101,16 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
       return NextResponse.json(
         { error: "NOT_FOUND" },
         { status: 404 }
+      );
+    }
+
+    if (e?.code === "P2003") {
+      return NextResponse.json(
+        {
+          code: "CLASS_HAS_DEPENDENCIES",
+          details: { bookings, waitlist },
+        },
+        { status: 409 }
       );
     }
 

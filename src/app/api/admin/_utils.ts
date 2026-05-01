@@ -1,38 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient, Role } from "@prisma/client";
-import { jwtVerify } from "jose";
+import { Role } from "@prisma/client";
 
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+import { getAuthFromRequest } from "@/lib/auth";
+import { prisma as sharedPrisma } from "@/lib/prisma";
 
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
-  });
-
-if (process.env.NODE_ENV === "development") globalForPrisma.prisma = prisma;
-
-const secret = new TextEncoder().encode(process.env.JWT_SECRET!);
+export const prisma = sharedPrisma;
 
 export async function getUserFromSession(req: NextRequest) {
-  const token = req.cookies.get("session")?.value;
-  if (!token) return null;
-
-  try {
-    const { payload } = await jwtVerify(token, secret);
-    const userId = payload.sub ? String(payload.sub) : null;
-    if (!userId) return null;
-
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, email: true, name: true, role: true },
-    });
-
-    return user;
-  } catch (err) {
-    console.error("jwtVerify failed:", err);
+  const auth = await getAuthFromRequest(req);
+  const userId = auth?.sub ? String(auth.sub) : null;
+  if (!userId) {
     return null;
   }
+
+  return prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, name: true, role: true },
+  });
 }
 
 // returns NextResponse if NOT admin, or null if ok

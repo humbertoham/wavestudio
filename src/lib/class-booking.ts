@@ -5,6 +5,7 @@ export type ManagedBookingErrorCode =
   | "CLASS_CANCELED"
   | "CLASS_ALREADY_STARTED"
   | "CLASS_FULL"
+  | "USER_NOT_FOUND"
   | "BOOKING_BLOCKED"
   | "USER_ALREADY_BOOKED"
   | "NO_CREDITS_AVAILABLE";
@@ -28,15 +29,38 @@ export function isManagedBookingError(
   );
 }
 
-export async function createSingleSeatBookingWithDebit(
+export async function getAvailableBookingCredits(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  now = new Date()
+) {
+  const packs = await tx.packPurchase.aggregate({
+    where: {
+      userId,
+      expiresAt: { gt: now },
+      classesLeft: { gt: 0 },
+      OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
+    },
+    _sum: { classesLeft: true },
+  });
+
+  return packs._sum.classesLeft ?? 0;
+}
+
+export async function createBookingWithCreditCheck(
   tx: Prisma.TransactionClient,
   params: {
     classId: string;
     userId: string;
+    quantity?: number;
     allowPastStart?: boolean;
   }
 ) {
   const now = new Date();
+  const quantity = params.quantity ?? 1;
+  if (!Number.isInteger(quantity) || quantity < 1) {
+    fail("CLASS_FULL");
+  }
 
   const cls = await tx.class.findUnique({
     where: { id: params.classId },
@@ -54,19 +78,22 @@ export async function createSingleSeatBookingWithDebit(
     fail("CLASS_ALREADY_STARTED");
   }
 
+  const creditCost = Math.max(1, cls.creditCost ?? 1);
+
   const usedSpots = cls.bookings.reduce(
     (acc, booking) => acc + (booking.quantity ?? 1),
     0
   );
 
-  if (usedSpots >= cls.capacity) fail("CLASS_FULL");
+  if (usedSpots + quantity > cls.capacity) fail("CLASS_FULL");
 
   const user = await tx.user.findUnique({
     where: { id: params.userId },
     select: { bookingBlocked: true },
   });
 
-  if (!user || user.bookingBlocked) fail("BOOKING_BLOCKED");
+  if (!user) fail("USER_NOT_FOUND");
+  if (user.bookingBlocked) fail("BOOKING_BLOCKED");
 
   const alreadyBooked = await tx.booking.findFirst({
     where: {
@@ -79,7 +106,7 @@ export async function createSingleSeatBookingWithDebit(
 
   if (alreadyBooked) fail("USER_ALREADY_BOOKED");
 
-  const pack = await tx.packPurchase.findFirst({
+  const packs = await tx.packPurchase.findMany({
     where: {
       userId: params.userId,
       classesLeft: { gt: 0 },
@@ -87,69 +114,94 @@ export async function createSingleSeatBookingWithDebit(
       OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
     },
     orderBy: [{ expiresAt: "asc" }, { createdAt: "asc" }],
-    select: { id: true },
+    select: { id: true, classesLeft: true },
   });
 
-  if (!pack) {
-    const ledgerBalance = await tx.tokenLedger.aggregate({
-      where: {
-        userId: params.userId,
-        OR: [
-          { packPurchaseId: null },
-          {
-            packPurchase: {
-              expiresAt: { gt: now },
-              OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
-            },
-          },
-        ],
-      },
-      _sum: { delta: true },
-    });
+  const packBalance = packs.reduce(
+    (sum, pack) => sum + pack.classesLeft,
+    0
+  );
 
-    if ((ledgerBalance._sum.delta ?? 0) < 1) {
-      fail("NO_CREDITS_AVAILABLE");
-    }
+  const totalCost = creditCost * quantity;
+  if (packBalance < totalCost) {
+    fail("NO_CREDITS_AVAILABLE");
   }
 
-  const booking = await tx.booking.create({
-    data: {
-      userId: params.userId,
-      classId: params.classId,
-      quantity: 1,
-      status: BookingStatus.ACTIVE,
-      packPurchaseId: pack?.id ?? null,
-    },
-    select: { id: true },
-  });
+  let booking: { id: string };
 
-  if (pack) {
-    await tx.packPurchase.update({
-      where: { id: pack.id },
+  try {
+    booking = await tx.booking.create({
       data: {
-        classesLeft: { decrement: 1 },
+        userId: params.userId,
+        classId: params.classId,
+        quantity,
+        status: BookingStatus.ACTIVE,
+        packPurchaseId: packs[0]?.id ?? null,
+      },
+      select: { id: true },
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      fail("USER_ALREADY_BOOKED");
+    }
+
+    throw error;
+  }
+
+  let remaining = totalCost;
+
+  for (const pack of packs) {
+    if (remaining <= 0) break;
+
+    const use = Math.min(pack.classesLeft, remaining);
+
+    const updated = await tx.packPurchase.updateMany({
+      where: {
+        id: pack.id,
+        classesLeft: { gte: use },
+      },
+      data: {
+        classesLeft: { decrement: use },
       },
     });
+
+    if (updated.count !== 1) {
+      fail("NO_CREDITS_AVAILABLE");
+    }
 
     await tx.tokenLedger.create({
       data: {
         userId: params.userId,
         bookingId: booking.id,
         packPurchaseId: pack.id,
-        delta: -1,
+        delta: -use,
         reason: TokenReason.BOOKING_DEBIT,
       },
     });
-  } else {
-    await tx.tokenLedger.create({
-      data: {
-        userId: params.userId,
-        bookingId: booking.id,
-        delta: -1,
-        reason: TokenReason.BOOKING_DEBIT,
-      },
-    });
+
+    remaining -= use;
+  }
+
+  if (remaining > 0) {
+    fail("NO_CREDITS_AVAILABLE");
   }
 
   return booking;
+}
+
+export async function createSingleSeatBookingWithDebit(
+  tx: Prisma.TransactionClient,
+  params: {
+    classId: string;
+    userId: string;
+    allowPastStart?: boolean;
+  }
+) {
+  return createBookingWithCreditCheck(tx, {
+    ...params,
+    quantity: 1,
+  });
 }

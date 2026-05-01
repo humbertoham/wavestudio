@@ -164,6 +164,13 @@ model Booking {
 
   ledgerEntries TokenLedger[]
 
+  // IMPORTANT:
+  // A PostgreSQL CHECK constraint is created manually in SQL migration
+  // to enforce quantity >= 1.
+  //
+  // A PostgreSQL partial unique index is created manually in SQL migration
+  // to enforce one ACTIVE user booking per class:
+  // ("userId", "classId") WHERE "status" = 'ACTIVE' AND "userId" IS NOT NULL
   @@index([classId])
   @@index([userId])
 }

@@ -407,6 +407,7 @@ export default function ClassAdminPage() {
   const [instructors, setInstructors] = useState<InstructorLite[]>([]);
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
@@ -432,6 +433,7 @@ export default function ClassAdminPage() {
       throw new Error(await readErrorMessage(res, "No se pudo cargar la clase."));
     }
 
+    setLoadError(null);
     setCls((await res.json()) as ClassApi);
   }
 
@@ -451,7 +453,9 @@ export default function ClassAdminPage() {
           setInstructors(payload.items ?? payload);
         }
       } catch (error) {
-        alert(error instanceof Error ? error.message : "No se pudo cargar la clase.");
+        setLoadError(
+          error instanceof Error ? error.message : "No se pudo cargar la clase."
+        );
       } finally {
         setLoading(false);
       }
@@ -746,7 +750,7 @@ export default function ClassAdminPage() {
         throw new Error(await readErrorMessage(res, "No se pudo cancelar."));
       }
 
-      window.location.reload();
+      await reload();
     } catch (error) {
       alert(error instanceof Error ? error.message : "No se pudo cancelar.");
     } finally {
@@ -758,7 +762,29 @@ export default function ClassAdminPage() {
     return <div className="section container-app">Cargando...</div>;
   }
 
-  if (!cls) return null;
+  if (loadError || !cls) {
+    return (
+      <section className="section">
+        <div className="container-app max-w-3xl">
+          <Link
+            href="/clases"
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <FiArrowLeft /> Volver
+          </Link>
+
+          <div className="mt-6 card p-6">
+            <h1 className="font-display text-2xl font-bold">
+              No se pudo cargar la clase
+            </h1>
+            <p className="mt-2 text-muted-foreground">
+              {loadError ?? "La clase ya no existe o no tienes acceso a verla."}
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="section">

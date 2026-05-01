@@ -6,13 +6,16 @@ import { requireAdmin } from "@/lib/auth";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const list = await prisma.instructor.findMany({ orderBy: { createdAt: "desc" } });
+  const list = await prisma.instructor.findMany({
+    where: { isVisible: true },
+    orderBy: { createdAt: "desc" },
+  });
   return NextResponse.json(list);
 }
 
 export async function POST(req: Request) {
   try {
-    requireAdmin();
+    await requireAdmin(req);
     const body = await req.json();
     const parsed = instructorCreateSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: "INVALID" }, { status: 400 });

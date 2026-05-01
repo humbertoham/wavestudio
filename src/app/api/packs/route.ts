@@ -32,7 +32,7 @@ function toStringArray(json: Prisma.JsonValue | null): string[] | null {
 export async function GET() {
   try {
     const rows = await prisma.pack.findMany({
-      where: { isActive: true },
+      where: { isActive: true, isVisible: true },
       orderBy: [{ highlight: "desc" }, { createdAt: "asc" }],
       select: {
         id: true,
