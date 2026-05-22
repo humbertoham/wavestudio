@@ -1,6 +1,7 @@
 // src/app/api/checkout-links/route.ts
 import { NextResponse } from "next/server";
 import { getAuthFromRequest } from "@/lib/auth";
+import { getOptionalServerEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import { MercadoPagoConfig, Preference } from "mercadopago";
 
@@ -24,7 +25,7 @@ function redactToken(token?: string) {
 }
 
 function getBaseUrl(req: Request) {
-  const env = process.env.APP_BASE_URL?.trim();
+  const env = getOptionalServerEnv("APP_BASE_URL");
   const hdr =
     req.headers.get("x-forwarded-origin")?.trim() ||
     req.headers.get("origin")?.trim() ||
@@ -58,7 +59,7 @@ export async function POST(req: Request) {
     // ── Validaciones básicas
     if (!packId) return j(400, { error: "PACK_ID_REQUIRED" });
 
-    const token = process.env.MP_ACCESS_TOKEN;
+    const token = getOptionalServerEnv("MP_ACCESS_TOKEN");
     if (!token) return j(500, { error: "MP_ACCESS_TOKEN_MISSING" });
 
     const pack = await prisma.pack.findUnique({
@@ -108,7 +109,7 @@ export async function POST(req: Request) {
     }
 
     // ── Chequeos de credenciales/entorno
-    const allowSandbox = process.env.ALLOW_SANDBOX === "1";
+    const allowSandbox = getOptionalServerEnv("ALLOW_SANDBOX") === "1";
     if (!allowSandbox && !isProdAccessToken(token)) {
       return j(409, {
         error: "NON_PROD_TOKEN",

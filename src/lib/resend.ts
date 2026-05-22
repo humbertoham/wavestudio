@@ -1,3 +1,9 @@
 import { Resend } from "resend";
+import { getRequiredServerEnv } from "./env";
 
-export const resend = new Resend(process.env.RESEND_API_KEY!);
+let resend: Resend | null = null;
+
+export function getResendClient() {
+  resend ??= new Resend(getRequiredServerEnv("RESEND_API_KEY"));
+  return resend;
+}

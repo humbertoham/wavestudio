@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { getOptionalServerEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 import {
   MercadoPagoConfig,
@@ -142,7 +143,7 @@ function safeCompareHex(left: string, right: string) {
 }
 
 function validateSignature(req: Request, url: URL): SignatureValidationResult {
-  const secret = process.env.MP_WEBHOOK_SECRET?.trim();
+  const secret = getOptionalServerEnv("MP_WEBHOOK_SECRET");
   const dataId = resolveNotificationIdFromUrl(url);
   const requestId = req.headers.get("x-request-id")?.trim() ?? null;
   const xSignature = req.headers.get("x-signature");
@@ -322,7 +323,7 @@ export async function POST(req: Request) {
         return null;
       });
 
-    const accessToken = process.env.MP_ACCESS_TOKEN?.trim();
+    const accessToken = getOptionalServerEnv("MP_ACCESS_TOKEN");
     if (!accessToken) {
       await updateWebhookLog(log?.id, false, "MP_ACCESS_TOKEN_MISSING");
       console.error("MP_WEBHOOK_CONFIG_ERROR", {

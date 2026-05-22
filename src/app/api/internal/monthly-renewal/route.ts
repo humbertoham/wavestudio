@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { Affiliation, Prisma, TokenReason } from "@prisma/client";
 
+import { getOptionalServerEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -63,7 +64,7 @@ async function ensureCorporatePacks() {
 }
 
 function validateCronRequest(authHeader: string | null) {
-  const secret = process.env.CRON_SECRET?.trim();
+  const secret = getOptionalServerEnv("CRON_SECRET");
   if (!secret) {
     console.error("CRON_SECRET is not configured for monthly renewal.");
     return null;

@@ -2,17 +2,14 @@ import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
+import { getRequiredServerEnv } from "@/lib/env";
 import { consumeRateLimit, getClientIp } from "@/lib/rate-limit";
-import { resend } from "@/lib/resend";
+import { getResendClient } from "@/lib/resend";
 
 export const runtime = "nodejs";
 
 function resolveResetUrl(token: string) {
-  const appBaseUrl = process.env.APP_BASE_URL?.trim();
-  if (!appBaseUrl) {
-    throw new Error("APP_BASE_URL_MISSING");
-  }
-
+  const appBaseUrl = getRequiredServerEnv("APP_BASE_URL");
   return new URL(`/reset-password?token=${token}`, appBaseUrl).toString();
 }
 
@@ -70,7 +67,7 @@ export async function POST(req: Request) {
 
     const resetUrl = resolveResetUrl(token);
 
-    await resend.emails.send({
+    await getResendClient().emails.send({
       from: "Wave Studio <no-reply@mail.wavestudio.mx>",
       to: email,
       subject: "Restablecer tu contrasena",
