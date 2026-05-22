@@ -97,7 +97,7 @@ Durante cada sesión, nos enfocaremos en conectar mente y cuerpo para maximizar 
           className="relative w-full order-first overflow-hidden rounded-2xl border border-border shadow-soft md:order-none"
         >
           <img
-            src="/41.jpeg"
+            src="/40.png"
             alt="Movimiento consciente en WAVE Studio"
             className="h-full w-full object-cover"
           />
