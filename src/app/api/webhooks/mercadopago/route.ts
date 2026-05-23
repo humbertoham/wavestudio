@@ -14,7 +14,10 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SIGNATURE_MAX_AGE_MS = 5 * 60 * 1000;
+// Soft window only used for emitting MP_WEBHOOK_TIMESTAMP_SKEW warnings.
+// We never reject a webhook for being outside this window — MP retries can
+// arrive hours later and the HMAC alone is the source of truth.
+const SIGNATURE_SKEW_WARN_MS = 5 * 60 * 1000;
 
 type WebhookPayload = {
   action?: string;
@@ -158,7 +161,10 @@ function parseSignatureHeader(headerValue: string | null): SignatureParts | null
     if (key === "v1") v1 = value.toLowerCase();
   }
 
-  if (!/^\d+$/.test(ts)) return null;
+  // We intentionally do NOT require ts to be numeric. The HMAC is computed
+  // using the exact ts string MP sent — even if MP ever changes the format,
+  // a matching HMAC must still validate.
+  if (!ts) return null;
   if (!/^[a-f0-9]{64}$/i.test(v1)) return null;
 
   return { ts, v1 };
@@ -244,23 +250,11 @@ function validateSignature(
     };
   }
 
-  const tsNumber = Number(signature.ts);
-  if (Math.abs(Date.now() - tsNumber) > SIGNATURE_MAX_AGE_MS) {
-    return {
-      ok: false,
-      status: 401,
-      error: "INVALID_SIGNATURE",
-      reason: "STALE_TIMESTAMP",
-      dataId: firstCandidate,
-      requestId,
-      ts: signature.ts,
-      v1Prefix: signature.v1.slice(0, 8),
-    };
-  }
-
   // Try each candidate id, and for each try lowercased then as-is.
   // Per MP docs, alphanumeric data.id values must be lowercased in the manifest;
   // we also try the original case for older integrations that did not normalize.
+  // The exact ts string from x-signature is always used in the manifest,
+  // regardless of whether it is numeric, in the past, or in the future.
   let lastComputed = "";
   for (const candidate of candidates) {
     const lower = candidate.toLowerCase();
@@ -290,8 +284,43 @@ function validateSignature(
     requestId,
     ts: signature.ts,
     v1Prefix: signature.v1.slice(0, 8),
+    // lastComputed is non-empty because we always run at least one HMAC
+    // computation above (firstCandidate is guaranteed at this point).
     computedPrefix: lastComputed.slice(0, 8),
   };
+}
+
+function logTimestampSkewIfAny(
+  url: URL,
+  payload: WebhookPayload | null,
+  ts: string,
+  dataId: string | null
+) {
+  const tsNumber = Number(ts);
+  if (!Number.isFinite(tsNumber)) {
+    console.warn("MP_WEBHOOK_TIMESTAMP_SKEW", {
+      reason: "NON_NUMERIC_TS",
+      ts,
+      skewSeconds: null,
+      dataId,
+      type: url.searchParams.get("type") || payload?.type || null,
+      action: payload?.action || null,
+      topic: url.searchParams.get("topic") || null,
+    });
+    return;
+  }
+  const skewMs = Date.now() - tsNumber;
+  if (Math.abs(skewMs) > SIGNATURE_SKEW_WARN_MS) {
+    console.warn("MP_WEBHOOK_TIMESTAMP_SKEW", {
+      reason: skewMs > 0 ? "OLD_TIMESTAMP" : "FUTURE_TIMESTAMP",
+      ts,
+      skewSeconds: Math.round(skewMs / 1000),
+      dataId,
+      type: url.searchParams.get("type") || payload?.type || null,
+      action: payload?.action || null,
+      topic: url.searchParams.get("topic") || null,
+    });
+  }
 }
 
 function logSignatureFailure(
@@ -379,6 +408,15 @@ export async function POST(req: Request) {
       logSignatureFailure(req, url, payload, signatureCheck);
       return j(signatureCheck.status, { error: signatureCheck.error });
     }
+
+    // Signature is valid. Emit a warning (never reject) if the ts looks skewed
+    // or non-numeric — useful for diagnostics without breaking MP retries.
+    logTimestampSkewIfAny(
+      url,
+      payload,
+      signatureCheck.ts,
+      signatureCheck.dataId
+    );
 
     if (!payload) {
       console.warn("MP_WEBHOOK_INVALID_JSON", {

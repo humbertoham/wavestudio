@@ -598,6 +598,164 @@ describe("POST /api/webhooks/mercadopago signature validation", () => {
       expect(dump).not.toMatch(/[a-f0-9]{64}/);
     }
   });
+
+  it("populates computedPrefix on SIGNATURE_MISMATCH", async () => {
+    await POST(buildSignedRequest({ v1: "0".repeat(64) }));
+    const mismatchCall = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_INVALID_SIGNATURE"
+    );
+    expect(mismatchCall).toBeDefined();
+    const ctx = mismatchCall![1] as { reason: string; computedPrefix: string | null };
+    expect(ctx.reason).toBe("SIGNATURE_MISMATCH");
+    expect(ctx.computedPrefix).toMatch(/^[a-f0-9]{8}$/);
+  });
+});
+
+describe("POST /api/webhooks/mercadopago timestamp handling", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let infoSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    process.env.MP_WEBHOOK_SECRET = WEBHOOK_SECRET;
+    process.env.MP_ACCESS_TOKEN = "APP_USR-test";
+    mocks.prisma.webhookLog.create.mockResolvedValue({ id: "webhook_log_ts" });
+    mocks.prisma.webhookLog.update.mockResolvedValue({});
+    mocks.Payment.mockImplementation(function PaymentMock() {
+      return { get: mocks.paymentGet };
+    });
+    mocks.MerchantOrder.mockImplementation(function MerchantOrderMock() {
+      return { get: vi.fn().mockResolvedValue({ payments: [] }) };
+    });
+    mocks.paymentGet.mockResolvedValue({ id: "ts_payment", status: "pending" });
+    mocks.prisma.payment.findFirst.mockResolvedValue({
+      id: "payment_ts",
+      status: "PENDING",
+      mpPreferenceId: null,
+      mpExternalRef: null,
+      mpPayerEmail: null,
+      checkoutLink: null,
+      packPurchase: null,
+    });
+    mocks.prisma.$transaction.mockImplementation(async (cb: any) =>
+      cb({
+        payment: { update: vi.fn().mockResolvedValue({ id: "payment_ts" }) },
+        checkoutLink: { findFirst: vi.fn().mockResolvedValue(null) },
+        packPurchase: { findUnique: vi.fn().mockResolvedValue(null) },
+        webhookLog: { update: vi.fn().mockResolvedValue({}) },
+      })
+    );
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    delete process.env.MP_WEBHOOK_SECRET;
+    delete process.env.MP_ACCESS_TOKEN;
+    warnSpy?.mockRestore?.();
+    infoSpy?.mockRestore?.();
+  });
+
+  it("accepts a valid signature with a far-past timestamp (no STALE rejection)", async () => {
+    const oldTs = (Date.now() - 24 * 60 * 60 * 1000).toString();
+    const res = await POST(
+      buildSignedRequest({ dataId: "ts_payment", ts: oldTs })
+    );
+    expect(res.status).toBe(200);
+    const skewCall = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_TIMESTAMP_SKEW"
+    );
+    expect(skewCall).toBeDefined();
+    const ctx = skewCall![1] as { reason: string; skewSeconds: number | null };
+    expect(ctx.reason).toBe("OLD_TIMESTAMP");
+    expect(typeof ctx.skewSeconds).toBe("number");
+  });
+
+  it("accepts a valid signature with a far-future timestamp", async () => {
+    const futureTs = (Date.now() + 24 * 60 * 60 * 1000).toString();
+    const res = await POST(
+      buildSignedRequest({ dataId: "ts_payment", ts: futureTs })
+    );
+    expect(res.status).toBe(200);
+    const skewCall = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_TIMESTAMP_SKEW"
+    );
+    expect(skewCall).toBeDefined();
+    expect((skewCall![1] as any).reason).toBe("FUTURE_TIMESTAMP");
+  });
+
+  it("accepts a valid signature with a non-numeric ts string", async () => {
+    const oddTs = "abc-not-a-number";
+    const res = await POST(
+      buildSignedRequest({ dataId: "ts_payment", ts: oddTs })
+    );
+    expect(res.status).toBe(200);
+    const skewCall = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_TIMESTAMP_SKEW"
+    );
+    expect(skewCall).toBeDefined();
+    expect((skewCall![1] as any).reason).toBe("NON_NUMERIC_TS");
+    expect((skewCall![1] as any).skewSeconds).toBeNull();
+  });
+
+  it("still rejects with 401 SIGNATURE_MISMATCH when the ts is old but the hash is wrong", async () => {
+    const oldTs = (Date.now() - 24 * 60 * 60 * 1000).toString();
+    const res = await POST(
+      buildSignedRequest({
+        dataId: "ts_payment",
+        ts: oldTs,
+        v1: "0".repeat(64),
+      })
+    );
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({ error: "INVALID_SIGNATURE" });
+    const mismatch = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_INVALID_SIGNATURE"
+    );
+    expect(mismatch).toBeDefined();
+    expect((mismatch![1] as any).reason).toBe("SIGNATURE_MISMATCH");
+  });
+
+  it("still rejects with 401 SIGNATURE_MISMATCH when the ts is in the future but the hash is wrong", async () => {
+    const futureTs = (Date.now() + 24 * 60 * 60 * 1000).toString();
+    const res = await POST(
+      buildSignedRequest({
+        dataId: "ts_payment",
+        ts: futureTs,
+        v1: "0".repeat(64),
+      })
+    );
+    expect(res.status).toBe(401);
+    const mismatch = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_INVALID_SIGNATURE"
+    );
+    expect((mismatch![1] as any).reason).toBe("SIGNATURE_MISMATCH");
+  });
+
+  it("never emits a STALE_TIMESTAMP rejection reason", async () => {
+    const cases = [
+      Date.now() - 24 * 60 * 60 * 1000,
+      Date.now() + 24 * 60 * 60 * 1000,
+      Date.now(),
+    ].map((ms) => ms.toString());
+
+    for (const ts of cases) {
+      await POST(buildSignedRequest({ dataId: "ts_payment", ts }));
+      await POST(
+        buildSignedRequest({
+          dataId: "ts_payment",
+          ts,
+          v1: "0".repeat(64),
+        })
+      );
+    }
+
+    const allReasons = warnSpy.mock.calls
+      .map(([, ctx]: any[]) => (ctx as any)?.reason)
+      .filter(Boolean);
+    expect(allReasons).not.toContain("STALE_TIMESTAMP");
+  });
 });
 
 describe("middleware does not block /api/webhooks/mercadopago", () => {
