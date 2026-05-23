@@ -47,12 +47,30 @@ type SignatureValidationResult =
     }
   | {
       ok: false;
-      status: 400 | 401 | 500;
+      status: 401 | 500;
       error: string;
       reason: string;
       dataId: string | null;
       requestId: string | null;
+      ts?: string | null;
+      v1Prefix?: string | null;
+      computedPrefix?: string | null;
     };
+
+type SignatureLogContext = {
+  reason: string;
+  hasSecret: boolean;
+  secretLength: number;
+  hasSignature: boolean;
+  hasRequestId: boolean;
+  ts: string | null;
+  v1Prefix: string | null;
+  computedPrefix: string | null;
+  dataId: string | null;
+  type: string | null;
+  action: string | null;
+  topic: string | null;
+};
 
 function j(status: number, body: any) {
   return NextResponse.json(body, { status });
@@ -96,16 +114,32 @@ function readPositiveInt(value: unknown): number | null {
   return Math.floor(parsed);
 }
 
-function resolveNotificationIdFromUrl(url: URL) {
-  // Official docs use data.id in the query string. We keep an id fallback
-  // to preserve compatibility with the existing integration formats.
-  const dataId = url.searchParams.get("data.id")?.trim();
-  if (dataId) return dataId;
+function collectDataIdCandidates(
+  url: URL,
+  payload: WebhookPayload | null
+): string[] {
+  const out: string[] = [];
+  const push = (value: unknown) => {
+    if (value === null || value === undefined) return;
+    const s = String(value).trim();
+    if (!s) return;
+    if (!out.includes(s)) out.push(s);
+  };
 
-  const legacyId = url.searchParams.get("id")?.trim();
-  if (legacyId) return legacyId;
+  // Canonical: ?data.id=... (payment events) and ?id=... (legacy topic / merchant_order)
+  push(url.searchParams.get("data.id"));
+  push(url.searchParams.get("id"));
 
-  return null;
+  // Body fallbacks for unusual delivery shapes
+  push(payload?.data?.id);
+  push(payload?.id);
+
+  if (typeof payload?.resource === "string") {
+    const segments = payload.resource.split("/").filter(Boolean);
+    push(segments[segments.length - 1]);
+  }
+
+  return out;
 }
 
 function parseSignatureHeader(headerValue: string | null): SignatureParts | null {
@@ -142,11 +176,16 @@ function safeCompareHex(left: string, right: string) {
   return timingSafeEqual(a, b);
 }
 
-function validateSignature(req: Request, url: URL): SignatureValidationResult {
+function validateSignature(
+  req: Request,
+  url: URL,
+  payload: WebhookPayload | null
+): SignatureValidationResult {
   const secret = getOptionalServerEnv("MP_WEBHOOK_SECRET");
-  const dataId = resolveNotificationIdFromUrl(url);
   const requestId = req.headers.get("x-request-id")?.trim() ?? null;
   const xSignature = req.headers.get("x-signature");
+  const candidates = collectDataIdCandidates(url, payload);
+  const firstCandidate = candidates[0] ?? null;
 
   if (!secret) {
     return {
@@ -154,18 +193,41 @@ function validateSignature(req: Request, url: URL): SignatureValidationResult {
       status: 500,
       error: "WEBHOOK_SECRET_NOT_CONFIGURED",
       reason: "MISSING_SECRET",
-      dataId,
+      dataId: firstCandidate,
       requestId,
     };
   }
 
-  if (!dataId || !requestId || !xSignature) {
+  // Missing signature parts → 401 (treat as unauthorized, not malformed)
+  if (!xSignature) {
     return {
       ok: false,
-      status: 400,
-      error: "MALFORMED_REQUEST",
-      reason: "MISSING_SIGNATURE_PARTS",
-      dataId,
+      status: 401,
+      error: "INVALID_SIGNATURE",
+      reason: "MISSING_SIGNATURE_HEADER",
+      dataId: firstCandidate,
+      requestId,
+    };
+  }
+
+  if (!requestId) {
+    return {
+      ok: false,
+      status: 401,
+      error: "INVALID_SIGNATURE",
+      reason: "MISSING_REQUEST_ID",
+      dataId: firstCandidate,
+      requestId,
+    };
+  }
+
+  if (!firstCandidate) {
+    return {
+      ok: false,
+      status: 401,
+      error: "INVALID_SIGNATURE",
+      reason: "MISSING_DATA_ID",
+      dataId: null,
       requestId,
     };
   }
@@ -174,10 +236,10 @@ function validateSignature(req: Request, url: URL): SignatureValidationResult {
   if (!signature) {
     return {
       ok: false,
-      status: 400,
-      error: "MALFORMED_REQUEST",
+      status: 401,
+      error: "INVALID_SIGNATURE",
       reason: "INVALID_SIGNATURE_HEADER",
-      dataId,
+      dataId: firstCandidate,
       requestId,
     };
   }
@@ -189,32 +251,79 @@ function validateSignature(req: Request, url: URL): SignatureValidationResult {
       status: 401,
       error: "INVALID_SIGNATURE",
       reason: "STALE_TIMESTAMP",
-      dataId,
+      dataId: firstCandidate,
       requestId,
+      ts: signature.ts,
+      v1Prefix: signature.v1.slice(0, 8),
     };
   }
 
-  const manifest = buildSignatureManifest(dataId, requestId, signature.ts);
-  const computed = createHmac("sha256", secret).update(manifest).digest("hex");
-
-  if (!safeCompareHex(computed, signature.v1)) {
-    return {
-      ok: false,
-      status: 401,
-      error: "INVALID_SIGNATURE",
-      reason: "SIGNATURE_MISMATCH",
-      dataId,
-      requestId,
-    };
+  // Try each candidate id, and for each try lowercased then as-is.
+  // Per MP docs, alphanumeric data.id values must be lowercased in the manifest;
+  // we also try the original case for older integrations that did not normalize.
+  let lastComputed = "";
+  for (const candidate of candidates) {
+    const lower = candidate.toLowerCase();
+    const variants = lower === candidate ? [candidate] : [lower, candidate];
+    for (const variant of variants) {
+      const manifest = buildSignatureManifest(variant, requestId, signature.ts);
+      const computed = createHmac("sha256", secret).update(manifest).digest("hex");
+      lastComputed = computed;
+      if (safeCompareHex(computed, signature.v1)) {
+        return {
+          ok: true,
+          dataId: candidate,
+          requestId,
+          ts: signature.ts,
+          manifest,
+        };
+      }
+    }
   }
 
   return {
-    ok: true,
-    dataId,
+    ok: false,
+    status: 401,
+    error: "INVALID_SIGNATURE",
+    reason: "SIGNATURE_MISMATCH",
+    dataId: firstCandidate,
     requestId,
     ts: signature.ts,
-    manifest,
+    v1Prefix: signature.v1.slice(0, 8),
+    computedPrefix: lastComputed.slice(0, 8),
   };
+}
+
+function logSignatureFailure(
+  req: Request,
+  url: URL,
+  payload: WebhookPayload | null,
+  result: Extract<SignatureValidationResult, { ok: false }>
+) {
+  const secret = getOptionalServerEnv("MP_WEBHOOK_SECRET");
+  const xSignature = req.headers.get("x-signature");
+  const xRequestId = req.headers.get("x-request-id");
+
+  const ctx: SignatureLogContext = {
+    reason: result.reason,
+    hasSecret: !!secret,
+    secretLength: secret?.length ?? 0,
+    hasSignature: !!xSignature,
+    hasRequestId: !!xRequestId,
+    ts: result.ts ?? null,
+    v1Prefix: result.v1Prefix ?? null,
+    computedPrefix: result.computedPrefix ?? null,
+    dataId: result.dataId,
+    type: url.searchParams.get("type") || payload?.type || null,
+    action: payload?.action || null,
+    topic: url.searchParams.get("topic") || null,
+  };
+
+  if (result.status === 500) {
+    console.error("MP_WEBHOOK_CONFIG_ERROR", ctx);
+  } else {
+    console.warn("MP_WEBHOOK_INVALID_SIGNATURE", ctx);
+  }
 }
 
 async function updateWebhookLog(
@@ -261,27 +370,16 @@ export async function POST(req: Request) {
   try {
     const raw = await req.text();
     const url = new URL(req.url);
+    // Parse body before signature validation so we can use body data.id
+    // as a fallback candidate when the URL does not carry it.
+    const payload = parseJsonObject<WebhookPayload>(raw);
 
-    const signatureCheck = validateSignature(req, url);
+    const signatureCheck = validateSignature(req, url, payload);
     if (!signatureCheck.ok) {
-      const logPayload = {
-        dataId: signatureCheck.dataId,
-        requestId: signatureCheck.requestId,
-        reason: signatureCheck.reason,
-      };
-
-      if (signatureCheck.status === 401) {
-        console.warn("MP_WEBHOOK_INVALID_SIGNATURE", logPayload);
-      } else if (signatureCheck.status === 400) {
-        console.warn("MP_WEBHOOK_MALFORMED", logPayload);
-      } else {
-        console.error("MP_WEBHOOK_CONFIG_ERROR", logPayload);
-      }
-
+      logSignatureFailure(req, url, payload, signatureCheck);
       return j(signatureCheck.status, { error: signatureCheck.error });
     }
 
-    const payload = parseJsonObject<WebhookPayload>(raw);
     if (!payload) {
       console.warn("MP_WEBHOOK_INVALID_JSON", {
         dataId: signatureCheck.dataId,
@@ -296,6 +394,17 @@ export async function POST(req: Request) {
       payload.type ||
       null;
     const qId = signatureCheck.dataId;
+
+    const eventType = (
+      qType ||
+      payload.action ||
+      ""
+    ).toLowerCase();
+    const isPaymentEvent =
+      eventType === "payment" || eventType.startsWith("payment.");
+    const isMerchantOrderEvent =
+      eventType === "merchant_order" ||
+      eventType === "topic_merchant_order_wh";
 
     const deliveryId =
       qId ||
@@ -336,17 +445,13 @@ export async function POST(req: Request) {
 
     const client = new MercadoPagoConfig({ accessToken });
 
-    let paymentId: string | null =
-      qType === "payment" || payload.type === "payment"
-        ? qId ?? payload.data?.id?.toString() ?? payload.id?.toString() ?? null
-        : null;
+    let paymentId: string | null = isPaymentEvent
+      ? qId ?? payload.data?.id?.toString() ?? payload.id?.toString() ?? null
+      : null;
 
     let prefIdFromMO: string | undefined;
 
-    if (
-      !paymentId &&
-      (qType === "merchant_order" || payload.type === "merchant_order")
-    ) {
+    if (!paymentId && isMerchantOrderEvent) {
       const merchantOrderId =
         qId ??
         payload.data?.id?.toString() ??
