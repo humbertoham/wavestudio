@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { Affiliation, Prisma, TokenReason } from "@prisma/client";
 
+import { getOptionalServerEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -14,7 +15,7 @@ async function ensureCorporatePacks() {
   await prisma.pack.upsert({
     where: { id: WELLHUB_PACK_ID },
     update: {
-      name: "Wellhub Mensual (Interno)",
+      name: "WellHub Mensual (Interno)",
       classes: 15,
       price: 0,
       validityDays: 31,
@@ -25,7 +26,7 @@ async function ensureCorporatePacks() {
     },
     create: {
       id: WELLHUB_PACK_ID,
-      name: "Wellhub Mensual (Interno)",
+      name: "WellHub Mensual (Interno)",
       classes: 15,
       price: 0,
       validityDays: 31,
@@ -63,7 +64,7 @@ async function ensureCorporatePacks() {
 }
 
 function validateCronRequest(authHeader: string | null) {
-  const secret = process.env.CRON_SECRET?.trim();
+  const secret = getOptionalServerEnv("CRON_SECRET");
   if (!secret) {
     console.error("CRON_SECRET is not configured for monthly renewal.");
     return null;

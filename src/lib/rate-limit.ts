@@ -1,3 +1,5 @@
+import { getOptionalServerEnv } from "./env";
+
 type RateLimitBucket = {
   count: number;
   resetAt: number;
@@ -91,8 +93,8 @@ const memoryStorage: RateLimitStorage = {
 };
 
 function getUpstashConfig() {
-  const url = process.env.UPSTASH_REDIS_REST_URL?.trim();
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
+  const url = getOptionalServerEnv("UPSTASH_REDIS_REST_URL");
+  const token = getOptionalServerEnv("UPSTASH_REDIS_REST_TOKEN");
 
   if (!url || !token) return null;
   return { url, token };

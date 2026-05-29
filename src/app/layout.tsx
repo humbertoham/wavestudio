@@ -3,9 +3,12 @@ import "./globals.css";
 import type { Metadata } from "next";
 import { Inter, Manrope } from "next/font/google";
 
+const SITE_DESCRIPTION =
+  "Entrenamiento funcional en Cumbres Monterrey. WAVE Studio: fuerza, energía y clases diseñadas para fortalecer tu cuerpo y mente.";
+
 export const metadata: Metadata = {
   title: "WAVE Studio",
-  description: "Clases de fitness, baile y movimiento consciente en WAVE Studio. Entrena cuerpo y mente al ritmo de la música en un espacio moderno y motivador.",
+  description: SITE_DESCRIPTION,
 };
 
 // Crea variables CSS para usarlas en tu global.css
@@ -32,19 +35,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <title>WAVE Studio</title>
     <meta name="theme-color" content="#000" />
 
-    <meta name="description" content="Clases de fitness, baile y movimiento consciente en WAVE Studio. Entrena cuerpo y mente al ritmo de la música en un espacio moderno y motivador."/>
+    <meta name="description" content={SITE_DESCRIPTION}/>
     <link rel="canonical" href="wavestudio.mx/"/>
-    <meta name="keywords" content="Clases de fitness, baile y movimiento consciente en WAVE Studio. Entrena cuerpo y mente al ritmo de la música en un espacio moderno y motivador."></meta>
+    <meta name="keywords" content={SITE_DESCRIPTION}></meta>
     <meta name="robots" content="index, follow"/>
     <meta property="og:title" content="WAVE Studio"/>
-<meta property="og:description" content="Clases de fitness, baile y movimiento consciente en WAVE Studio. Entrena cuerpo y mente al ritmo de la música en un espacio moderno y motivador."/>
+<meta property="og:description" content={SITE_DESCRIPTION}/>
 <meta property="og:image" content="wavestudio.mx/banner.png"/>
 <meta property="og:url" content="wavestudio.mx"/>
 <meta property="og:type" content="website"/>
 <meta property="og:site_name" content="WAVE Studio"/>
 <meta name="twitter:card" content="summary_large_image"/>
 <meta name="twitter:title" content="WAVE Studio"/>
-<meta name="twitter:description" content="Clases de fitness, baile y movimiento consciente en WAVE Studio. Entrena cuerpo y mente al ritmo de la música en un espacio moderno y motivador."/>
+<meta name="twitter:description" content={SITE_DESCRIPTION}/>
 <meta name="twitter:image" content="wavestudio.mx/banner.png"/>
 <script
           type="application/ld+json"
@@ -55,7 +58,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   "name": "WAVE Studio",
   "url": "wavestudio.mx",
   "logo": "wavestudio.mx/logo-light.png",
-  "description": "Clases de fitness, baile y movimiento consciente en WAVE Studio. Entrena cuerpo y mente al ritmo de la música en un espacio moderno y motivador.",
+  "description": SITE_DESCRIPTION,
   "contactPoint": {
     "@type": "ContactPoint",
     "contactType": "customer service",

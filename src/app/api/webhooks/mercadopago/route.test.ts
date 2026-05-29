@@ -340,3 +340,428 @@ describe("POST /api/webhooks/mercadopago refund handling", () => {
     });
   });
 });
+
+type SignedRequestOptions = {
+  dataId?: string;
+  urlDataId?: string;
+  urlId?: string | null;
+  type?: string | null;
+  topic?: string | null;
+  requestId?: string | null;
+  ts?: string;
+  v1?: string;
+  signWith?: string;
+  body?: any;
+  omitSignature?: boolean;
+  omitRequestId?: boolean;
+  secret?: string;
+};
+
+function buildSignedRequest(opts: SignedRequestOptions = {}) {
+  const dataId = opts.dataId ?? "mp_payment_signed";
+  const urlDataId = opts.urlDataId ?? dataId;
+  const requestId = opts.requestId ?? "request_signed";
+  const ts = opts.ts ?? Date.now().toString();
+  const secret = opts.secret ?? WEBHOOK_SECRET;
+  const signWith = (opts.signWith ?? dataId).toLowerCase();
+  const manifest = `id:${signWith};request-id:${requestId};ts:${ts};`;
+  const v1 =
+    opts.v1 ?? createHmac("sha256", secret).update(manifest).digest("hex");
+
+  const query = new URLSearchParams();
+  if (opts.type !== null) query.set("type", opts.type ?? "payment");
+  if (opts.topic) query.set("topic", opts.topic);
+  if (urlDataId) query.set("data.id", urlDataId);
+  if (opts.urlId) query.set("id", opts.urlId);
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
+  if (!opts.omitSignature) headers["x-signature"] = `ts=${ts},v1=${v1}`;
+  if (!opts.omitRequestId) headers["x-request-id"] = requestId;
+
+  const body = JSON.stringify(
+    opts.body ?? {
+      type: opts.type ?? "payment",
+      action: "payment.created",
+      data: { id: dataId },
+    }
+  );
+
+  return new Request(
+    `https://example.test/api/webhooks/mercadopago?${query.toString()}`,
+    { method: "POST", headers, body }
+  );
+}
+
+describe("POST /api/webhooks/mercadopago signature validation", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let infoSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    process.env.MP_WEBHOOK_SECRET = WEBHOOK_SECRET;
+    process.env.MP_ACCESS_TOKEN = "APP_USR-test";
+    mocks.prisma.webhookLog.create.mockResolvedValue({ id: "webhook_log_sig" });
+    mocks.prisma.webhookLog.update.mockResolvedValue({});
+    mocks.Payment.mockImplementation(function PaymentMock() {
+      return { get: mocks.paymentGet };
+    });
+    mocks.MerchantOrder.mockImplementation(function MerchantOrderMock() {
+      return { get: vi.fn().mockResolvedValue({ payments: [] }) };
+    });
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    delete process.env.MP_WEBHOOK_SECRET;
+    delete process.env.MP_ACCESS_TOKEN;
+    warnSpy?.mockRestore?.();
+    infoSpy?.mockRestore?.();
+    errorSpy?.mockRestore?.();
+  });
+
+  it("accepts a valid payment.created webhook (URL data.id, lowercase)", async () => {
+    mocks.paymentGet.mockResolvedValue({
+      id: "mp_payment_signed",
+      status: "pending",
+      external_reference: null,
+    });
+    mocks.prisma.payment.findFirst.mockResolvedValue({
+      id: "payment_local",
+      status: "PENDING",
+      mpPreferenceId: null,
+      mpExternalRef: null,
+      mpPayerEmail: null,
+      checkoutLink: null,
+      packPurchase: null,
+    });
+    mocks.prisma.$transaction.mockImplementation(async (cb: any) =>
+      cb({
+        payment: { update: vi.fn().mockResolvedValue({ id: "payment_local" }) },
+        checkoutLink: { findFirst: vi.fn().mockResolvedValue(null) },
+        packPurchase: { findUnique: vi.fn().mockResolvedValue(null) },
+        webhookLog: { update: vi.fn().mockResolvedValue({}) },
+      })
+    );
+
+    const res = await POST(buildSignedRequest());
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts a webhook whose data.id is mixed case (lowercased manifest)", async () => {
+    mocks.paymentGet.mockResolvedValue({
+      id: "MP_Payment_MIXED",
+      status: "pending",
+    });
+    mocks.prisma.payment.findFirst.mockResolvedValue({
+      id: "payment_mixed",
+      status: "PENDING",
+      mpPreferenceId: null,
+      mpExternalRef: null,
+      mpPayerEmail: null,
+      checkoutLink: null,
+      packPurchase: null,
+    });
+    mocks.prisma.$transaction.mockImplementation(async (cb: any) =>
+      cb({
+        payment: { update: vi.fn().mockResolvedValue({ id: "payment_mixed" }) },
+        checkoutLink: { findFirst: vi.fn().mockResolvedValue(null) },
+        packPurchase: { findUnique: vi.fn().mockResolvedValue(null) },
+        webhookLog: { update: vi.fn().mockResolvedValue({}) },
+      })
+    );
+
+    const dataId = "MP_Payment_MIXED";
+    const res = await POST(
+      buildSignedRequest({
+        dataId,
+        urlDataId: dataId,
+        signWith: dataId,
+      })
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts a merchant_order topic webhook with ?id= and returns 200", async () => {
+    const moId = "merchant_order_777";
+    const res = await POST(
+      buildSignedRequest({
+        type: null,
+        topic: "merchant_order",
+        urlDataId: undefined,
+        urlId: moId,
+        dataId: moId,
+        body: { topic: "merchant_order" },
+      })
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts a topic_merchant_order_wh event as ignored 200", async () => {
+    const moId = "merchant_order_888";
+    mocks.MerchantOrder.mockImplementation(function MerchantOrderMock() {
+      return { get: vi.fn().mockResolvedValue({ payments: [] }) };
+    });
+    const res = await POST(
+      buildSignedRequest({
+        type: "topic_merchant_order_wh",
+        urlDataId: undefined,
+        urlId: moId,
+        dataId: moId,
+        body: { type: "topic_merchant_order_wh", data: { id: moId } },
+      })
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("falls back to body data.id when URL has no data.id", async () => {
+    const dataId = "body_only_payment";
+    mocks.paymentGet.mockResolvedValue({ id: dataId, status: "pending" });
+    mocks.prisma.payment.findFirst.mockResolvedValue({
+      id: "payment_body",
+      status: "PENDING",
+      mpPreferenceId: null,
+      mpExternalRef: null,
+      mpPayerEmail: null,
+      checkoutLink: null,
+      packPurchase: null,
+    });
+    mocks.prisma.$transaction.mockImplementation(async (cb: any) =>
+      cb({
+        payment: { update: vi.fn().mockResolvedValue({ id: "payment_body" }) },
+        checkoutLink: { findFirst: vi.fn().mockResolvedValue(null) },
+        packPurchase: { findUnique: vi.fn().mockResolvedValue(null) },
+        webhookLog: { update: vi.fn().mockResolvedValue({}) },
+      })
+    );
+
+    const res = await POST(
+      buildSignedRequest({
+        dataId,
+        urlDataId: undefined,
+        body: { type: "payment", data: { id: dataId } },
+      })
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("returns 401 for an invalid signature", async () => {
+    const req = buildSignedRequest({
+      v1: "0".repeat(64),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({ error: "INVALID_SIGNATURE" });
+  });
+
+  it("returns 401 when x-signature is missing", async () => {
+    const res = await POST(buildSignedRequest({ omitSignature: true }));
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({ error: "INVALID_SIGNATURE" });
+  });
+
+  it("returns 401 when x-request-id is missing", async () => {
+    const res = await POST(buildSignedRequest({ omitRequestId: true }));
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({ error: "INVALID_SIGNATURE" });
+  });
+
+  it("returns 200 (ignored) for an unsupported but validly signed event", async () => {
+    const res = await POST(
+      buildSignedRequest({
+        type: "plan",
+        urlDataId: "plan_42",
+        dataId: "plan_42",
+        body: { type: "plan", data: { id: "plan_42" } },
+      })
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("never logs the full signature or full computed hash", async () => {
+    await POST(
+      buildSignedRequest({
+        v1: "0".repeat(64),
+      })
+    );
+    const calls = warnSpy.mock.calls.flat().filter(Boolean);
+    for (const arg of calls) {
+      if (typeof arg === "string") continue;
+      const dump = JSON.stringify(arg);
+      expect(dump).not.toContain(WEBHOOK_SECRET);
+      expect(dump).not.toMatch(/[a-f0-9]{64}/);
+    }
+  });
+
+  it("populates computedPrefix on SIGNATURE_MISMATCH", async () => {
+    await POST(buildSignedRequest({ v1: "0".repeat(64) }));
+    const mismatchCall = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_INVALID_SIGNATURE"
+    );
+    expect(mismatchCall).toBeDefined();
+    const ctx = mismatchCall![1] as { reason: string; computedPrefix: string | null };
+    expect(ctx.reason).toBe("SIGNATURE_MISMATCH");
+    expect(ctx.computedPrefix).toMatch(/^[a-f0-9]{8}$/);
+  });
+});
+
+describe("POST /api/webhooks/mercadopago timestamp handling", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let infoSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    process.env.MP_WEBHOOK_SECRET = WEBHOOK_SECRET;
+    process.env.MP_ACCESS_TOKEN = "APP_USR-test";
+    mocks.prisma.webhookLog.create.mockResolvedValue({ id: "webhook_log_ts" });
+    mocks.prisma.webhookLog.update.mockResolvedValue({});
+    mocks.Payment.mockImplementation(function PaymentMock() {
+      return { get: mocks.paymentGet };
+    });
+    mocks.MerchantOrder.mockImplementation(function MerchantOrderMock() {
+      return { get: vi.fn().mockResolvedValue({ payments: [] }) };
+    });
+    mocks.paymentGet.mockResolvedValue({ id: "ts_payment", status: "pending" });
+    mocks.prisma.payment.findFirst.mockResolvedValue({
+      id: "payment_ts",
+      status: "PENDING",
+      mpPreferenceId: null,
+      mpExternalRef: null,
+      mpPayerEmail: null,
+      checkoutLink: null,
+      packPurchase: null,
+    });
+    mocks.prisma.$transaction.mockImplementation(async (cb: any) =>
+      cb({
+        payment: { update: vi.fn().mockResolvedValue({ id: "payment_ts" }) },
+        checkoutLink: { findFirst: vi.fn().mockResolvedValue(null) },
+        packPurchase: { findUnique: vi.fn().mockResolvedValue(null) },
+        webhookLog: { update: vi.fn().mockResolvedValue({}) },
+      })
+    );
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+    delete process.env.MP_WEBHOOK_SECRET;
+    delete process.env.MP_ACCESS_TOKEN;
+    warnSpy?.mockRestore?.();
+    infoSpy?.mockRestore?.();
+  });
+
+  it("accepts a valid signature with a far-past timestamp (no STALE rejection)", async () => {
+    const oldTs = (Date.now() - 24 * 60 * 60 * 1000).toString();
+    const res = await POST(
+      buildSignedRequest({ dataId: "ts_payment", ts: oldTs })
+    );
+    expect(res.status).toBe(200);
+    const skewCall = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_TIMESTAMP_SKEW"
+    );
+    expect(skewCall).toBeDefined();
+    const ctx = skewCall![1] as { reason: string; skewSeconds: number | null };
+    expect(ctx.reason).toBe("OLD_TIMESTAMP");
+    expect(typeof ctx.skewSeconds).toBe("number");
+  });
+
+  it("accepts a valid signature with a far-future timestamp", async () => {
+    const futureTs = (Date.now() + 24 * 60 * 60 * 1000).toString();
+    const res = await POST(
+      buildSignedRequest({ dataId: "ts_payment", ts: futureTs })
+    );
+    expect(res.status).toBe(200);
+    const skewCall = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_TIMESTAMP_SKEW"
+    );
+    expect(skewCall).toBeDefined();
+    expect((skewCall![1] as any).reason).toBe("FUTURE_TIMESTAMP");
+  });
+
+  it("accepts a valid signature with a non-numeric ts string", async () => {
+    const oddTs = "abc-not-a-number";
+    const res = await POST(
+      buildSignedRequest({ dataId: "ts_payment", ts: oddTs })
+    );
+    expect(res.status).toBe(200);
+    const skewCall = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_TIMESTAMP_SKEW"
+    );
+    expect(skewCall).toBeDefined();
+    expect((skewCall![1] as any).reason).toBe("NON_NUMERIC_TS");
+    expect((skewCall![1] as any).skewSeconds).toBeNull();
+  });
+
+  it("still rejects with 401 SIGNATURE_MISMATCH when the ts is old but the hash is wrong", async () => {
+    const oldTs = (Date.now() - 24 * 60 * 60 * 1000).toString();
+    const res = await POST(
+      buildSignedRequest({
+        dataId: "ts_payment",
+        ts: oldTs,
+        v1: "0".repeat(64),
+      })
+    );
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({ error: "INVALID_SIGNATURE" });
+    const mismatch = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_INVALID_SIGNATURE"
+    );
+    expect(mismatch).toBeDefined();
+    expect((mismatch![1] as any).reason).toBe("SIGNATURE_MISMATCH");
+  });
+
+  it("still rejects with 401 SIGNATURE_MISMATCH when the ts is in the future but the hash is wrong", async () => {
+    const futureTs = (Date.now() + 24 * 60 * 60 * 1000).toString();
+    const res = await POST(
+      buildSignedRequest({
+        dataId: "ts_payment",
+        ts: futureTs,
+        v1: "0".repeat(64),
+      })
+    );
+    expect(res.status).toBe(401);
+    const mismatch = warnSpy.mock.calls.find(
+      ([label]: any[]) => label === "MP_WEBHOOK_INVALID_SIGNATURE"
+    );
+    expect((mismatch![1] as any).reason).toBe("SIGNATURE_MISMATCH");
+  });
+
+  it("never emits a STALE_TIMESTAMP rejection reason", async () => {
+    const cases = [
+      Date.now() - 24 * 60 * 60 * 1000,
+      Date.now() + 24 * 60 * 60 * 1000,
+      Date.now(),
+    ].map((ms) => ms.toString());
+
+    for (const ts of cases) {
+      await POST(buildSignedRequest({ dataId: "ts_payment", ts }));
+      await POST(
+        buildSignedRequest({
+          dataId: "ts_payment",
+          ts,
+          v1: "0".repeat(64),
+        })
+      );
+    }
+
+    const allReasons = warnSpy.mock.calls
+      .map(([, ctx]: any[]) => (ctx as any)?.reason)
+      .filter(Boolean);
+    expect(allReasons).not.toContain("STALE_TIMESTAMP");
+  });
+});
+
+describe("middleware does not block /api/webhooks/mercadopago", () => {
+  it("only matches /admin/* paths", async () => {
+    const mod = await import("../../../../../middleware");
+    // The exported matcher must NOT include the webhook path.
+    expect(mod.config.matcher).toEqual(["/admin/:path*"]);
+  });
+});

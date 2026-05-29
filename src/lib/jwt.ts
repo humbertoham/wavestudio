@@ -1,9 +1,9 @@
 // lib/jwt.ts
 import jwt, { type SignOptions, type Secret } from "jsonwebtoken";
 import type { StringValue } from "ms";
+import { getRequiredServerEnv } from "./env";
 
-const SECRET: Secret = process.env.JWT_SECRET as string;
-if (!SECRET) throw new Error("Missing JWT_SECRET");
+const SECRET: Secret = getRequiredServerEnv("JWT_SECRET");
 
 export type JWTPayload = { sub: string; role: "USER" | "ADMIN" };
 
