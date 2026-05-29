@@ -575,7 +575,7 @@ function LateCancelModalLegacy({
         className="card w-full max-w-md p-6"
       >
         <h3 className="font-display text-xl font-bold">
-          Cancelación tardía
+          Ups, estás fuera del tiempo de cancelación
         </h3>
 
         <p className="mt-3 text-sm text-muted-foreground">
@@ -587,9 +587,27 @@ function LateCancelModalLegacy({
         </p>
 
         <p className="mt-4 text-sm text-red-600">
-          Faltan menos de 4 horas.
-          <br />
-          Si cancelas tu clase no se te regresarán los créditos por nuestras políticas de cancelación.
+          {hasPenalty ? (
+            <>
+              Faltan menos de 4 horas para la clase.
+              <br />
+              Esta cancelación podría generar un cargo de $100 MXN por cancelación tardía.
+              <br />
+              Nuestro equipo se pondrá en contacto contigo para realizar el pago.
+              <br />
+              Mientras tanto, tu cuenta quedará temporalmente bloqueada para nuevas reservas.
+              <br />
+              Gracias por ayudarnos a respetar los espacios de cada clase!
+            </>
+          ) : (
+            <>
+              Faltan menos de 4 horas para la clase.
+              <br />
+              Este crédito no podrá recuperarse debido a la cancelación tardía.
+              <br />
+              Gracias por ayudarnos a respetar los espacios de cada clase!
+            </>
+          )}
         </p>
 
         <div className="mt-6 flex justify-end gap-3">
@@ -640,7 +658,7 @@ function LateCancelModal({
         className="card w-full max-w-md p-6"
       >
         <h3 className="font-display text-xl font-bold">
-          Ups, estás fuera del tiempo de cancelación 
+          Ups, estás fuera del tiempo de cancelación
         </h3>
 
         <p className="mt-3 text-sm text-muted-foreground">
@@ -652,13 +670,27 @@ function LateCancelModal({
         </p>
 
         <p className="mt-4 text-sm text-red-600">
-          Faltan menos de 4 horas para la clase.
-          <br />
-          {hasPenalty
-            ? "Esta reserva genera un cargo de $100 por cancelación tardía."
-            : "Este crédito no podrá recuperarse debido a la cancelación tardía."}
-            <br/>
-            Gracias por ayudarnos a respetar los espacios de cada clase!
+          {hasPenalty ? (
+            <>
+              Faltan menos de 4 horas para la clase.
+              <br />
+              Esta cancelación podría generar un cargo de $100 MXN por cancelación tardía.
+              <br />
+              Nuestro equipo se pondrá en contacto contigo para realizar el pago.
+              <br />
+              Mientras tanto, tu cuenta quedará temporalmente bloqueada para nuevas reservas.
+              <br />
+              Gracias por ayudarnos a respetar los espacios de cada clase!
+            </>
+          ) : (
+            <>
+              Faltan menos de 4 horas para la clase.
+              <br />
+              Este crédito no podrá recuperarse debido a la cancelación tardía.
+              <br />
+              Gracias por ayudarnos a respetar los espacios de cada clase!
+            </>
+          )}
         </p>
 
         <div className="mt-6 flex justify-end gap-3">
