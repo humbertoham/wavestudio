@@ -10,7 +10,7 @@ const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
 const MX_LOCALE: Intl.LocalesArgument = "es-MX";
 const BOOKING_BLOCKED_MESSAGE =
-  "Hola, debido a nuestras políticas de cancelación, tus créditos están bloqueados por una cancelación tardía o falta a clase. Para desbloquearlos, es necesario liquidar el monto de $100. Contáctanos por DM para realizar el pago.";
+  "Hola, tu cuenta está temporalmente bloqueada para nuevas reservas por una cancelación tardía o falta a clase. Nuestro equipo se pondrá en contacto contigo para realizar el pago de $100 MXN.";
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
 type NoCreditsModalVariant = "reserve" | "waitlist";
 
@@ -438,7 +438,7 @@ function ReserveMenu({
 
               {isCorporate && (
                 <div className="text-xs text-muted-foreground md:col-span-2">
-                  Usuarios Wellhub y TotalPass solo pueden reservar 1 lugar.
+                  Usuarios WellHub y TotalPass solo pueden reservar 1 lugar.
                 </div>
               )}
             </div>
@@ -1414,14 +1414,32 @@ function LateCancelModalLegacy({
         transition={{ duration: 0.2 }}
         className="card w-full max-w-md p-6"
       >
-        <h3 className="font-display text-xl font-bold">Cancelacion tardia</h3>
+        <h3 className="font-display text-xl font-bold">
+          Ups, estás fuera del tiempo de cancelación
+        </h3>
 
         <p className="mt-4 text-sm text-red-600">
-          Faltan menos de 4 horas.
-          <br />
-          {hasPenalty
-            ? "Si cancelas esta clase se te cobrará una penalización de $100 pesos."
-            : "Si cancelas tu clase no se te regresaran los creditos por nuestras politicas de cancelacion."}
+          {hasPenalty ? (
+            <>
+              Faltan menos de 4 horas para la clase.
+              <br />
+              Esta cancelación podría generar un cargo de $100 MXN por cancelación tardía.
+              <br />
+              Nuestro equipo se pondrá en contacto contigo para realizar el pago.
+              <br />
+              Mientras tanto, tu cuenta quedará temporalmente bloqueada para nuevas reservas.
+              <br />
+              Gracias por ayudarnos a respetar los espacios de cada clase!
+            </>
+          ) : (
+            <>
+              Faltan menos de 4 horas para la clase.
+              <br />
+              Este crédito no podrá recuperarse debido a la cancelación tardía.
+              <br />
+              Gracias por ayudarnos a respetar los espacios de cada clase!
+            </>
+          )}
         </p>
 
         <div className="mt-6 flex justify-end gap-3">
@@ -1465,18 +1483,32 @@ function LateCancelModal({
         className="card w-full max-w-md p-6"
       >
         <h3 className="font-display text-xl font-bold">
-          Ups, estás fuera del tiempo de cancelación 
+          Ups, estás fuera del tiempo de cancelación
         </h3>
 
 
         <p className="mt-4 text-sm text-red-600">
-          Faltan menos de 4 horas para la clase.
-          <br />
-          {hasPenalty
-            ? "Esta reserva genera un cargo de $100 por cancelación tardía."
-            : "Este crédito no podrá recuperarse debido a la cancelación tardía."}
-            <br/>
-            Gracias por ayudarnos a respetar los espacios de cada clase!
+          {hasPenalty ? (
+            <>
+              Faltan menos de 4 horas para la clase.
+              <br />
+              Esta cancelación podría generar un cargo de $100 MXN por cancelación tardía.
+              <br />
+              Nuestro equipo se pondrá en contacto contigo para realizar el pago.
+              <br />
+              Mientras tanto, tu cuenta quedará temporalmente bloqueada para nuevas reservas.
+              <br />
+              Gracias por ayudarnos a respetar los espacios de cada clase!
+            </>
+          ) : (
+            <>
+              Faltan menos de 4 horas para la clase.
+              <br />
+              Este crédito no podrá recuperarse debido a la cancelación tardía.
+              <br />
+              Gracias por ayudarnos a respetar los espacios de cada clase!
+            </>
+          )}
         </p>
 
         <div className="mt-6 flex justify-end gap-3">

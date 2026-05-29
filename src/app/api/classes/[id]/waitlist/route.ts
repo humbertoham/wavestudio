@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const BOOKING_BLOCKED_MESSAGE =
-  "Hola, debido a nuestras polÃ­ticas de cancelaciÃ³n, tus crÃ©ditos estÃ¡n bloqueados por una cancelaciÃ³n tardÃ­a o falta a clase. Para desbloquearlos, es necesario liquidar el monto de $100. ContÃ¡ctanos por DM para realizar el pago.";
+  "Hola, tu cuenta está temporalmente bloqueada para nuevas reservas por una cancelación tardía o falta a clase. Nuestro equipo se pondrá en contacto contigo para realizar el pago de $100 MXN.";
 
 type Ctx = { params: Promise<{ id: string }> };
 type WaitlistJoinErrorCode =

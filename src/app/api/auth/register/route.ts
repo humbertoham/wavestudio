@@ -100,7 +100,7 @@ async function ensureCorporatePacks(tx: Prisma.TransactionClient) {
   await tx.pack.upsert({
     where: { id: WELLHUB_PACK_ID },
     update: {
-      name: "Wellhub Mensual (Interno)",
+      name: "WellHub Mensual (Interno)",
       classes: 15,
       price: 0,
       validityDays: 31,
@@ -111,7 +111,7 @@ async function ensureCorporatePacks(tx: Prisma.TransactionClient) {
     },
     create: {
       id: WELLHUB_PACK_ID,
-      name: "Wellhub Mensual (Interno)",
+      name: "WellHub Mensual (Interno)",
       classes: 15,
       price: 0,
       validityDays: 31,

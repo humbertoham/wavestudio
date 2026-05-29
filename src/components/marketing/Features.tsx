@@ -74,7 +74,7 @@ export default function Features() {
             Diseñado para tu bienestar
           </motion.h2>
           <motion.p variants={item} className="mt-3 text-muted-foreground">
-            FORTALECE TU CUERPO CON INTENCIÓN, comunidad y una experiencia clara de reserva y compra.
+            Fortalece tu cuerpo con intención, comunidad y una experiencia clara de reserva y compra.
 
           </motion.p>
         </motion.div>

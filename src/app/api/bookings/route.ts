@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const BOOKING_BLOCKED_MESSAGE =
-  "Hola, debido a nuestras politicas de cancelacion, tus creditos estan bloqueados por una cancelacion tardia o falta a clase. Para desbloquearlos, es necesario liquidar el monto de $100. Contactanos por DM para realizar el pago.";
+  "Hola, tu cuenta está temporalmente bloqueada para nuevas reservas por una cancelación tardía o falta a clase. Nuestro equipo se pondrá en contacto contigo para realizar el pago de $100 MXN.";
 
 const MAX_SERIALIZABLE_RETRIES = 3;
 
@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
     if (isCorporate && quantity > 1) {
       return j(403, {
         error:
-          "Los usuarios Wellhub y TotalPass solo pueden reservar 1 lugar por clase.",
+          "Los usuarios WellHub y TotalPass solo pueden reservar 1 lugar por clase.",
       });
     }
 

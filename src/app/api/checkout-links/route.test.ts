@@ -61,7 +61,7 @@ describe("POST /api/checkout-links", () => {
   it("rejects hidden/internal packs before creating checkout records", async () => {
     mocks.prisma.pack.findUnique.mockResolvedValue({
       id: "corp_wellhub_monthly",
-      name: "Wellhub Mensual (Interno)",
+      name: "WellHub Mensual (Interno)",
       classes: 15,
       price: 0,
       validityDays: 31,

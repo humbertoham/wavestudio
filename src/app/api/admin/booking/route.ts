@@ -12,7 +12,7 @@ import { prisma } from "@/lib/prisma";
 export const runtime = "nodejs";
 
 const BOOKING_BLOCKED_MESSAGE =
-  "Hola, debido a nuestras politicas de cancelacion, tus creditos estan bloqueados por una cancelacion tardia o falta a clase. Para desbloquearlos, es necesario liquidar el monto de $100. Contactanos por DM para realizar el pago.";
+  "Hola, tu cuenta está temporalmente bloqueada para nuevas reservas por una cancelación tardía o falta a clase. Nuestro equipo se pondrá en contacto contigo para realizar el pago de $100 MXN.";
 
 const bodySchema = z.object({
   userId: z.string().min(1),
