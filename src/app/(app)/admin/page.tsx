@@ -2,6 +2,8 @@
 
 import useSWR from "swr";
 import { useMemo, useState } from "react";
+import { FiMessageCircle } from "react-icons/fi";
+import { getWhatsAppHref } from "@/lib/whatsapp";
 
 // --- helpers ---
 const fetcher = (url: string) =>
@@ -69,6 +71,13 @@ function formatAdminDate(value?: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
 }
 
+function getAdminWhatsAppMessage(name?: string | null) {
+  const trimmedName = name?.trim();
+  return trimmedName
+    ? `Hola ${trimmedName}, te contactamos de WAVE Studio.`
+    : "Hola, te contactamos de WAVE Studio.";
+}
+
 type Instructor = { id: string; name: string; bio?: string | null };
 type ClassItem = {
   id: string; title: string; focus: string; date: string; durationMin: number; capacity: number;
@@ -93,6 +102,7 @@ type User = {
   id: string;
   name: string | null;
   email: string;
+  phone?: string | null;
   dateOfBirth?: string | null;
   bookingBlocked?: boolean;
 };
@@ -1422,32 +1432,57 @@ function UserInspectorSection() {
 
           <div className="border rounded-[var(--radius)] overflow-hidden">
             <ul className="divide-y">
-              {(list ?? []).map((u) => (
-                <li key={u.id}>
-                  <button
-                    className={`w-full text-left p-3 hover:bg-[--color-muted] ${
-                      selectedId === u.id ? "bg-[--color-muted]" : ""
-                    }`}
-                    onClick={() => {
-                      setSelectedId(u.id);
-                      setFeedback(null);
-                      setTokenDelta(0);
-                    }}
-                  >
-                    <div className="flex items-center gap-2 font-medium">
-                      <span>{u.name ?? "—"}</span>
-                      {u.bookingBlocked && (
-                        <span className="rounded bg-red-100 px-2 py-0.5 text-[11px] text-red-700">
-                          Bloqueado
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {u.email}
-                    </div>
-                  </button>
-                </li>
-              ))}
+              {(list ?? []).map((u) => {
+                const whatsappHref = getWhatsAppHref(
+                  u.phone,
+                  getAdminWhatsAppMessage(u.name)
+                );
+
+                return (
+                  <li key={u.id} className="flex items-stretch gap-2 p-2">
+                    <button
+                      className={`min-w-0 flex-1 rounded-[var(--radius)] text-left p-2 hover:bg-[--color-muted] ${
+                        selectedId === u.id ? "bg-[--color-muted]" : ""
+                      }`}
+                      onClick={() => {
+                        setSelectedId(u.id);
+                        setFeedback(null);
+                        setTokenDelta(0);
+                      }}
+                    >
+                      <div className="flex items-center gap-2 font-medium">
+                        <span className="min-w-0 truncate">{u.name ?? "—"}</span>
+                        {u.bookingBlocked && (
+                          <span className="shrink-0 rounded bg-red-100 px-2 py-0.5 text-[11px] text-red-700">
+                            Bloqueado
+                          </span>
+                        )}
+                      </div>
+                      <div className="truncate text-sm text-muted-foreground">
+                        {u.email}
+                      </div>
+                    </button>
+
+                    {whatsappHref ? (
+                      <a
+                        className="btn-outline h-10 self-center whitespace-nowrap px-3 text-xs"
+                        href={whatsappHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={u.phone?.trim() || "WhatsApp"}
+                        aria-label={`Enviar WhatsApp a ${u.name ?? u.email}`}
+                      >
+                        <FiMessageCircle aria-hidden="true" />
+                        WhatsApp
+                      </a>
+                    ) : (
+                      <span className="self-center whitespace-nowrap px-2 text-xs text-muted-foreground">
+                        Sin telefono
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
 
               {!loadingList && (list?.length ?? 0) === 0 && (
                 <li className="p-3 text-sm text-muted-foreground">
