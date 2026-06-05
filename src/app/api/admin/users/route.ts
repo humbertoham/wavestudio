@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
       id: true,
       name: true,
       email: true,
+      phone: true,
       dateOfBirth: true,
       bookingBlocked: true,
     }, // ✅ conservado
