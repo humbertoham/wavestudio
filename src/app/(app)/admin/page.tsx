@@ -1,7 +1,8 @@
 "use client";
 
 import useSWR from "swr";
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FiMessageCircle } from "react-icons/fi";
 import { getWhatsAppHref } from "@/lib/whatsapp";
 
@@ -85,12 +86,97 @@ function formatMoneyMXN(value?: number | null) {
 }
 
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
+type AdminTab =
+  | "classes"
+  | "instructors"
+  | "packs"
+  | "purchases"
+  | "revenue"
+  | "users";
+type PurchasePaymentStatusFilter =
+  | "ALL"
+  | "PENDING"
+  | "APPROVED"
+  | "REJECTED"
+  | "REFUNDED"
+  | "CANCELED"
+  | "NO_PAYMENT";
+type PurchaseRemainingFilter = "ALL" | "ACTIVE" | "ZERO";
+type PurchaseSort = "newest" | "oldest";
 
 const AFFILIATION_LABELS: Record<Affiliation, string> = {
   NONE: "Ninguna",
   WELLHUB: "WellHub",
   TOTALPASS: "TotalPass",
 };
+
+const PURCHASE_PAYMENT_STATUS_LABELS: Record<
+  PurchasePaymentStatusFilter,
+  string
+> = {
+  ALL: "Todos",
+  PENDING: "Pendiente",
+  APPROVED: "Aprobado",
+  REJECTED: "Rechazado",
+  REFUNDED: "Reembolsado",
+  CANCELED: "Cancelado",
+  NO_PAYMENT: "Sin pago",
+};
+
+const PURCHASE_REMAINING_LABELS: Record<PurchaseRemainingFilter, string> = {
+  ALL: "Todos",
+  ACTIVE: "Con restantes",
+  ZERO: "Usados / cero",
+};
+
+function isAdminTab(value: string | null): value is AdminTab {
+  return (
+    value === "classes" ||
+    value === "instructors" ||
+    value === "packs" ||
+    value === "purchases" ||
+    value === "revenue" ||
+    value === "users"
+  );
+}
+
+function isAffiliation(value: string | null): value is Affiliation {
+  return value === "NONE" || value === "WELLHUB" || value === "TOTALPASS";
+}
+
+function isPurchasePaymentStatusFilter(
+  value: string | null
+): value is PurchasePaymentStatusFilter {
+  return (
+    value === "ALL" ||
+    value === "PENDING" ||
+    value === "APPROVED" ||
+    value === "REJECTED" ||
+    value === "REFUNDED" ||
+    value === "CANCELED" ||
+    value === "NO_PAYMENT"
+  );
+}
+
+function isPurchaseRemainingFilter(
+  value: string | null
+): value is PurchaseRemainingFilter {
+  return value === "ALL" || value === "ACTIVE" || value === "ZERO";
+}
+
+function isPurchaseSort(value: string | null): value is PurchaseSort {
+  return value === "newest" || value === "oldest";
+}
+
+function isDateInputValue(value: string | null): value is string {
+  return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function parseQueryInt(value: string | null, fallback: number, max: number) {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(Math.floor(parsed), 1), max);
+}
 
 function getAdminWhatsAppMessage(name?: string | null) {
   const trimmedName = name?.trim();
@@ -185,14 +271,13 @@ type PurchasedPackage = {
   classesLeft: number;
   classesPurchased: number;
   creditReason?: string | null;
-  user: { name: string | null; email: string };
+  user: { name: string | null; email: string; affiliation: Affiliation };
   pack: { name: string; classes: number; price: number };
-  payment?: {
-    provider: "MERCADOPAGO" | "ADMIN";
-    status: "PENDING" | "APPROVED" | "REJECTED" | "REFUNDED" | "CANCELED";
-    amount: number;
-    currency: string;
-  } | null;
+  amountPaid: number;
+  paymentStatus: "PENDING" | "APPROVED" | "REJECTED" | "REFUNDED" | "CANCELED" | null;
+  paymentProvider: "MERCADOPAGO" | "ADMIN" | null;
+  paymentReference?: string | null;
+  checkoutStatus?: "CREATED" | "OPEN" | "EXPIRED" | "COMPLETED" | "CANCELED" | null;
 };
 type PaginatedPurchasedPackages = {
   items: PurchasedPackage[];
@@ -217,11 +302,35 @@ type BookingRow = {
 
 // ...
 export default function AdminPage() {
-  const [tab, setTab] = useState<
-    "classes" | "instructors" | "packs" | "purchases" | "revenue" | "users"
-  >("classes");
+  return (
+    <Suspense
+      fallback={
+        <main className="container-app py-8">
+          <p className="text-sm text-muted-foreground">Cargando panel...</p>
+        </main>
+      }
+    >
+      <AdminPageContent />
+    </Suspense>
+  );
+}
 
-  const tabs: Array<[value: typeof tab, label: string]> = [
+function AdminPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const [tab, setTab] = useState<AdminTab>(
+    isAdminTab(tabParam) ? tabParam : "classes"
+  );
+
+  useEffect(() => {
+    const nextTab = isAdminTab(tabParam) ? tabParam : "classes";
+    if (nextTab !== tab) {
+      setTab(nextTab);
+    }
+  }, [tab, tabParam]);
+
+  const tabs: Array<[value: AdminTab, label: string]> = [
     ["classes", "Clases"],
     ["instructors", "Instructores"],
     ["packs", "Paquetes"],
@@ -229,6 +338,18 @@ export default function AdminPage() {
     ["revenue", "Ingresos"],
      ["users", "Usuarios"],
   ];
+
+  function selectTab(next: AdminTab) {
+    setTab(next);
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "classes") {
+      params.delete("tab");
+    } else {
+      params.set("tab", next);
+    }
+    const query = params.toString();
+    router.push(query ? `?${query}` : "/admin", { scroll: false });
+  }
 
   return (
     <main className="container-app py-8 space-y-6">
@@ -244,7 +365,7 @@ export default function AdminPage() {
               role="tab"
               aria-selected={selected}
               aria-controls={`panel-${value}`}
-              onClick={() => setTab(value)}
+              onClick={() => selectTab(value)}
               className={selected ? "btn-primary" : "btn-outline"}
             >
               {label}
@@ -1208,14 +1329,123 @@ function EditablePackRow({
 
 
 function PurchasedPackagesSection() {
-  const [page, setPage] = useState(1);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const page = parseQueryInt(searchParams.get("pPage"), 1, 100000);
+  const pageSize = parseQueryInt(
+    searchParams.get("pPageSize"),
+    PURCHASE_PAGE_SIZE,
+    100
+  );
+  const q = searchParams.get("pQ") ?? "";
+  const pack = searchParams.get("pPack") ?? "";
+  const statusParam = searchParams.get("pStatus");
+  const paymentStatus: PurchasePaymentStatusFilter =
+    isPurchasePaymentStatusFilter(statusParam) ? statusParam : "ALL";
+  const affiliationParam = searchParams.get("pAffiliation");
+  const affiliation: Affiliation | "ALL" = isAffiliation(affiliationParam)
+    ? affiliationParam
+    : "ALL";
+  const fromParam = searchParams.get("pFrom");
+  const toParam = searchParams.get("pTo");
+  const from = isDateInputValue(fromParam) ? fromParam : "";
+  const to = isDateInputValue(toParam) ? toParam : "";
+  const remainingParam = searchParams.get("pRemaining");
+  const remaining: PurchaseRemainingFilter = isPurchaseRemainingFilter(
+    remainingParam
+  )
+    ? remainingParam
+    : "ALL";
+  const sortParam = searchParams.get("pSort");
+  const sort: PurchaseSort = isPurchaseSort(sortParam) ? sortParam : "newest";
+
+  const apiParams = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  });
+  if (q.trim()) apiParams.set("q", q.trim());
+  if (pack.trim()) apiParams.set("pack", pack.trim());
+  if (paymentStatus !== "ALL") apiParams.set("paymentStatus", paymentStatus);
+  if (affiliation !== "ALL") apiParams.set("affiliation", affiliation);
+  if (from) apiParams.set("from", from);
+  if (to) apiParams.set("to", to);
+  if (remaining !== "ALL") apiParams.set("remaining", remaining);
+  if (sort !== "newest") apiParams.set("sort", sort);
+
   const { data, error, isLoading, mutate } =
     useSWR<PaginatedPurchasedPackages>(
-      `/api/admin/purchased-packages?page=${page}&pageSize=${PURCHASE_PAGE_SIZE}`,
+      `/api/admin/purchased-packages?${apiParams.toString()}`,
       fetcher
     );
 
   const totalPages = data?.totalPages ?? 1;
+  const hasFilters =
+    q.trim() ||
+    pack.trim() ||
+    paymentStatus !== "ALL" ||
+    affiliation !== "ALL" ||
+    from ||
+    to ||
+    remaining !== "ALL" ||
+    sort !== "newest" ||
+    pageSize !== PURCHASE_PAGE_SIZE;
+
+  function updatePurchaseParams(
+    next: Record<string, string | number | null | undefined>,
+    options: { resetPage?: boolean; replace?: boolean } = { resetPage: true }
+  ) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", "purchases");
+
+    for (const [key, value] of Object.entries(next)) {
+      const param = `p${key}`;
+      const isDefaultPageSize =
+        key === "PageSize" && Number(value) === PURCHASE_PAGE_SIZE;
+      const isDefaultSort = key === "Sort" && value === "newest";
+
+      if (
+        value == null ||
+        value === "" ||
+        value === "ALL" ||
+        isDefaultPageSize ||
+        isDefaultSort
+      ) {
+        params.delete(param);
+      } else {
+        params.set(param, String(value));
+      }
+    }
+
+    if (options.resetPage !== false) {
+      params.delete("pPage");
+    }
+
+    const nextUrl = `?${params.toString()}`;
+    if (options.replace) {
+      router.replace(nextUrl, { scroll: false });
+    } else {
+      router.push(nextUrl, { scroll: false });
+    }
+  }
+
+  function clearPurchaseFilters() {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", "purchases");
+    [
+      "pPage",
+      "pPageSize",
+      "pQ",
+      "pStatus",
+      "pPack",
+      "pAffiliation",
+      "pFrom",
+      "pTo",
+      "pRemaining",
+      "pSort",
+    ].forEach((key) => params.delete(key));
+
+    router.push(`?${params.toString()}`, { scroll: false });
+  }
 
   return (
     <Section>
@@ -1226,9 +1456,134 @@ function PurchasedPackagesSection() {
             Ultimas compras y asignaciones registradas.
           </p>
         </div>
-        <button className="btn-outline w-full md:w-auto" onClick={() => mutate()}>
-          Actualizar
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button className="btn-outline w-full md:w-auto" onClick={() => mutate()}>
+            Actualizar
+          </button>
+          <button
+            className="btn-outline w-full md:w-auto"
+            onClick={clearPurchaseFilters}
+            disabled={!hasFilters}
+          >
+            Limpiar filtros
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-5 grid gap-3 md:grid-cols-4">
+        <label className="text-sm">
+          <span className="mb-1 block text-muted-foreground">Usuario</span>
+          <input
+            className="input w-full"
+            placeholder="Nombre o email"
+            value={q}
+            onChange={(e) =>
+              updatePurchaseParams(
+                { Q: e.target.value },
+                { resetPage: true, replace: true }
+              )
+            }
+          />
+        </label>
+
+        <label className="text-sm">
+          <span className="mb-1 block text-muted-foreground">Paquete</span>
+          <input
+            className="input w-full"
+            placeholder="Nombre del paquete"
+            value={pack}
+            onChange={(e) =>
+              updatePurchaseParams(
+                { Pack: e.target.value },
+                { resetPage: true, replace: true }
+              )
+            }
+          />
+        </label>
+
+        <label className="text-sm">
+          <span className="mb-1 block text-muted-foreground">Pago</span>
+          <select
+            className="input w-full"
+            value={paymentStatus}
+            onChange={(e) => updatePurchaseParams({ Status: e.target.value })}
+          >
+            {(
+              Object.keys(
+                PURCHASE_PAYMENT_STATUS_LABELS
+              ) as PurchasePaymentStatusFilter[]
+            ).map((value) => (
+              <option key={value} value={value}>
+                {PURCHASE_PAYMENT_STATUS_LABELS[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="text-sm">
+          <span className="mb-1 block text-muted-foreground">Afiliacion</span>
+          <select
+            className="input w-full"
+            value={affiliation}
+            onChange={(e) => updatePurchaseParams({ Affiliation: e.target.value })}
+          >
+            <option value="ALL">Todas</option>
+            {(Object.keys(AFFILIATION_LABELS) as Affiliation[]).map((value) => (
+              <option key={value} value={value}>
+                {AFFILIATION_LABELS[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="text-sm">
+          <span className="mb-1 block text-muted-foreground">Desde</span>
+          <input
+            className="input w-full"
+            type="date"
+            value={from}
+            onChange={(e) => updatePurchaseParams({ From: e.target.value })}
+          />
+        </label>
+
+        <label className="text-sm">
+          <span className="mb-1 block text-muted-foreground">Hasta</span>
+          <input
+            className="input w-full"
+            type="date"
+            value={to}
+            onChange={(e) => updatePurchaseParams({ To: e.target.value })}
+          />
+        </label>
+
+        <label className="text-sm">
+          <span className="mb-1 block text-muted-foreground">Restantes</span>
+          <select
+            className="input w-full"
+            value={remaining}
+            onChange={(e) => updatePurchaseParams({ Remaining: e.target.value })}
+          >
+            {(Object.keys(PURCHASE_REMAINING_LABELS) as PurchaseRemainingFilter[]).map(
+              (value) => (
+                <option key={value} value={value}>
+                  {PURCHASE_REMAINING_LABELS[value]}
+                </option>
+              )
+            )}
+          </select>
+        </label>
+
+        <label className="text-sm">
+          <span className="mb-1 block text-muted-foreground">Orden</span>
+          <select
+            className="input w-full"
+            value={sort}
+            onChange={(e) => updatePurchaseParams({ Sort: e.target.value })}
+          >
+            <option value="newest">Mas recientes</option>
+            <option value="oldest">Mas antiguas</option>
+          </select>
+        </label>
       </div>
 
       {isLoading && <p className="text-sm text-gray-500">Cargando...</p>}
@@ -1237,53 +1592,65 @@ function PurchasedPackagesSection() {
       )}
 
       <div className="overflow-x-auto">
-        <table className="min-w-[980px] w-full text-sm border-collapse">
+        <table className="min-w-[1200px] w-full text-sm border-collapse">
           <thead className="border-b text-left">
             <tr>
+              <th>Compra</th>
               <th>Usuario</th>
               <th>Email</th>
+              <th>Afiliacion</th>
               <th>Paquete</th>
               <th>Clases</th>
-              <th>Monto</th>
-              <th>Pago</th>
-              <th>Compra</th>
               <th>Restantes</th>
+              <th>Monto</th>
+              <th>Estado pago</th>
+              <th>Proveedor / referencia</th>
+              <th>Checkout</th>
             </tr>
           </thead>
           <tbody>
             {(data?.items ?? []).map((item) => {
-              const amount = item.payment?.amount ?? item.pack.price;
-
               return (
                 <tr key={item.id} className="border-b">
-                  <td className="py-2">{item.user.name ?? "-"}</td>
-                  <td className="py-2">{item.user.email}</td>
-                  <td className="py-2">{item.pack.name}</td>
-                  <td className="py-2">{item.classesPurchased}</td>
-                  <td className="py-2">{formatMoneyMXN(amount)}</td>
-                  <td className="py-2">
-                    <div className="flex flex-col">
-                      <span className="font-medium">
-                        {item.payment?.status ?? "SIN_PAGO"}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {item.payment?.provider ?? "N/A"}
-                      </span>
-                    </div>
-                  </td>
                   <td className="py-2">
                     <span className="whitespace-nowrap">
                       {formatAdminDate(item.createdAt)}
                     </span>
                   </td>
+                  <td className="py-2">{item.user.name ?? "-"}</td>
+                  <td className="py-2">{item.user.email}</td>
+                  <td className="py-2">
+                    {AFFILIATION_LABELS[item.user.affiliation]}
+                  </td>
+                  <td className="py-2">{item.pack.name}</td>
+                  <td className="py-2">{item.classesPurchased}</td>
                   <td className="py-2">{item.classesLeft}</td>
+                  <td className="py-2">{formatMoneyMXN(item.amountPaid)}</td>
+                  <td className="py-2">
+                    <span className="font-medium">
+                      {item.paymentStatus ?? "SIN_PAGO"}
+                    </span>
+                  </td>
+                  <td className="py-2">
+                    <div className="flex max-w-[220px] flex-col">
+                      <span className="text-xs text-muted-foreground">
+                        {item.paymentProvider ?? "N/A"}
+                      </span>
+                      <span className="truncate" title={item.paymentReference ?? ""}>
+                        {item.paymentReference ?? "-"}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="py-2">
+                    {item.checkoutStatus ?? "-"}
+                  </td>
                 </tr>
               );
             })}
 
             {!isLoading && (data?.items.length ?? 0) === 0 && (
               <tr>
-                <td colSpan={8} className="py-3 text-center text-muted-foreground">
+                <td colSpan={11} className="py-3 text-center text-muted-foreground">
                   Sin compras registradas
                 </td>
               </tr>
@@ -1297,18 +1664,36 @@ function PurchasedPackagesSection() {
           <p className="text-muted-foreground">
             Pagina {data.page} de {totalPages} · {data.total} registros
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <select
+              className="input"
+              value={pageSize}
+              onChange={(e) =>
+                updatePurchaseParams({ PageSize: e.target.value }, { resetPage: true })
+              }
+            >
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
             <button
               className="btn-outline"
               disabled={page <= 1}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              onClick={() =>
+                updatePurchaseParams(
+                  { Page: Math.max(1, page - 1) },
+                  { resetPage: false }
+                )
+              }
             >
               Anterior
             </button>
             <button
               className="btn-outline"
               disabled={page >= totalPages}
-              onClick={() => setPage((current) => current + 1)}
+              onClick={() =>
+                updatePurchaseParams({ Page: page + 1 }, { resetPage: false })
+              }
             >
               Siguiente
             </button>
