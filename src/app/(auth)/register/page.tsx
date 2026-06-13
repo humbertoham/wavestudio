@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/useSession";
 
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MAX_LENGTH = 64;
+
 export default function RegisterPage() {
   const router = useRouter();
   const { refresh } = useSession();
@@ -26,6 +29,15 @@ export default function RegisterPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErrorMsg(null);
+
+    if (password.length < PASSWORD_MIN_LENGTH)
+      return setErrorMsg(
+        `La contrase\u00f1a debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`
+      );
+    if (password.length > PASSWORD_MAX_LENGTH)
+      return setErrorMsg(
+        `La contrase\u00f1a debe tener m\u00e1ximo ${PASSWORD_MAX_LENGTH} caracteres.`
+      );
 
     if (password !== confirmPwd) return setErrorMsg("Las contraseñas no coinciden.");
     if (!dateOfBirth) return setErrorMsg("Selecciona tu fecha de nacimiento.");
