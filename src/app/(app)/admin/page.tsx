@@ -6,6 +6,9 @@ import { FiMessageCircle } from "react-icons/fi";
 import { getWhatsAppHref } from "@/lib/whatsapp";
 
 // --- helpers ---
+const USER_PAGE_SIZE = 25;
+const PURCHASE_PAGE_SIZE = 20;
+
 const fetcher = (url: string) =>
   fetch(url, { credentials: "include" }).then(r => {
     if (!r.ok) throw new Error(String(r.status));
@@ -71,6 +74,24 @@ function formatAdminDate(value?: string | null) {
   return value ? new Date(value).toLocaleString() : "—";
 }
 
+function formatMoneyMXN(value?: number | null) {
+  return typeof value === "number"
+    ? value.toLocaleString("es-MX", {
+        style: "currency",
+        currency: "MXN",
+        maximumFractionDigits: 0,
+      })
+    : "—";
+}
+
+type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
+
+const AFFILIATION_LABELS: Record<Affiliation, string> = {
+  NONE: "Ninguna",
+  WELLHUB: "WellHub",
+  TOTALPASS: "TotalPass",
+};
+
 function getAdminWhatsAppMessage(name?: string | null) {
   const trimmedName = name?.trim();
   return trimmedName
@@ -106,6 +127,13 @@ type User = {
   dateOfBirth?: string | null;
   bookingBlocked?: boolean;
 };
+type PaginatedUsers = {
+  items: User[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
 type UserDetails = {
   user: {
     id: string;
@@ -114,7 +142,7 @@ type UserDetails = {
     dateOfBirth?: string | null;
     phone?: string | null;
     emergencyPhone?: string | null;
-    affiliation: "NONE" | "WELLHUB" | "TOTALPASS";
+    affiliation: Affiliation;
     bookingBlocked: boolean;
     bookingBlockedAt?: string | null;
     bookingBlockLogs?: Array<{
@@ -150,6 +178,29 @@ type UserDetails = {
     packPurchase?: { id: string; pack?: { id: string; name: string } | null } | null;
   }>;
 };
+type PurchasedPackage = {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  classesLeft: number;
+  classesPurchased: number;
+  creditReason?: string | null;
+  user: { name: string | null; email: string };
+  pack: { name: string; classes: number; price: number };
+  payment?: {
+    provider: "MERCADOPAGO" | "ADMIN";
+    status: "PENDING" | "APPROVED" | "REJECTED" | "REFUNDED" | "CANCELED";
+    amount: number;
+    currency: string;
+  } | null;
+};
+type PaginatedPurchasedPackages = {
+  items: PurchasedPackage[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
 type BookingRow = {
   id: string;
   status: "ACTIVE" | "CANCELED";
@@ -167,13 +218,14 @@ type BookingRow = {
 // ...
 export default function AdminPage() {
   const [tab, setTab] = useState<
-    "classes" | "instructors" | "packs" | "revenue" | "users"
+    "classes" | "instructors" | "packs" | "purchases" | "revenue" | "users"
   >("classes");
 
   const tabs: Array<[value: typeof tab, label: string]> = [
     ["classes", "Clases"],
     ["instructors", "Instructores"],
     ["packs", "Paquetes"],
+    ["purchases", "Compras"],
     ["revenue", "Ingresos"],
      ["users", "Usuarios"],
   ];
@@ -230,6 +282,16 @@ export default function AdminPage() {
         className="space-y-6"
       >
         {tab === "packs" && <PacksSection />}
+      </section>
+
+      <section
+        id="panel-purchases"
+        role="tabpanel"
+        hidden={tab !== "purchases"}
+        aria-labelledby="purchases"
+        className="space-y-6"
+      >
+        {tab === "purchases" && <PurchasedPackagesSection />}
       </section>
 
      
@@ -1145,6 +1207,119 @@ function EditablePackRow({
 }
 
 
+function PurchasedPackagesSection() {
+  const [page, setPage] = useState(1);
+  const { data, error, isLoading, mutate } =
+    useSWR<PaginatedPurchasedPackages>(
+      `/api/admin/purchased-packages?page=${page}&pageSize=${PURCHASE_PAGE_SIZE}`,
+      fetcher
+    );
+
+  const totalPages = data?.totalPages ?? 1;
+
+  return (
+    <Section>
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">Paquetes comprados</h2>
+          <p className="text-sm text-muted-foreground">
+            Ultimas compras y asignaciones registradas.
+          </p>
+        </div>
+        <button className="btn-outline w-full md:w-auto" onClick={() => mutate()}>
+          Actualizar
+        </button>
+      </div>
+
+      {isLoading && <p className="text-sm text-gray-500">Cargando...</p>}
+      {error && (
+        <p className="text-sm text-red-600">Error cargando paquetes comprados</p>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="min-w-[980px] w-full text-sm border-collapse">
+          <thead className="border-b text-left">
+            <tr>
+              <th>Usuario</th>
+              <th>Email</th>
+              <th>Paquete</th>
+              <th>Clases</th>
+              <th>Monto</th>
+              <th>Pago</th>
+              <th>Compra</th>
+              <th>Restantes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(data?.items ?? []).map((item) => {
+              const amount = item.payment?.amount ?? item.pack.price;
+
+              return (
+                <tr key={item.id} className="border-b">
+                  <td className="py-2">{item.user.name ?? "-"}</td>
+                  <td className="py-2">{item.user.email}</td>
+                  <td className="py-2">{item.pack.name}</td>
+                  <td className="py-2">{item.classesPurchased}</td>
+                  <td className="py-2">{formatMoneyMXN(amount)}</td>
+                  <td className="py-2">
+                    <div className="flex flex-col">
+                      <span className="font-medium">
+                        {item.payment?.status ?? "SIN_PAGO"}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {item.payment?.provider ?? "N/A"}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="py-2">
+                    <span className="whitespace-nowrap">
+                      {formatAdminDate(item.createdAt)}
+                    </span>
+                  </td>
+                  <td className="py-2">{item.classesLeft}</td>
+                </tr>
+              );
+            })}
+
+            {!isLoading && (data?.items.length ?? 0) === 0 && (
+              <tr>
+                <td colSpan={8} className="py-3 text-center text-muted-foreground">
+                  Sin compras registradas
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {data && (
+        <div className="mt-4 flex flex-col gap-2 text-sm md:flex-row md:items-center md:justify-between">
+          <p className="text-muted-foreground">
+            Pagina {data.page} de {totalPages} · {data.total} registros
+          </p>
+          <div className="flex gap-2">
+            <button
+              className="btn-outline"
+              disabled={page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              Anterior
+            </button>
+            <button
+              className="btn-outline"
+              disabled={page >= totalPages}
+              onClick={() => setPage((current) => current + 1)}
+            >
+              Siguiente
+            </button>
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+
 function RevenueSection() {
   const now = new Date();
   const defaultMonth = `${now.getFullYear()}-${String(
@@ -1281,6 +1456,7 @@ SECCION DE USUARIOS
 */
 function UserInspectorSection() {
   const [q, setQ] = useState("");
+  const [userPage, setUserPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // admin actions
@@ -1294,20 +1470,18 @@ function UserInspectorSection() {
     text: string;
   } | null>(null);
   const [togglingBlock, setTogglingBlock] = useState(false);
+  const [savingAffiliation, setSavingAffiliation] = useState(false);
   const [pauseDaysById, setPauseDaysById] = useState<Record<string, number>>({});
   const [pausingPackId, setPausingPackId] = useState<string | null>(null);
 
   // 1️⃣ últimos usuarios
-  const { data: latestUsers, isLoading: loadingLatest } = useSWR<{ items: User[] }>(
-    q.trim() ? null : "/api/admin/users",
-    fetcher
-  );
+  const usersUrl = `/api/admin/users?page=${userPage}&pageSize=${USER_PAGE_SIZE}${
+    q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ""
+  }`;
+  const { data: usersData, isLoading: loadingList, mutate: mutateUsers } =
+    useSWR<PaginatedUsers>(usersUrl, fetcher);
 
   // 2️⃣ búsqueda
-  const { data: searchData, isLoading: searching } = useSWR<{ items: User[] }>(
-    q.trim() ? `/api/admin/users?q=${encodeURIComponent(q.trim())}` : null,
-    fetcher
-  );
 
   // 3️⃣ detalles usuario
   const {
@@ -1326,8 +1500,8 @@ function UserInspectorSection() {
     fetcher
   );
 
-  const list = q.trim() ? searchData?.items : latestUsers?.items;
-  const loadingList = q.trim() ? searching : loadingLatest;
+  const list = usersData?.items;
+  const userTotalPages = usersData?.totalPages ?? 1;
 
   async function updateBookingBlocked(next: boolean) {
     if (!selectedId) return;
@@ -1363,6 +1537,46 @@ function UserInspectorSection() {
       });
     } finally {
       setTogglingBlock(false);
+    }
+  }
+
+  async function updateAffiliation(next: Affiliation) {
+    if (!selectedId || next === details?.user.affiliation) return;
+
+    setSavingAffiliation(true);
+    setFeedback(null);
+
+    try {
+      const res = await fetch(`/api/admin/users/${selectedId}/details`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ affiliation: next }),
+      });
+
+      if (!res.ok) {
+        throw new Error(
+          await readApiMessage(res, "No se pudo actualizar la afiliacion.")
+        );
+      }
+
+      await Promise.all([mutate(), mutateUsers()]);
+      setFeedback({
+        type: "success",
+        text:
+          next === "NONE"
+            ? "Afiliacion actualizada. Las renovaciones corporativas futuras quedan detenidas."
+            : "Afiliacion actualizada.",
+      });
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "No se pudo actualizar la afiliacion.",
+      });
+    } finally {
+      setSavingAffiliation(false);
     }
   }
 
@@ -1423,7 +1637,10 @@ function UserInspectorSection() {
             className="input w-full"
             placeholder="Buscar por nombre o email…"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setUserPage(1);
+            }}
           />
 
           {loadingList && (
@@ -1492,10 +1709,28 @@ function UserInspectorSection() {
             </ul>
           </div>
 
-          {!q.trim() && !loadingList && (
-            <p className="text-xs text-muted-foreground text-center">
-              Últimos usuarios registrados
-            </p>
+          {usersData && !loadingList && (
+            <div className="space-y-2 text-xs text-muted-foreground">
+              <p className="text-center">
+                Pagina {usersData.page} de {userTotalPages} · {usersData.total} usuarios
+              </p>
+              <div className="flex gap-2">
+                <button
+                  className="btn-outline flex-1"
+                  disabled={userPage <= 1}
+                  onClick={() => setUserPage((current) => Math.max(1, current - 1))}
+                >
+                  Anterior
+                </button>
+                <button
+                  className="btn-outline flex-1"
+                  disabled={userPage >= userTotalPages}
+                  onClick={() => setUserPage((current) => current + 1)}
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
           )}
         </div>
 
@@ -1545,7 +1780,27 @@ function UserInspectorSection() {
                     <dd className="col-span-2">{details.user.email}</dd>
 
                     <dt className="text-muted-foreground">Afiliación</dt>
-                    <dd className="col-span-2">{details.user.affiliation}</dd>
+                    <dd className="col-span-2 space-y-1">
+                      <select
+                        className="input w-full"
+                        value={details.user.affiliation}
+                        disabled={savingAffiliation}
+                        onChange={(e) =>
+                          updateAffiliation(e.target.value as Affiliation)
+                        }
+                      >
+                        {(Object.keys(AFFILIATION_LABELS) as Affiliation[]).map(
+                          (value) => (
+                            <option key={value} value={value}>
+                              {AFFILIATION_LABELS[value]}
+                            </option>
+                          )
+                        )}
+                      </select>
+                      <p className="text-xs text-muted-foreground">
+                        Ninguna detiene renovaciones corporativas futuras.
+                      </p>
+                    </dd>
 
                     <dt className="text-muted-foreground">Alta</dt>
                     <dd className="col-span-2">

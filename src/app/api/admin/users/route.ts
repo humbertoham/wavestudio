@@ -8,8 +8,15 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get("q") ?? "").trim();
-  const takeParam = Number(searchParams.get("take") ?? 25);
-  const take = Number.isFinite(takeParam) ? Math.min(Math.max(takeParam, 1), 100) : 25;
+  const pageParam = Number(searchParams.get("page") ?? 1);
+  const page = Number.isFinite(pageParam) ? Math.max(Math.floor(pageParam), 1) : 1;
+  const pageSizeParam = Number(
+    searchParams.get("pageSize") ?? searchParams.get("take") ?? 25
+  );
+  const pageSize = Number.isFinite(pageSizeParam)
+    ? Math.min(Math.max(Math.floor(pageSizeParam), 1), 100)
+    : 25;
+  const skip = (page - 1) * pageSize;
 
   // 👇 Tipado explícito para evitar el error de unión en OR
   const where: Prisma.UserWhereInput | undefined = q
@@ -22,7 +29,9 @@ export async function GET(req: NextRequest) {
       }
     : undefined;
 
-  const items = await prisma.user.findMany({
+  const [total, items] = await prisma.$transaction([
+    prisma.user.count({ where }),
+    prisma.user.findMany({
     where,
     select: {
       id: true,
@@ -32,9 +41,17 @@ export async function GET(req: NextRequest) {
       dateOfBirth: true,
       bookingBlocked: true,
     }, // ✅ conservado
-    orderBy: { createdAt: "desc" },
-    take,
-  });
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: pageSize,
+    }),
+  ]);
 
-  return NextResponse.json({ items });
+  return NextResponse.json({
+    items,
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  });
 }

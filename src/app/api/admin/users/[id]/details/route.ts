@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Affiliation, Prisma } from "@prisma/client";
 import { prisma, requireAdmin } from "../../../_utils";
 
 export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
+
+function parseAffiliation(value: unknown): Affiliation | null {
+  if (value === Affiliation.NONE) return Affiliation.NONE;
+  if (value === Affiliation.WELLHUB) return Affiliation.WELLHUB;
+  if (value === Affiliation.TOTALPASS) return Affiliation.TOTALPASS;
+  return null;
+}
 
 function j(status: number, body: any) {
   return NextResponse.json(body, { status });
@@ -145,4 +153,56 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       packPurchase: b.packPurchase ?? null,
     })),
   });
+}
+
+export async function PATCH(req: NextRequest, ctx: Ctx) {
+  const auth = await requireAdmin(req);
+  if (auth) return auth;
+
+  const { id } = await ctx.params;
+  const body = await req.json().catch(() => null);
+  const affiliation = parseAffiliation(
+    body && typeof body === "object"
+      ? (body as { affiliation?: unknown }).affiliation
+      : null
+  );
+
+  if (!affiliation) {
+    return j(400, {
+      ok: false,
+      message: "Afiliacion invalida",
+    });
+  }
+
+  try {
+    const user = await prisma.user.update({
+      where: { id },
+      data: { affiliation },
+      select: {
+        id: true,
+        affiliation: true,
+      },
+    });
+
+    return j(200, {
+      ok: true,
+      user,
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      return j(404, {
+        ok: false,
+        message: "Usuario no encontrado",
+      });
+    }
+
+    console.error("PATCH /api/admin/users/[id]/details error:", error);
+    return j(500, {
+      ok: false,
+      message: "No se pudo actualizar la afiliacion.",
+    });
+  }
 }
