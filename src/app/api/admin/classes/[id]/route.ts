@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, requireAdmin } from "../../_utils";
+import { prisma, requireAdmin, requireClassManager } from "../../_utils";
 import { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
@@ -95,7 +95,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 }
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
-  const auth = await requireAdmin(req);
+  const auth = await requireClassManager(req);
   if (auth) return auth;
 
   const { id } = await ctx.params;

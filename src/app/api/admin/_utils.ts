@@ -32,3 +32,25 @@ export async function requireAdmin(req: NextRequest) {
 
   return null as NextResponse | null;
 }
+
+// Class detail management is shared by admins and coaches. Broader admin routes
+// should keep using requireAdmin so coaches cannot access the admin panel APIs.
+export async function requireClassManager(req: NextRequest) {
+  const user = await getUserFromSession(req);
+
+  if (!user) {
+    return NextResponse.json(
+      { error: "UNAUTHORIZED", message: "Inicia sesión para continuar." },
+      { status: 401, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
+  if (user.role !== Role.ADMIN && user.role !== Role.COACH) {
+    return NextResponse.json(
+      { error: "FORBIDDEN", message: "No tienes permiso para administrar esta clase." },
+      { status: 403, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
+  return null as NextResponse | null;
+}

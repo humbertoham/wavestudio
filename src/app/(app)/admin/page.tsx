@@ -86,6 +86,7 @@ function formatMoneyMXN(value?: number | null) {
 }
 
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
+type Role = "USER" | "COACH" | "ADMIN";
 type AdminTab =
   | "classes"
   | "instructors"
@@ -108,6 +109,12 @@ const AFFILIATION_LABELS: Record<Affiliation, string> = {
   NONE: "Ninguna",
   WELLHUB: "WellHub",
   TOTALPASS: "TotalPass",
+};
+
+const ROLE_LABELS: Record<Role, string> = {
+  USER: "User",
+  COACH: "Coach",
+  ADMIN: "Admin",
 };
 
 const PURCHASE_PAYMENT_STATUS_LABELS: Record<
@@ -209,6 +216,7 @@ type User = {
   id: string;
   name: string | null;
   email: string;
+  role: Role;
   phone?: string | null;
   dateOfBirth?: string | null;
   bookingBlocked?: boolean;
@@ -225,6 +233,7 @@ type UserDetails = {
     id: string;
     name: string | null;
     email: string;
+    role: Role;
     dateOfBirth?: string | null;
     phone?: string | null;
     emergencyPhone?: string | null;
@@ -1856,6 +1865,7 @@ function UserInspectorSection() {
   } | null>(null);
   const [togglingBlock, setTogglingBlock] = useState(false);
   const [savingAffiliation, setSavingAffiliation] = useState(false);
+  const [savingRole, setSavingRole] = useState(false);
   const [pauseDaysById, setPauseDaysById] = useState<Record<string, number>>({});
   const [pausingPackId, setPausingPackId] = useState<string | null>(null);
 
@@ -1965,6 +1975,45 @@ function UserInspectorSection() {
     }
   }
 
+  async function updateRole(next: Role) {
+    if (!selectedId || next === details?.user.role) return;
+
+    setSavingRole(true);
+    setFeedback(null);
+
+    try {
+      const res = await fetch(`/api/admin/users/${selectedId}/role`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: next }),
+      });
+
+      if (!res.ok) {
+        throw new Error(await readApiMessage(res, "No se pudo actualizar el rol."));
+      }
+
+      const payload = await res.json().catch(() => null);
+      await Promise.all([mutate(), mutateUsers()]);
+      setFeedback({
+        type: "success",
+        text:
+          payload && typeof payload.message === "string"
+            ? payload.message
+            : "Rol actualizado.",
+      });
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "No se pudo actualizar el rol.",
+      });
+    } finally {
+      setSavingRole(false);
+    }
+  }
+
   async function pausePurchase(purchaseId: string) {
     if (!selectedId) return;
 
@@ -2062,6 +2111,9 @@ function UserInspectorSection() {
                       </div>
                       <div className="truncate text-sm text-muted-foreground">
                         {u.email}
+                      </div>
+                      <div className="mt-1 text-xs font-medium text-muted-foreground">
+                        {ROLE_LABELS[u.role]}
                       </div>
                     </button>
 
@@ -2163,6 +2215,22 @@ function UserInspectorSection() {
 
                     <dt className="text-muted-foreground">Email</dt>
                     <dd className="col-span-2">{details.user.email}</dd>
+
+                    <dt className="text-muted-foreground">Rol</dt>
+                    <dd className="col-span-2 space-y-1">
+                      <select
+                        className="input w-full"
+                        value={details.user.role}
+                        disabled={savingRole}
+                        onChange={(e) => updateRole(e.target.value as Role)}
+                      >
+                        {(Object.keys(ROLE_LABELS) as Role[]).map((value) => (
+                          <option key={value} value={value}>
+                            {ROLE_LABELS[value]}
+                          </option>
+                        ))}
+                      </select>
+                    </dd>
 
                     <dt className="text-muted-foreground">Afiliación</dt>
                     <dd className="col-span-2 space-y-1">

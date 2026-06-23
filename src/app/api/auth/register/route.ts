@@ -72,7 +72,13 @@ function parseDOB(value: string): Date {
   const [, y, mo, d] = match;
   const date = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
 
-  if (Number.isNaN(date.getTime()) || date > new Date()) {
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() !== Number(y) ||
+    date.getUTCMonth() !== Number(mo) - 1 ||
+    date.getUTCDate() !== Number(d) ||
+    date > new Date()
+  ) {
     throw new RegisterHttpError(400, "INVALID_DATE_OF_BIRTH");
   }
 
@@ -94,6 +100,23 @@ function json(status: number, body: Record<string, unknown>) {
     status,
     headers: { "Cache-Control": "no-store" },
   });
+}
+
+function firstFieldMessage(fieldErrors: Record<string, string[] | undefined>) {
+  for (const key of [
+    "name",
+    "email",
+    "password",
+    "dateOfBirth",
+    "phone",
+    "emergencyPhone",
+    "affiliation",
+  ]) {
+    const messages = fieldErrors[key];
+    if (messages?.[0]) return messages[0];
+  }
+
+  return "Revisa los datos del formulario.";
 }
 
 async function ensureCorporatePacks(tx: Prisma.TransactionClient) {
@@ -203,7 +226,7 @@ export async function POST(req: Request) {
 
       return json(400, {
         error: "INVALID_BODY",
-        message: "Los datos de registro no son validos.",
+        message: firstFieldMessage(fieldErrors),
         fields: fieldErrors,
         requestId,
       });
@@ -240,7 +263,7 @@ export async function POST(req: Request) {
 
       return json(409, {
         error: "EMAIL_IN_USE",
-        message: "Este correo ya esta registrado.",
+        message: "Ya existe una cuenta con este correo.",
         requestId,
       });
     }
@@ -332,7 +355,10 @@ export async function POST(req: Request) {
 
       return json(error.status, {
         error: error.code,
-        message: "No se pudo completar el registro.",
+        message:
+          error.code === "INVALID_DATE_OF_BIRTH"
+            ? "Ingresa una fecha de nacimiento válida."
+            : "No se pudo completar el registro.",
         details: error.details ?? null,
         requestId,
       });
@@ -358,7 +384,7 @@ export async function POST(req: Request) {
       ) {
         return json(409, {
           error: "EMAIL_IN_USE",
-          message: "Este correo ya esta registrado.",
+          message: "Ya existe una cuenta con este correo.",
           requestId,
         });
       }

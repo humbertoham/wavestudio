@@ -32,6 +32,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       id: true,
       name: true,
       email: true,
+      role: true,
       createdAt: true,
       dateOfBirth: true,
       phone: true,

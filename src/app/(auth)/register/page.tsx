@@ -8,6 +8,51 @@ import { useSession } from "@/lib/useSession";
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_LENGTH = 64;
 
+function phoneDigits(value: string) {
+  return value.replace(/\D+/g, "");
+}
+
+function firstServerFieldMessage(fields: unknown) {
+  if (!fields || typeof fields !== "object") return null;
+
+  for (const key of [
+    "name",
+    "email",
+    "password",
+    "dateOfBirth",
+    "phone",
+    "emergencyPhone",
+    "affiliation",
+  ]) {
+    const value = (fields as Record<string, unknown>)[key];
+    if (Array.isArray(value) && typeof value[0] === "string") {
+      return value[0];
+    }
+  }
+
+  return null;
+}
+
+function serverErrorMessage(payload: unknown, fallback: string) {
+  const fieldMessage =
+    payload && typeof payload === "object" && "fields" in payload
+      ? firstServerFieldMessage((payload as { fields?: unknown }).fields)
+      : null;
+
+  if (fieldMessage) return fieldMessage;
+
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "message" in payload &&
+    typeof (payload as { message?: unknown }).message === "string"
+  ) {
+    return (payload as { message: string }).message;
+  }
+
+  return fallback;
+}
+
 export default function RegisterPage() {
   const router = useRouter();
   const { refresh } = useSession();
@@ -30,19 +75,38 @@ export default function RegisterPage() {
     e.preventDefault();
     setErrorMsg(null);
 
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    const normalizedPhone = phoneDigits(phone);
+    const normalizedEmergencyPhone = phoneDigits(emergencyPhone);
+
+    if (!trimmedName) return setErrorMsg("Ingresa tu nombre.");
+    if (!trimmedEmail) return setErrorMsg("Ingresa tu correo electrónico.");
+    if (!dateOfBirth) return setErrorMsg("Selecciona tu fecha de nacimiento.");
+    if (!phone.trim()) return setErrorMsg("Ingresa tu número de celular.");
+    if (normalizedPhone.length < 10 || normalizedPhone.length > 20) {
+      return setErrorMsg("Ingresa un número de celular válido.");
+    }
+    if (!emergencyPhone.trim()) {
+      return setErrorMsg("Ingresa un número de emergencias.");
+    }
+    if (
+      normalizedEmergencyPhone.length < 10 ||
+      normalizedEmergencyPhone.length > 20
+    ) {
+      return setErrorMsg("Ingresa un número de emergencias válido.");
+    }
+
     if (password.length < PASSWORD_MIN_LENGTH)
       return setErrorMsg(
-        `La contrase\u00f1a debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`
+        `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`
       );
     if (password.length > PASSWORD_MAX_LENGTH)
       return setErrorMsg(
-        `La contrase\u00f1a debe tener m\u00e1ximo ${PASSWORD_MAX_LENGTH} caracteres.`
+        `La contraseña debe tener máximo ${PASSWORD_MAX_LENGTH} caracteres.`
       );
 
     if (password !== confirmPwd) return setErrorMsg("Las contraseñas no coinciden.");
-    if (!dateOfBirth) return setErrorMsg("Selecciona tu fecha de nacimiento.");
-    if (!phone) return setErrorMsg("Ingresa tu número de celular.");
-    if (!emergencyPhone) return setErrorMsg("Ingresa un número de emergencias.");
 
     setLoading(true);
     try {
@@ -51,8 +115,8 @@ export default function RegisterPage() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          name,
-          email,
+          name: trimmedName,
+          email: trimmedEmail,
           password,
           dateOfBirth,
           phone,
@@ -63,18 +127,14 @@ export default function RegisterPage() {
 
       if (!regRes.ok) {
         const err = await regRes.json().catch(() => ({}));
-        if (regRes.status === 409 || err?.error === "EMAIL_IN_USE")
-          throw new Error("Este correo ya está registrado.");
-        if (regRes.status === 400 || err?.error === "INVALID" || err?.error === "INVALID_BODY")
-          throw new Error("Datos inválidos. Revisa el formulario.");
-        throw new Error("No se pudo crear la cuenta.");
+        throw new Error(serverErrorMessage(err, "No se pudo crear la cuenta."));
       }
 
       const logRes = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: trimmedEmail, password }),
       });
       if (!logRes.ok)
         throw new Error("Cuenta creada, pero no se pudo iniciar sesión. Intenta entrar manualmente.");

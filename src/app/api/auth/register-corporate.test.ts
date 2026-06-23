@@ -28,20 +28,86 @@ vi.mock("@/lib/prisma", () => ({
 import { POST } from "./register/route";
 
 function registerRequest(affiliation: "WELLHUB" | "TOTALPASS") {
+  return registerRequestBody({
+    name: "Corporate User",
+    email: "corp@example.test",
+    password: "password123",
+    dateOfBirth: "1990-01-01",
+    phone: "5555555555",
+    emergencyPhone: "5555555556",
+    affiliation,
+  });
+}
+
+function registerRequestBody(body: Record<string, unknown>) {
   return new Request("https://example.test/api/auth/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      name: "Corporate User",
-      email: "corp@example.test",
-      password: "password123",
-      dateOfBirth: "1990-01-01",
-      phone: "5555555555",
-      emergencyPhone: "5555555556",
-      affiliation,
-    }),
+    body: JSON.stringify(body),
   });
 }
+
+describe("registration validation", () => {
+  beforeEach(() => {
+    mocks.consumeRateLimit.mockResolvedValue({
+      limited: false,
+      remaining: 4,
+      retryAfter: 0,
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns field-specific Spanish messages for invalid signup fields", async () => {
+    const res = await POST(
+      registerRequestBody({
+        name: "",
+        email: "correo-invalido",
+        password: "short",
+        dateOfBirth: "2030-02-31",
+        phone: "123",
+        emergencyPhone: "",
+        affiliation: "none",
+      })
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body).toMatchObject({
+      error: "INVALID_BODY",
+      message: "Ingresa tu nombre.",
+    });
+    expect(body.fields).toMatchObject({
+      name: expect.arrayContaining(["Ingresa tu nombre."]),
+      email: expect.arrayContaining(["Ingresa un correo electrónico válido."]),
+      password: expect.arrayContaining([
+        "La contraseña debe tener al menos 8 caracteres.",
+      ]),
+      dateOfBirth: expect.arrayContaining([
+        "Ingresa una fecha de nacimiento válida.",
+      ]),
+      phone: expect.arrayContaining(["Ingresa un número de celular válido."]),
+      emergencyPhone: expect.arrayContaining([
+        "Ingresa un número de emergencias.",
+      ]),
+    });
+    expect(mocks.prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe duplicate-email message", async () => {
+    mocks.prisma.user.findUnique.mockResolvedValue({ id: "existing_user" });
+
+    const res = await POST(registerRequest("TOTALPASS"));
+
+    await expect(res.json()).resolves.toMatchObject({
+      error: "EMAIL_IN_USE",
+      message: "Ya existe una cuenta con este correo.",
+    });
+    expect(res.status).toBe(409);
+  });
+});
 
 describe("corporate registration grants", () => {
   beforeEach(() => {

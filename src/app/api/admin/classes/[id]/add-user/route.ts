@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 
 import { createBookingWithCreditCheck, isManagedBookingError } from "@/lib/class-booking";
 
-import { prisma, requireAdmin } from "../../../_utils";
+import { prisma, requireClassManager } from "../../../_utils";
 
 export const runtime = "nodejs";
 
@@ -81,7 +81,7 @@ function errorResponse(error: unknown) {
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
-  const auth = await requireAdmin(req);
+  const auth = await requireClassManager(req);
   if (auth) return auth;
 
   const { id: classId } = await ctx.params;
