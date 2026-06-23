@@ -27,6 +27,25 @@ function parseRole(value: unknown): Role | null {
   return null;
 }
 
+function isMissingRoleMigrationError(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "object" && error !== null && "message" in error
+        ? String((error as { message?: unknown }).message)
+        : "";
+
+  return (
+    message.includes("invalid input value for enum") &&
+    message.includes("Role") &&
+    message.includes("COACH")
+  ) || (
+    message.includes("Value") &&
+    message.includes("COACH") &&
+    message.includes("Role")
+  );
+}
+
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const actor = await getUserFromSession(req);
 
@@ -93,7 +112,16 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       });
     }
 
+    if (isMissingRoleMigrationError(error)) {
+      return j(503, {
+        error: "ROLE_MIGRATION_REQUIRED",
+        message:
+          "La migración de roles no está aplicada en la base de datos. Ejecuta las migraciones antes de asignar Coach.",
+      });
+    }
+
     console.error("PATCH /api/admin/users/[id]/role error:", error);
+
     return j(500, {
       error: "INTERNAL_ERROR",
       message: "No se pudo actualizar el rol.",

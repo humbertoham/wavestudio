@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 const requiredServerEnvKeys = [
   "DATABASE_URL",
   "JWT_SECRET",
@@ -7,6 +9,37 @@ const requiredServerEnvKeys = [
   "MP_WEBHOOK_SECRET",
   "CRON_SECRET",
 ];
+
+function loadLocalEnvFile() {
+  if (!process.cwd()) return;
+
+  let text = "";
+  try {
+    text = fs.readFileSync(".env", "utf8");
+  } catch {
+    return;
+  }
+
+  for (const line of text.split(/\r?\n/)) {
+    const match = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line);
+    if (!match || match[1].startsWith("#")) continue;
+
+    const [, name, rawValue] = match;
+    if (process.env[name]) continue;
+
+    let value = rawValue.trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    process.env[name] = value;
+  }
+}
+
+loadLocalEnvFile();
 
 function hasValue(name) {
   return Boolean(process.env[name]?.trim());
@@ -46,6 +79,7 @@ console.log(
         process.env.VERCEL_ENV || process.env.APP_ENV || process.env.NODE_ENV || "local",
       NODE_ENV: process.env.NODE_ENV || null,
       required,
+      appBaseUrl: redactedDatabaseTarget(process.env.APP_BASE_URL),
       database: redactedDatabaseTarget(process.env.DATABASE_URL),
     },
     null,

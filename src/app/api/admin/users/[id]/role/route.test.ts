@@ -109,4 +109,19 @@ describe("PATCH /api/admin/users/[id]/role", () => {
     expect(res.status).toBe(400);
     expect(mocks.prisma.user.update).not.toHaveBeenCalled();
   });
+
+  it("returns a clear migration error when COACH is missing in the database enum", async () => {
+    mocks.prisma.user.update.mockRejectedValue(
+      new Error('invalid input value for enum "Role": "COACH"')
+    );
+
+    const res = await PATCH(req("COACH"), ctx());
+
+    await expect(res.json()).resolves.toMatchObject({
+      error: "ROLE_MIGRATION_REQUIRED",
+      message:
+        "La migración de roles no está aplicada en la base de datos. Ejecuta las migraciones antes de asignar Coach.",
+    });
+    expect(res.status).toBe(503);
+  });
 });
