@@ -86,6 +86,7 @@ function formatMoneyMXN(value?: number | null) {
 }
 
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
+type WellhubPlan = "GOLD_PLUS" | "PLATINUM" | "DIAMOND" | "DIAMOND_PLUS";
 type Role = "USER" | "COACH" | "ADMIN";
 type AdminTab =
   | "classes"
@@ -109,6 +110,20 @@ const AFFILIATION_LABELS: Record<Affiliation, string> = {
   NONE: "Ninguna",
   WELLHUB: "WellHub",
   TOTALPASS: "TotalPass",
+};
+
+const WELLHUB_PLAN_LABELS: Record<WellhubPlan, string> = {
+  GOLD_PLUS: "Gold+",
+  PLATINUM: "Platinum",
+  DIAMOND: "Diamond",
+  DIAMOND_PLUS: "Diamond+",
+};
+
+const WELLHUB_PLAN_CREDITS: Record<WellhubPlan, number> = {
+  GOLD_PLUS: 2,
+  PLATINUM: 8,
+  DIAMOND: 30,
+  DIAMOND_PLUS: 30,
 };
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -219,6 +234,9 @@ type User = {
   role: Role;
   phone?: string | null;
   dateOfBirth?: string | null;
+  affiliation: Affiliation;
+  wellhubPlan?: WellhubPlan | null;
+  affiliationConfirmedAt?: string | null;
   bookingBlocked?: boolean;
 };
 type PaginatedUsers = {
@@ -238,6 +256,8 @@ type UserDetails = {
     phone?: string | null;
     emergencyPhone?: string | null;
     affiliation: Affiliation;
+    wellhubPlan?: WellhubPlan | null;
+    affiliationConfirmedAt?: string | null;
     bookingBlocked: boolean;
     bookingBlockedAt?: string | null;
     bookingBlockLogs?: Array<{
@@ -1851,6 +1871,8 @@ SECCION DE USUARIOS
 function UserInspectorSection() {
   const [q, setQ] = useState("");
   const [userPage, setUserPage] = useState(1);
+  const [userAffiliation, setUserAffiliation] = useState<Affiliation | "ALL">("ALL");
+  const [userWellhubPlan, setUserWellhubPlan] = useState<WellhubPlan | "ALL">("ALL");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // admin actions
@@ -1865,14 +1887,21 @@ function UserInspectorSection() {
   } | null>(null);
   const [togglingBlock, setTogglingBlock] = useState(false);
   const [savingAffiliation, setSavingAffiliation] = useState(false);
+  const [affiliationDraft, setAffiliationDraft] = useState<Affiliation>("NONE");
+  const [wellhubPlanDraft, setWellhubPlanDraft] = useState<WellhubPlan | "">("");
   const [savingRole, setSavingRole] = useState(false);
   const [pauseDaysById, setPauseDaysById] = useState<Record<string, number>>({});
   const [pausingPackId, setPausingPackId] = useState<string | null>(null);
 
   // 1️⃣ últimos usuarios
-  const usersUrl = `/api/admin/users?page=${userPage}&pageSize=${USER_PAGE_SIZE}${
-    q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ""
-  }`;
+  const userParams = new URLSearchParams({
+    page: String(userPage),
+    pageSize: String(USER_PAGE_SIZE),
+  });
+  if (q.trim()) userParams.set("q", q.trim());
+  if (userAffiliation !== "ALL") userParams.set("affiliation", userAffiliation);
+  if (userWellhubPlan !== "ALL") userParams.set("wellhubPlan", userWellhubPlan);
+  const usersUrl = `/api/admin/users?${userParams.toString()}`;
   const { data: usersData, isLoading: loadingList, mutate: mutateUsers } =
     useSWR<PaginatedUsers>(usersUrl, fetcher);
 
@@ -1897,6 +1926,12 @@ function UserInspectorSection() {
 
   const list = usersData?.items;
   const userTotalPages = usersData?.totalPages ?? 1;
+
+  useEffect(() => {
+    if (!details?.user) return;
+    setAffiliationDraft(details.user.affiliation);
+    setWellhubPlanDraft(details.user.wellhubPlan ?? "");
+  }, [details?.user.id, details?.user.affiliation, details?.user.wellhubPlan]);
 
   async function updateBookingBlocked(next: boolean) {
     if (!selectedId) return;
@@ -1935,8 +1970,26 @@ function UserInspectorSection() {
     }
   }
 
-  async function updateAffiliation(next: Affiliation) {
-    if (!selectedId || next === details?.user.affiliation) return;
+  async function saveAffiliationSettings() {
+    if (!selectedId || !details) return;
+
+    const nextPlan = affiliationDraft === "WELLHUB" ? wellhubPlanDraft : null;
+    const currentPlan = details.user.wellhubPlan ?? null;
+
+    if (
+      affiliationDraft === details.user.affiliation &&
+      nextPlan === currentPlan
+    ) {
+      return;
+    }
+
+    if (affiliationDraft === "WELLHUB" && !wellhubPlanDraft) {
+      setFeedback({
+        type: "error",
+        text: "Selecciona un plan de WellHub.",
+      });
+      return;
+    }
 
     setSavingAffiliation(true);
     setFeedback(null);
@@ -1945,7 +1998,10 @@ function UserInspectorSection() {
       const res = await fetch(`/api/admin/users/${selectedId}/details`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ affiliation: next }),
+        body: JSON.stringify({
+          affiliation: affiliationDraft,
+          wellhubPlan: nextPlan,
+        }),
       });
 
       if (!res.ok) {
@@ -1958,7 +2014,7 @@ function UserInspectorSection() {
       setFeedback({
         type: "success",
         text:
-          next === "NONE"
+          affiliationDraft === "NONE"
             ? "Afiliacion actualizada. Las renovaciones corporativas futuras quedan detenidas."
             : "Afiliacion actualizada.",
       });
@@ -2077,6 +2133,49 @@ function UserInspectorSection() {
             }}
           />
 
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="text-xs">
+              <span className="mb-1 block text-muted-foreground">Afiliacion</span>
+              <select
+                className="input w-full"
+                value={userAffiliation}
+                onChange={(e) => {
+                  const next = e.target.value as Affiliation | "ALL";
+                  setUserAffiliation(next);
+                  if (next !== "WELLHUB") setUserWellhubPlan("ALL");
+                  setUserPage(1);
+                }}
+              >
+                <option value="ALL">Todas</option>
+                {(Object.keys(AFFILIATION_LABELS) as Affiliation[]).map((value) => (
+                  <option key={value} value={value}>
+                    {AFFILIATION_LABELS[value]}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-xs">
+              <span className="mb-1 block text-muted-foreground">Plan WellHub</span>
+              <select
+                className="input w-full"
+                value={userWellhubPlan}
+                disabled={userAffiliation !== "ALL" && userAffiliation !== "WELLHUB"}
+                onChange={(e) => {
+                  setUserWellhubPlan(e.target.value as WellhubPlan | "ALL");
+                  setUserPage(1);
+                }}
+              >
+                <option value="ALL">Todos</option>
+                {(Object.keys(WELLHUB_PLAN_LABELS) as WellhubPlan[]).map((value) => (
+                  <option key={value} value={value}>
+                    {WELLHUB_PLAN_LABELS[value]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
           {loadingList && (
             <p className="text-sm text-muted-foreground">Cargando…</p>
           )}
@@ -2114,6 +2213,21 @@ function UserInspectorSection() {
                       </div>
                       <div className="mt-1 text-xs font-medium text-muted-foreground">
                         {ROLE_LABELS[u.role]}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                        <span className="rounded bg-[--color-muted] px-2 py-0.5 text-muted-foreground">
+                          {AFFILIATION_LABELS[u.affiliation]}
+                        </span>
+                        {u.affiliation === "WELLHUB" && u.wellhubPlan && (
+                          <span className="rounded bg-pink-100 px-2 py-0.5 text-pink-700">
+                            {WELLHUB_PLAN_LABELS[u.wellhubPlan]}
+                          </span>
+                        )}
+                        {!u.affiliationConfirmedAt && u.role !== "ADMIN" && (
+                          <span className="rounded bg-amber-100 px-2 py-0.5 text-amber-700">
+                            Pendiente
+                          </span>
+                        )}
                       </div>
                     </button>
 
@@ -2236,11 +2350,13 @@ function UserInspectorSection() {
                     <dd className="col-span-2 space-y-1">
                       <select
                         className="input w-full"
-                        value={details.user.affiliation}
+                        value={affiliationDraft}
                         disabled={savingAffiliation}
-                        onChange={(e) =>
-                          updateAffiliation(e.target.value as Affiliation)
-                        }
+                        onChange={(e) => {
+                          const next = e.target.value as Affiliation;
+                          setAffiliationDraft(next);
+                          if (next !== "WELLHUB") setWellhubPlanDraft("");
+                        }}
                       >
                         {(Object.keys(AFFILIATION_LABELS) as Affiliation[]).map(
                           (value) => (
@@ -2250,6 +2366,40 @@ function UserInspectorSection() {
                           )
                         )}
                       </select>
+                      {affiliationDraft === "WELLHUB" && (
+                        <select
+                          className="input w-full"
+                          value={wellhubPlanDraft}
+                          disabled={savingAffiliation}
+                          onChange={(e) =>
+                            setWellhubPlanDraft(e.target.value as WellhubPlan)
+                          }
+                        >
+                          <option value="">Selecciona plan</option>
+                          {(Object.keys(WELLHUB_PLAN_LABELS) as WellhubPlan[]).map(
+                            (value) => (
+                              <option key={value} value={value}>
+                                {WELLHUB_PLAN_LABELS[value]} -{" "}
+                                {WELLHUB_PLAN_CREDITS[value]} creditos
+                              </option>
+                            )
+                          )}
+                        </select>
+                      )}
+                      {details.user.affiliation === "WELLHUB" &&
+                        details.user.wellhubPlan && (
+                          <p className="text-xs text-muted-foreground">
+                            Plan actual: {WELLHUB_PLAN_LABELS[details.user.wellhubPlan]}.
+                          </p>
+                        )}
+                      <button
+                        type="button"
+                        className="btn btn-outline w-full"
+                        disabled={savingAffiliation}
+                        onClick={saveAffiliationSettings}
+                      >
+                        {savingAffiliation ? "Guardando..." : "Guardar afiliacion"}
+                      </button>
                       <p className="text-xs text-muted-foreground">
                         Ninguna detiene renovaciones corporativas futuras.
                       </p>

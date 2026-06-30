@@ -8,6 +8,10 @@ type Me = {
   name: string;
   email: string;
   role: "USER" | "COACH" | "ADMIN";
+  affiliation: "NONE" | "WELLHUB" | "TOTALPASS";
+  wellhubPlan: "GOLD_PLUS" | "PLATINUM" | "DIAMOND" | "DIAMOND_PLUS" | null;
+  affiliationConfirmed: boolean;
+  affiliationConfirmedAt?: string | null;
 };
 
 const fetcher = (url: string) =>

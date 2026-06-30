@@ -27,8 +27,11 @@ vi.mock("@/lib/prisma", () => ({
 
 import { POST } from "./register/route";
 
-function registerRequest(affiliation: "WELLHUB" | "TOTALPASS") {
-  return registerRequestBody({
+function registerRequest(
+  affiliation: "WELLHUB" | "TOTALPASS",
+  wellhubPlan?: string
+) {
+  const body: Record<string, unknown> = {
     name: "Corporate User",
     email: "corp@example.test",
     password: "password123",
@@ -36,7 +39,13 @@ function registerRequest(affiliation: "WELLHUB" | "TOTALPASS") {
     phone: "5555555555",
     emergencyPhone: "5555555556",
     affiliation,
-  });
+  };
+
+  if (wellhubPlan !== undefined) {
+    body.wellhubPlan = wellhubPlan;
+  }
+
+  return registerRequestBody(body);
 }
 
 function registerRequestBody(body: Record<string, unknown>) {
@@ -107,6 +116,20 @@ describe("registration validation", () => {
     });
     expect(res.status).toBe(409);
   });
+
+  it("requires WellHub plan when signing up with WellHub", async () => {
+    const res = await POST(registerRequest("WELLHUB"));
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body).toMatchObject({
+      error: "INVALID_BODY",
+      fields: {
+        wellhubPlan: expect.arrayContaining(["Selecciona tu plan de WellHub."]),
+      },
+    });
+    expect(mocks.prisma.user.findUnique).not.toHaveBeenCalled();
+  });
 });
 
 describe("corporate registration grants", () => {
@@ -124,7 +147,7 @@ describe("corporate registration grants", () => {
     vi.clearAllMocks();
   });
 
-  it("creates internal inactive/hidden corporate packs but still grants PackPurchase credits", async () => {
+  it("grants WellHub signup credits from the selected plan", async () => {
     const tx = {
       user: {
         create: vi.fn().mockResolvedValue({
@@ -146,33 +169,41 @@ describe("corporate registration grants", () => {
       callback(tx)
     );
 
-    const res = await POST(registerRequest("WELLHUB"));
+    const res = await POST(registerRequest("WELLHUB", "PLATINUM"));
 
     expect(res.status).toBe(201);
     await expect(res.json()).resolves.toMatchObject({
       id: "user_1",
       email: "corp@example.test",
     });
+    expect(tx.user.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        affiliation: "WELLHUB",
+        wellhubPlan: "PLATINUM",
+        affiliationConfirmedAt: expect.any(Date),
+      }),
+      select: { id: true, email: true },
+    });
     expect(tx.pack.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "corp_wellhub_monthly" },
+        where: { id: "corp_wellhub_platinum_monthly" },
         update: expect.objectContaining({
           isActive: false,
           isVisible: false,
-          classes: 15,
+          classes: 8,
         }),
         create: expect.objectContaining({
           isActive: false,
           isVisible: false,
-          classes: 15,
+          classes: 8,
         }),
       })
     );
     expect(tx.packPurchase.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: "user_1",
-        packId: "corp_wellhub_monthly",
-        classesLeft: 15,
+        packId: "corp_wellhub_platinum_monthly",
+        classesLeft: 8,
       }),
       select: { id: true },
     });
@@ -180,9 +211,57 @@ describe("corporate registration grants", () => {
       data: {
         userId: "user_1",
         packPurchaseId: "purchase_1",
-        delta: 15,
+        delta: 8,
         reason: "CORPORATE_MONTHLY",
       },
     });
+  });
+
+  it("clears WellHub plan input for non-WellHub signup", async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: "user_1",
+          email: "corp@example.test",
+        }),
+      },
+      pack: {
+        upsert: vi.fn(),
+      },
+      packPurchase: {
+        create: vi.fn(),
+      },
+      tokenLedger: {
+        create: vi.fn(),
+      },
+    };
+    mocks.prisma.$transaction.mockImplementation(async (callback: any) =>
+      callback(tx)
+    );
+
+    const res = await POST(
+      registerRequestBody({
+        name: "No Plan User",
+        email: "none@example.test",
+        password: "password123",
+        dateOfBirth: "1990-01-01",
+        phone: "5555555555",
+        emergencyPhone: "5555555556",
+        affiliation: "none",
+        wellhubPlan: "DIAMOND",
+      })
+    );
+
+    expect(res.status).toBe(201);
+    expect(tx.user.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        affiliation: "NONE",
+        wellhubPlan: null,
+        affiliationConfirmedAt: expect.any(Date),
+      }),
+      select: { id: true, email: true },
+    });
+    expect(tx.packPurchase.create).not.toHaveBeenCalled();
+    expect(tx.tokenLedger.create).not.toHaveBeenCalled();
   });
 });

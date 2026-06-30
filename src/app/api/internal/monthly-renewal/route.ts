@@ -4,83 +4,15 @@ import { Affiliation, Prisma, TokenReason } from "@prisma/client";
 
 import { getOptionalServerEnv } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
+import {
+  CORPORATE_INTERNAL_PACK_IDS,
+  ensureCorporatePacks,
+  getCorporateGrantConfig,
+} from "@/lib/wellhub";
 
 export const runtime = "nodejs";
 
-const WELLHUB_PACK_ID = "corp_wellhub_monthly";
-const TOTALPASS_PACK_ID = "corp_totalpass_monthly";
 const MAX_SERIALIZABLE_RETRIES = 3;
-
-type CorporateGrantConfig = {
-  classesGranted: number;
-  packId: string;
-};
-
-function getCorporateGrantConfig(
-  affiliation: Affiliation | null | undefined
-): CorporateGrantConfig | null {
-  if (affiliation === Affiliation.WELLHUB) {
-    return { classesGranted: 15, packId: WELLHUB_PACK_ID };
-  }
-
-  if (affiliation === Affiliation.TOTALPASS) {
-    return { classesGranted: 10, packId: TOTALPASS_PACK_ID };
-  }
-
-  return null;
-}
-
-async function ensureCorporatePacks() {
-  await prisma.pack.upsert({
-    where: { id: WELLHUB_PACK_ID },
-    update: {
-      name: "WellHub Mensual (Interno)",
-      classes: 15,
-      price: 0,
-      validityDays: 31,
-      isActive: false,
-      isVisible: false,
-      oncePerUser: false,
-      classesLabel: "15 clases",
-    },
-    create: {
-      id: WELLHUB_PACK_ID,
-      name: "WellHub Mensual (Interno)",
-      classes: 15,
-      price: 0,
-      validityDays: 31,
-      isActive: false,
-      isVisible: false,
-      oncePerUser: false,
-      classesLabel: "15 clases",
-    },
-  });
-
-  await prisma.pack.upsert({
-    where: { id: TOTALPASS_PACK_ID },
-    update: {
-      name: "TotalPass Mensual (Interno)",
-      classes: 10,
-      price: 0,
-      validityDays: 31,
-      isActive: false,
-      isVisible: false,
-      oncePerUser: false,
-      classesLabel: "10 clases",
-    },
-    create: {
-      id: TOTALPASS_PACK_ID,
-      name: "TotalPass Mensual (Interno)",
-      classes: 10,
-      price: 0,
-      validityDays: 31,
-      isActive: false,
-      isVisible: false,
-      oncePerUser: false,
-      classesLabel: "10 clases",
-    },
-  });
-}
 
 function validateCronRequest(authHeader: string | null) {
   const secret = getOptionalServerEnv("CRON_SECRET");
@@ -135,10 +67,10 @@ export async function GET(req: Request) {
   const firstDay = new Date(Date.UTC(year, month, 1));
   const nextMonth = new Date(Date.UTC(year, month + 1, 1));
 
-  await ensureCorporatePacks();
+  await ensureCorporatePacks(prisma);
 
   const users = await prisma.user.findMany({
-    select: { id: true, affiliation: true },
+    select: { id: true, affiliation: true, wellhubPlan: true },
   });
 
   let renewedUsers = 0;
@@ -150,7 +82,10 @@ export async function GET(req: Request) {
 
   for (const user of users) {
     let processed = false;
-    const initialGrant = getCorporateGrantConfig(user.affiliation);
+    const initialGrant = getCorporateGrantConfig(
+      user.affiliation,
+      user.wellhubPlan
+    );
 
     if (!initialGrant) {
       skippedUsers += 1;
@@ -174,7 +109,7 @@ export async function GET(req: Request) {
           async (tx) => {
             const currentUser = await tx.user.findUnique({
               where: { id: user.id },
-              select: { affiliation: true },
+              select: { affiliation: true, wellhubPlan: true },
             });
 
             if (!currentUser) {
@@ -185,7 +120,10 @@ export async function GET(req: Request) {
               };
             }
 
-            const currentGrant = getCorporateGrantConfig(currentUser.affiliation);
+            const currentGrant = getCorporateGrantConfig(
+              currentUser.affiliation,
+              currentUser.wellhubPlan
+            );
             if (!currentGrant) {
               return {
                 renewed: false,
@@ -217,7 +155,7 @@ export async function GET(req: Request) {
             await tx.packPurchase.updateMany({
               where: {
                 userId: user.id,
-                packId: { in: [WELLHUB_PACK_ID, TOTALPASS_PACK_ID] },
+                packId: { in: CORPORATE_INTERNAL_PACK_IDS },
                 expiresAt: { gt: firstDay },
               },
               data: {

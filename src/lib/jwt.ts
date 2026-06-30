@@ -7,7 +7,11 @@ const SECRET: Secret = getRequiredServerEnv("JWT_SECRET");
 
 export type AppRole = "USER" | "COACH" | "ADMIN";
 
-export type JWTPayload = { sub: string; role: AppRole };
+export type JWTPayload = {
+  sub: string;
+  role: AppRole;
+  affiliationConfirmed?: boolean;
+};
 
 export function signToken(
   payload: JWTPayload,

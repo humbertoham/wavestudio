@@ -1,17 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Affiliation, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { normalizeAffiliationAndPlan } from "@/lib/affiliation";
 import { prisma, requireAdmin } from "../../../_utils";
 
 export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
-
-function parseAffiliation(value: unknown): Affiliation | null {
-  if (value === Affiliation.NONE) return Affiliation.NONE;
-  if (value === Affiliation.WELLHUB) return Affiliation.WELLHUB;
-  if (value === Affiliation.TOTALPASS) return Affiliation.TOTALPASS;
-  return null;
-}
 
 function j(status: number, body: any) {
   return NextResponse.json(body, { status });
@@ -38,6 +32,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       phone: true,
       emergencyPhone: true,
       affiliation: true,
+      wellhubPlan: true,
+      affiliationConfirmedAt: true,
       bookingBlocked: true,
       bookingBlockedAt: true,
       bookingBlockLogs: {
@@ -162,26 +158,36 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const { id } = await ctx.params;
   const body = await req.json().catch(() => null);
-  const affiliation = parseAffiliation(
-    body && typeof body === "object"
-      ? (body as { affiliation?: unknown }).affiliation
-      : null
+  const input = body && typeof body === "object" ? body : {};
+  const normalized = normalizeAffiliationAndPlan(
+    (input as { affiliation?: unknown }).affiliation,
+    (input as { wellhubPlan?: unknown }).wellhubPlan
   );
 
-  if (!affiliation) {
+  if (!normalized.ok) {
     return j(400, {
       ok: false,
-      message: "Afiliacion invalida",
+      error: normalized.code,
+      message: normalized.message,
+      fields: {
+        [normalized.field]: [normalized.message],
+      },
     });
   }
 
   try {
     const user = await prisma.user.update({
       where: { id },
-      data: { affiliation },
+      data: {
+        affiliation: normalized.affiliation,
+        wellhubPlan: normalized.wellhubPlan,
+        affiliationConfirmedAt: new Date(),
+      },
       select: {
         id: true,
         affiliation: true,
+        wellhubPlan: true,
+        affiliationConfirmedAt: true,
       },
     });
 

@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
-import { Affiliation, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
+import { normalizeAffiliationAndPlan } from "@/lib/affiliation";
 import { hash } from "@/lib/hash";
 import { prisma } from "@/lib/prisma";
 import { consumeRateLimit, getClientIp } from "@/lib/rate-limit";
+import { ensureCorporatePacks, getCorporateGrantConfig } from "@/lib/wellhub";
 import { registerSchema } from "@/lib/zod";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const WELLHUB_PACK_ID = "corp_wellhub_monthly";
-const TOTALPASS_PACK_ID = "corp_totalpass_monthly";
 
 type RegisterResult = {
   user: {
@@ -47,20 +46,6 @@ function cleanEmail(value: unknown) {
 function cleanPhone(value: unknown) {
   const digits = String(value ?? "").replace(/\D+/g, "");
   return digits.slice(0, 20);
-}
-
-function parseAffiliation(value: unknown): Affiliation {
-  const map: Record<string, Affiliation> = {
-    NONE: Affiliation.NONE,
-    WELLHUB: Affiliation.WELLHUB,
-    TOTALPASS: Affiliation.TOTALPASS,
-    none: Affiliation.NONE,
-    wellhub: Affiliation.WELLHUB,
-    totalpass: Affiliation.TOTALPASS,
-  };
-
-  const key = typeof value === "string" ? value : "NONE";
-  return map[key] ?? Affiliation.NONE;
 }
 
 function parseDOB(value: string): Date {
@@ -111,64 +96,13 @@ function firstFieldMessage(fieldErrors: Record<string, string[] | undefined>) {
     "phone",
     "emergencyPhone",
     "affiliation",
+    "wellhubPlan",
   ]) {
     const messages = fieldErrors[key];
     if (messages?.[0]) return messages[0];
   }
 
   return "Revisa los datos del formulario.";
-}
-
-async function ensureCorporatePacks(tx: Prisma.TransactionClient) {
-  await tx.pack.upsert({
-    where: { id: WELLHUB_PACK_ID },
-    update: {
-      name: "WellHub Mensual (Interno)",
-      classes: 15,
-      price: 0,
-      validityDays: 31,
-      isActive: false,
-      isVisible: false,
-      oncePerUser: false,
-      classesLabel: "15 clases",
-    },
-    create: {
-      id: WELLHUB_PACK_ID,
-      name: "WellHub Mensual (Interno)",
-      classes: 15,
-      price: 0,
-      validityDays: 31,
-      isActive: false,
-      isVisible: false,
-      oncePerUser: false,
-      classesLabel: "15 clases",
-    },
-  });
-
-  await tx.pack.upsert({
-    where: { id: TOTALPASS_PACK_ID },
-    update: {
-      name: "TotalPass Mensual (Interno)",
-      classes: 10,
-      price: 0,
-      validityDays: 31,
-      isActive: false,
-      isVisible: false,
-      oncePerUser: false,
-      classesLabel: "10 clases",
-    },
-    create: {
-      id: TOTALPASS_PACK_ID,
-      name: "TotalPass Mensual (Interno)",
-      classes: 10,
-      price: 0,
-      validityDays: 31,
-      isActive: false,
-      isVisible: false,
-      oncePerUser: false,
-      classesLabel: "10 clases",
-    },
-  });
 }
 
 function nextMonthStartUTC(from = new Date()) {
@@ -238,12 +172,29 @@ export async function POST(req: Request) {
     const dateOfBirth = parseDOB(parsed.data.dateOfBirth);
     const phone = cleanPhone(parsed.data.phone);
     const emergencyPhone = cleanPhone(parsed.data.emergencyPhone);
-    const affiliation = parseAffiliation(parsed.data.affiliation);
+    const affiliationSelection = normalizeAffiliationAndPlan(
+      parsed.data.affiliation,
+      parsed.data.wellhubPlan
+    );
+
+    if (!affiliationSelection.ok) {
+      return json(400, {
+        error: affiliationSelection.code,
+        message: affiliationSelection.message,
+        fields: {
+          [affiliationSelection.field]: [affiliationSelection.message],
+        },
+        requestId,
+      });
+    }
+
+    const { affiliation, wellhubPlan } = affiliationSelection;
 
     console.info("[register] normalized_input", {
       requestId,
       email: maskEmail(email),
       affiliation,
+      wellhubPlan,
       hasDateOfBirth: true,
       phoneDigits: phone.length,
       emergencyPhoneDigits: emergencyPhone.length,
@@ -274,9 +225,11 @@ export async function POST(req: Request) {
       requestId,
       email: maskEmail(email),
       affiliation,
+      wellhubPlan,
     });
 
     const result = await prisma.$transaction<RegisterResult>(async (tx) => {
+      const affiliationConfirmedAt = new Date();
       const user = await tx.user.create({
         data: {
           name,
@@ -286,30 +239,25 @@ export async function POST(req: Request) {
           phone,
           emergencyPhone,
           affiliation,
+          wellhubPlan,
+          affiliationConfirmedAt,
         },
         select: { id: true, email: true },
       });
 
-      if (
-        affiliation !== Affiliation.WELLHUB &&
-        affiliation !== Affiliation.TOTALPASS
-      ) {
+      const grant = getCorporateGrantConfig(affiliation, wellhubPlan);
+
+      if (!grant) {
         return { user, corporateGrant: null };
       }
 
       await ensureCorporatePacks(tx);
 
-      const classesGranted = affiliation === Affiliation.WELLHUB ? 15 : 10;
-      const packId =
-        affiliation === Affiliation.WELLHUB
-          ? WELLHUB_PACK_ID
-          : TOTALPASS_PACK_ID;
-
       const purchase = await tx.packPurchase.create({
         data: {
           userId: user.id,
-          packId,
-          classesLeft: classesGranted,
+          packId: grant.packId,
+          classesLeft: grant.classesGranted,
           expiresAt: nextMonthStartUTC(new Date()),
         },
         select: { id: true },
@@ -319,7 +267,7 @@ export async function POST(req: Request) {
         data: {
           userId: user.id,
           packPurchaseId: purchase.id,
-          delta: classesGranted,
+          delta: grant.classesGranted,
           reason: "CORPORATE_MONTHLY",
         },
       });
@@ -327,9 +275,9 @@ export async function POST(req: Request) {
       return {
         user,
         corporateGrant: {
-          packId,
+          packId: grant.packId,
           packPurchaseId: purchase.id,
-          classesGranted,
+          classesGranted: grant.classesGranted,
         },
       };
     });

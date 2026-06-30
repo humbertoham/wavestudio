@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { parseAffiliation } from "@/lib/affiliation";
+import { parseWellhubPlan } from "@/lib/wellhub";
+
 export const REGISTER_FIELD_MESSAGES = {
   nameRequired: "Ingresa tu nombre.",
   nameTooLong: "El nombre no puede tener más de 80 caracteres.",
@@ -15,6 +18,8 @@ export const REGISTER_FIELD_MESSAGES = {
   emergencyPhoneRequired: "Ingresa un número de emergencias.",
   emergencyPhoneInvalid: "Ingresa un número de emergencias válido.",
   affiliationInvalid: "Selecciona una afiliación válida.",
+  wellhubPlanRequired: "Selecciona tu plan de WellHub.",
+  wellhubPlanInvalid: "Selecciona un plan de WellHub valido.",
 } as const;
 
 const registerAffiliationSchema = z.enum([
@@ -99,6 +104,7 @@ export const registerSchema = z
       z.string().min(1, REGISTER_FIELD_MESSAGES.emergencyPhoneRequired)
     ),
     affiliation: registerAffiliationSchema.optional().default("NONE"),
+    wellhubPlan: z.unknown().optional(),
   })
   .superRefine((value, ctx) => {
     if (value.dateOfBirth && !isValidDateOfBirthValue(value.dateOfBirth)) {
@@ -127,6 +133,31 @@ export const registerSchema = z
         code: z.ZodIssueCode.custom,
         path: ["emergencyPhone"],
         message: REGISTER_FIELD_MESSAGES.emergencyPhoneInvalid,
+      });
+    }
+
+    const affiliation = parseAffiliation(value.affiliation);
+    const planInput =
+      typeof value.wellhubPlan === "string"
+        ? value.wellhubPlan.trim()
+        : value.wellhubPlan;
+    const hasPlanInput =
+      typeof planInput === "string" ? planInput.length > 0 : planInput != null;
+    const plan = parseWellhubPlan(planInput);
+
+    if (hasPlanInput && !plan) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["wellhubPlan"],
+        message: REGISTER_FIELD_MESSAGES.wellhubPlanInvalid,
+      });
+    }
+
+    if (affiliation === "WELLHUB" && !plan) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["wellhubPlan"],
+        message: REGISTER_FIELD_MESSAGES.wellhubPlanRequired,
       });
     }
   });

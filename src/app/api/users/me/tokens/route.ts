@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
           tokens: 0,
           authenticated: false,
           affiliation: "NONE",
+          wellhubPlan: null,
           bookingBlocked: false,
         },
         { status: 200 }
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
     // 🔎 afiliación
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { affiliation: true, bookingBlocked: true },
+      select: { affiliation: true, wellhubPlan: true, bookingBlocked: true },
     });
 
     if (!user) {
@@ -35,6 +36,7 @@ export async function GET(req: NextRequest) {
           tokens: 0,
           authenticated: false,
           affiliation: "NONE",
+          wellhubPlan: null,
           bookingBlocked: false,
         },
         { status: 200 }
@@ -61,6 +63,7 @@ export async function GET(req: NextRequest) {
         tokens,
         authenticated: true,
         affiliation: user.affiliation ?? "NONE",
+        wellhubPlan: user.wellhubPlan ?? null,
         bookingBlocked: user.bookingBlocked,
       },
       { status: 200 }
@@ -73,6 +76,7 @@ export async function GET(req: NextRequest) {
         tokens: 0,
         authenticated: false,
         affiliation: "NONE",
+        wellhubPlan: null,
         bookingBlocked: false,
         error: "TOKENS_FETCH_FAILED",
       },

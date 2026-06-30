@@ -47,6 +47,7 @@ export async function POST(req: Request) {
     select: {
       id: true,
       role: true,
+      affiliationConfirmedAt: true,
       passwordHash: true,
     },
   });
@@ -55,7 +56,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "INVALID_CREDENTIALS" }, { status: 401 });
   }
 
-  const token = signToken({ sub: user.id, role: user.role });
+  const token = signToken({
+    sub: user.id,
+    role: user.role,
+    affiliationConfirmed: user.affiliationConfirmedAt != null,
+  });
 
   const res = NextResponse.json(
     { ok: true },

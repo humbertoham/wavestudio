@@ -23,6 +23,7 @@ function firstServerFieldMessage(fields: unknown) {
     "phone",
     "emergencyPhone",
     "affiliation",
+    "wellhubPlan",
   ]) {
     const value = (fields as Record<string, unknown>)[key];
     if (Array.isArray(value) && typeof value[0] === "string") {
@@ -70,6 +71,9 @@ export default function RegisterPage() {
   const [phone, setPhone] = useState("");
   const [emergencyPhone, setEmergencyPhone] = useState("");
   const [affiliation, setAffiliation] = useState<"none" | "wellhub" | "totalpass">("none");
+  const [wellhubPlan, setWellhubPlan] = useState<
+    "" | "GOLD_PLUS" | "PLATINUM" | "DIAMOND" | "DIAMOND_PLUS"
+  >("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -107,6 +111,9 @@ export default function RegisterPage() {
       );
 
     if (password !== confirmPwd) return setErrorMsg("Las contraseñas no coinciden.");
+    if (affiliation === "wellhub" && !wellhubPlan) {
+      return setErrorMsg("Selecciona tu plan de WellHub.");
+    }
 
     setLoading(true);
     try {
@@ -122,6 +129,7 @@ export default function RegisterPage() {
           phone,
           emergencyPhone,
           affiliation,
+          wellhubPlan: affiliation === "wellhub" ? wellhubPlan : null,
         }),
       });
 
@@ -273,7 +281,11 @@ export default function RegisterPage() {
               <select
                 id="affiliation"
                 value={affiliation}
-                onChange={(e) => setAffiliation(e.target.value as any)}
+                onChange={(e) => {
+                  const next = e.target.value as "none" | "wellhub" | "totalpass";
+                  setAffiliation(next);
+                  if (next !== "wellhub") setWellhubPlan("");
+                }}
                 className="w-full rounded-xl border border-[color:var(--color-input)] bg-[color:var(--color-card)] px-4 py-2.5 text-[color:var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
               >
                 <option value="none">Ninguna</option>
@@ -281,6 +293,30 @@ export default function RegisterPage() {
                 <option value="totalpass">TotalPass</option>
               </select>
             </div>
+
+            {affiliation === "wellhub" && (
+              <div className="space-y-2">
+                <label htmlFor="wellhubPlan" className="block text-sm font-medium text-[color:var(--color-card-foreground)]">
+                  Plan en WellHub
+                </label>
+                <select
+                  id="wellhubPlan"
+                  value={wellhubPlan}
+                  onChange={(e) => setWellhubPlan(e.target.value as typeof wellhubPlan)}
+                  required
+                  className="w-full rounded-xl border border-[color:var(--color-input)] bg-[color:var(--color-card)] px-4 py-2.5 text-[color:var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                >
+                  <option value="">Selecciona tu plan</option>
+                  <option value="GOLD_PLUS">Gold+ - 2 creditos mensuales</option>
+                  <option value="PLATINUM">Platinum - 8 creditos mensuales</option>
+                  <option value="DIAMOND">Diamond - 30 creditos mensuales</option>
+                  <option value="DIAMOND_PLUS">Diamond+ - 30 creditos mensuales</option>
+                </select>
+                <p className="text-xs text-[color:var(--color-muted-foreground)]">
+                  Este plan determina tus creditos mensuales automaticos.
+                </p>
+              </div>
+            )}
 
             {/* Contraseña */}
             <div className="space-y-2">
