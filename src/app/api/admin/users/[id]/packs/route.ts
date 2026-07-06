@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getPackageExpirationAt11Pm } from "@/lib/package-expiration";
 import { prisma, requireAdmin } from "../../../_utils";
 
 export const runtime = "nodejs";
@@ -52,8 +53,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
 
   // 5️⃣ Calcular vencimiento
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + pack.validityDays);
+  const expiresAt = getPackageExpirationAt11Pm(new Date(), pack.validityDays);
 
   // 6️⃣ Transacción (IMPORTANTÍSIMO)
   const result = await prisma.$transaction(async (tx) => {

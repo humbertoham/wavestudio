@@ -86,6 +86,7 @@ function formatMoneyMXN(value?: number | null) {
 }
 
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
+type WellhubPlan = "GOLD_PLUS" | "PLATINUM" | "DIAMOND" | "DIAMOND_PLUS";
 type Role = "USER" | "COACH" | "ADMIN";
 type AdminTab =
   | "classes"
@@ -109,6 +110,20 @@ const AFFILIATION_LABELS: Record<Affiliation, string> = {
   NONE: "Ninguna",
   WELLHUB: "WellHub",
   TOTALPASS: "TotalPass",
+};
+
+const WELLHUB_PLAN_LABELS: Record<WellhubPlan, string> = {
+  GOLD_PLUS: "Gold+",
+  PLATINUM: "Platinum",
+  DIAMOND: "Diamond",
+  DIAMOND_PLUS: "Diamond+",
+};
+
+const WELLHUB_PLAN_CREDITS: Record<WellhubPlan, number> = {
+  GOLD_PLUS: 2,
+  PLATINUM: 8,
+  DIAMOND: 30,
+  DIAMOND_PLUS: 30,
 };
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -238,6 +253,8 @@ type UserDetails = {
     phone?: string | null;
     emergencyPhone?: string | null;
     affiliation: Affiliation;
+    wellhubPlan?: WellhubPlan | null;
+    affiliationConfirmedAt?: string | null;
     bookingBlocked: boolean;
     bookingBlockedAt?: string | null;
     bookingBlockLogs?: Array<{
@@ -1865,6 +1882,8 @@ function UserInspectorSection() {
   } | null>(null);
   const [togglingBlock, setTogglingBlock] = useState(false);
   const [savingAffiliation, setSavingAffiliation] = useState(false);
+  const [affiliationDraft, setAffiliationDraft] = useState<Affiliation>("NONE");
+  const [wellhubPlanDraft, setWellhubPlanDraft] = useState<WellhubPlan | "">("");
   const [savingRole, setSavingRole] = useState(false);
   const [pauseDaysById, setPauseDaysById] = useState<Record<string, number>>({});
   const [pausingPackId, setPausingPackId] = useState<string | null>(null);
@@ -1897,6 +1916,12 @@ function UserInspectorSection() {
 
   const list = usersData?.items;
   const userTotalPages = usersData?.totalPages ?? 1;
+
+  useEffect(() => {
+    if (!details?.user) return;
+    setAffiliationDraft(details.user.affiliation);
+    setWellhubPlanDraft(details.user.wellhubPlan ?? "");
+  }, [details?.user.id, details?.user.affiliation, details?.user.wellhubPlan]);
 
   async function updateBookingBlocked(next: boolean) {
     if (!selectedId) return;
@@ -1935,8 +1960,26 @@ function UserInspectorSection() {
     }
   }
 
-  async function updateAffiliation(next: Affiliation) {
-    if (!selectedId || next === details?.user.affiliation) return;
+  async function saveAffiliation() {
+    if (!selectedId || !details) return;
+
+    const nextPlan = affiliationDraft === "WELLHUB" ? wellhubPlanDraft : null;
+    const currentPlan = details.user.wellhubPlan ?? null;
+
+    if (
+      affiliationDraft === details.user.affiliation &&
+      nextPlan === currentPlan
+    ) {
+      return;
+    }
+
+    if (affiliationDraft === "WELLHUB" && !wellhubPlanDraft) {
+      setFeedback({
+        type: "error",
+        text: "Selecciona un plan de WellHub.",
+      });
+      return;
+    }
 
     setSavingAffiliation(true);
     setFeedback(null);
@@ -1945,7 +1988,10 @@ function UserInspectorSection() {
       const res = await fetch(`/api/admin/users/${selectedId}/details`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ affiliation: next }),
+        body: JSON.stringify({
+          affiliation: affiliationDraft,
+          wellhubPlan: nextPlan,
+        }),
       });
 
       if (!res.ok) {
@@ -1958,7 +2004,7 @@ function UserInspectorSection() {
       setFeedback({
         type: "success",
         text:
-          next === "NONE"
+          affiliationDraft === "NONE"
             ? "Afiliacion actualizada. Las renovaciones corporativas futuras quedan detenidas."
             : "Afiliacion actualizada.",
       });
@@ -2236,11 +2282,13 @@ function UserInspectorSection() {
                     <dd className="col-span-2 space-y-1">
                       <select
                         className="input w-full"
-                        value={details.user.affiliation}
+                        value={affiliationDraft}
                         disabled={savingAffiliation}
-                        onChange={(e) =>
-                          updateAffiliation(e.target.value as Affiliation)
-                        }
+                        onChange={(e) => {
+                          const next = e.target.value as Affiliation;
+                          setAffiliationDraft(next);
+                          if (next !== "WELLHUB") setWellhubPlanDraft("");
+                        }}
                       >
                         {(Object.keys(AFFILIATION_LABELS) as Affiliation[]).map(
                           (value) => (
@@ -2250,6 +2298,34 @@ function UserInspectorSection() {
                           )
                         )}
                       </select>
+                      {affiliationDraft === "WELLHUB" && (
+                        <select
+                          className="input w-full"
+                          value={wellhubPlanDraft}
+                          disabled={savingAffiliation}
+                          onChange={(e) =>
+                            setWellhubPlanDraft(e.target.value as WellhubPlan)
+                          }
+                        >
+                          <option value="">Selecciona plan WellHub</option>
+                          {(Object.keys(WELLHUB_PLAN_LABELS) as WellhubPlan[]).map(
+                            (value) => (
+                              <option key={value} value={value}>
+                                {WELLHUB_PLAN_LABELS[value]} -{" "}
+                                {WELLHUB_PLAN_CREDITS[value]} creditos
+                              </option>
+                            )
+                          )}
+                        </select>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={savingAffiliation}
+                        onClick={saveAffiliation}
+                      >
+                        {savingAffiliation ? "Guardando..." : "Guardar afiliacion"}
+                      </button>
                       <p className="text-xs text-muted-foreground">
                         Ninguna detiene renovaciones corporativas futuras.
                       </p>

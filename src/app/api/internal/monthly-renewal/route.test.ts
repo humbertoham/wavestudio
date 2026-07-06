@@ -1,0 +1,245 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  getOptionalServerEnv: vi.fn(),
+  prisma: {
+    pack: {
+      upsert: vi.fn(),
+    },
+    user: {
+      findMany: vi.fn(),
+    },
+    $transaction: vi.fn(),
+  },
+}));
+
+vi.mock("@/lib/env", () => ({
+  getOptionalServerEnv: mocks.getOptionalServerEnv,
+}));
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: mocks.prisma,
+}));
+
+import { GET } from "./route";
+
+function cronReq(secret = "cron-secret") {
+  return new Request("https://example.test/api/internal/monthly-renewal", {
+    headers: { authorization: `Bearer ${secret}` },
+  });
+}
+
+describe("GET /api/internal/monthly-renewal", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-01T05:00:00.000Z"));
+    mocks.getOptionalServerEnv.mockReturnValue("cron-secret");
+    mocks.prisma.pack.upsert.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("rejects missing and invalid CRON_SECRET safely", async () => {
+    mocks.getOptionalServerEnv.mockReturnValueOnce("");
+    const missing = await GET(cronReq());
+
+    expect(missing.status).toBe(500);
+    await expect(missing.json()).resolves.toMatchObject({
+      ok: false,
+      message: "CRON_SECRET_MISSING",
+    });
+
+    mocks.getOptionalServerEnv.mockReturnValueOnce("cron-secret");
+    const invalid = await GET(cronReq("wrong-secret"));
+
+    expect(invalid.status).toBe(401);
+    await expect(invalid.json()).resolves.toMatchObject({
+      ok: false,
+      message: "UNAUTHORIZED",
+    });
+  });
+
+  it("grants WellHub credits by plan, keeps TotalPass behavior, and skips NONE", async () => {
+    const currentUsers: Record<string, unknown> = {
+      wellhub_gold: {
+        affiliation: "WELLHUB",
+        wellhubPlan: "GOLD_PLUS",
+      },
+      wellhub_platinum: {
+        affiliation: "WELLHUB",
+        wellhubPlan: "PLATINUM",
+      },
+      wellhub_diamond: {
+        affiliation: "WELLHUB",
+        wellhubPlan: "DIAMOND",
+      },
+      wellhub_diamond_plus: {
+        affiliation: "WELLHUB",
+        wellhubPlan: "DIAMOND_PLUS",
+      },
+      totalpass_1: {
+        affiliation: "TOTALPASS",
+        wellhubPlan: null,
+      },
+    };
+    const tx = {
+      user: {
+        findUnique: vi.fn(({ where }: any) =>
+          Promise.resolve(currentUsers[where.id] ?? null)
+        ),
+      },
+      tokenLedger: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "ledger_1" }),
+      },
+      packPurchase: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        create: vi
+          .fn()
+          .mockResolvedValueOnce({ id: "purchase_gold" })
+          .mockResolvedValueOnce({ id: "purchase_platinum" })
+          .mockResolvedValueOnce({ id: "purchase_diamond" })
+          .mockResolvedValueOnce({ id: "purchase_diamond_plus" })
+          .mockResolvedValueOnce({ id: "purchase_totalpass" }),
+      },
+    };
+
+    mocks.prisma.user.findMany.mockResolvedValue([
+      { id: "wellhub_gold", affiliation: "WELLHUB", wellhubPlan: "GOLD_PLUS" },
+      { id: "wellhub_platinum", affiliation: "WELLHUB", wellhubPlan: "PLATINUM" },
+      { id: "wellhub_diamond", affiliation: "WELLHUB", wellhubPlan: "DIAMOND" },
+      {
+        id: "wellhub_diamond_plus",
+        affiliation: "WELLHUB",
+        wellhubPlan: "DIAMOND_PLUS",
+      },
+      { id: "totalpass_1", affiliation: "TOTALPASS", wellhubPlan: null },
+      { id: "none_1", affiliation: "NONE", wellhubPlan: null },
+    ]);
+    mocks.prisma.$transaction.mockImplementation(async (callback: any) =>
+      callback(tx)
+    );
+
+    const res = await GET(cronReq());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      periodKey: "2026-05",
+      renewedUsers: 5,
+      skippedNoneAffiliation: 1,
+      expiresAt: "2026-06-01T05:00:00.000Z",
+    });
+
+    expect(tx.packPurchase.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "wellhub_gold",
+        packId: "corp_wellhub_gold_plus_monthly",
+        classesLeft: 2,
+        expiresAt: new Date("2026-06-01T05:00:00.000Z"),
+      }),
+      select: { id: true },
+    });
+    expect(tx.packPurchase.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "wellhub_platinum",
+        packId: "corp_wellhub_platinum_monthly",
+        classesLeft: 8,
+      }),
+      select: { id: true },
+    });
+    expect(tx.packPurchase.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "wellhub_diamond",
+        packId: "corp_wellhub_diamond_monthly",
+        classesLeft: 30,
+      }),
+      select: { id: true },
+    });
+    expect(tx.packPurchase.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "wellhub_diamond_plus",
+        packId: "corp_wellhub_diamond_plus_monthly",
+        classesLeft: 30,
+      }),
+      select: { id: true },
+    });
+    expect(tx.packPurchase.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "totalpass_1",
+        packId: "corp_totalpass_monthly",
+        classesLeft: 10,
+      }),
+      select: { id: true },
+    });
+    expect(tx.tokenLedger.findFirst).toHaveBeenCalledWith({
+      where: {
+        userId: "wellhub_gold",
+        reason: "CORPORATE_MONTHLY",
+        createdAt: {
+          gte: new Date("2026-05-01T05:00:00.000Z"),
+          lt: new Date("2026-06-01T06:00:00.000Z"),
+        },
+      },
+      select: { id: true },
+    });
+  });
+
+  it("does not duplicate credits when a ledger row already exists for the target month", async () => {
+    const tx = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue({
+          affiliation: "WELLHUB",
+          wellhubPlan: "GOLD_PLUS",
+        }),
+      },
+      tokenLedger: {
+        findFirst: vi.fn().mockResolvedValue({ id: "existing_ledger" }),
+        create: vi.fn(),
+      },
+      packPurchase: {
+        updateMany: vi.fn(),
+        create: vi.fn(),
+      },
+    };
+
+    mocks.prisma.user.findMany.mockResolvedValue([
+      { id: "wellhub_1", affiliation: "WELLHUB", wellhubPlan: "GOLD_PLUS" },
+    ]);
+    mocks.prisma.$transaction.mockImplementation(async (callback: any) =>
+      callback(tx)
+    );
+
+    const res = await GET(cronReq());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      renewedUsers: 0,
+      skippedAlreadyRenewed: 1,
+    });
+    expect(tx.packPurchase.create).not.toHaveBeenCalled();
+    expect(tx.tokenLedger.create).not.toHaveBeenCalled();
+  });
+
+  it("skips WellHub users that do not have a plan", async () => {
+    mocks.prisma.user.findMany.mockResolvedValue([
+      { id: "wellhub_missing", affiliation: "WELLHUB", wellhubPlan: null },
+    ]);
+
+    const res = await GET(cronReq());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({
+      renewedUsers: 0,
+      skippedMissingWellhubPlan: 1,
+    });
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+});

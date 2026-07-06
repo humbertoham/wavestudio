@@ -25,6 +25,13 @@ enum Affiliation {
   TOTALPASS
 }
 
+enum WellhubPlan {
+  GOLD_PLUS
+  PLATINUM
+  DIAMOND
+  DIAMOND_PLUS
+}
+
 enum BookingStatus {
   ACTIVE
   CANCELED
@@ -99,6 +106,8 @@ model User {
   phone          String?     @db.VarChar(20)
   emergencyPhone String?     @db.VarChar(20)
   affiliation    Affiliation @default(NONE)
+  wellhubPlan    WellhubPlan?
+  affiliationConfirmedAt DateTime?
 }
 
 model Instructor {

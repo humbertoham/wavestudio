@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getPackageExpirationAt11Pm } from "@/lib/package-expiration";
 import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
 
@@ -32,10 +33,8 @@ export async function POST(req: Request) {
     if (!user) return j(404, { error: "User not found" });
     if (!pack) return j(404, { error: "Pack not found" });
 
-    // Calcula expiración (hoy + validityDays)
     const now = new Date();
-    const expiresAt = new Date(now.getTime());
-    expiresAt.setDate(expiresAt.getDate() + pack.validityDays);
+    const expiresAt = getPackageExpirationAt11Pm(now, pack.validityDays);
 
     const result = await prisma.$transaction(async (tx) => {
       // 1) Payment APPROVED (proveedor MERCADOPAGO para mantener el enum)

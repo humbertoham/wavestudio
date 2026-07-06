@@ -4,6 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getOptionalServerEnv } from "@/lib/env";
+import { getPackageExpirationAt11Pm } from "@/lib/package-expiration";
 import { prisma } from "@/lib/prisma";
 import {
   MercadoPagoConfig,
@@ -835,7 +836,10 @@ export async function POST(req: Request) {
             userId: beneficiaryUserId,
             packId: pack.id,
             classesLeft: creditedClasses,
-            expiresAt: new Date(Date.now() + creditedValidityDays * 86400000),
+            expiresAt: getPackageExpirationAt11Pm(
+              new Date(),
+              creditedValidityDays
+            ),
             paymentId: updated.id,
           },
         });
