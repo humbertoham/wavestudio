@@ -62,28 +62,10 @@ describe("GET /api/internal/monthly-renewal", () => {
     });
   });
 
-  it("grants WellHub credits by plan, keeps TotalPass behavior, and skips NONE", async () => {
+  it("grants production corporate credits and skips NONE", async () => {
     const currentUsers: Record<string, unknown> = {
-      wellhub_gold: {
-        affiliation: "WELLHUB",
-        wellhubPlan: "GOLD_PLUS",
-      },
-      wellhub_platinum: {
-        affiliation: "WELLHUB",
-        wellhubPlan: "PLATINUM",
-      },
-      wellhub_diamond: {
-        affiliation: "WELLHUB",
-        wellhubPlan: "DIAMOND",
-      },
-      wellhub_diamond_plus: {
-        affiliation: "WELLHUB",
-        wellhubPlan: "DIAMOND_PLUS",
-      },
-      totalpass_1: {
-        affiliation: "TOTALPASS",
-        wellhubPlan: null,
-      },
+      wellhub_1: { affiliation: "WELLHUB" },
+      totalpass_1: { affiliation: "TOTALPASS" },
     };
     const tx = {
       user: {
@@ -99,25 +81,15 @@ describe("GET /api/internal/monthly-renewal", () => {
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         create: vi
           .fn()
-          .mockResolvedValueOnce({ id: "purchase_gold" })
-          .mockResolvedValueOnce({ id: "purchase_platinum" })
-          .mockResolvedValueOnce({ id: "purchase_diamond" })
-          .mockResolvedValueOnce({ id: "purchase_diamond_plus" })
+          .mockResolvedValueOnce({ id: "purchase_wellhub" })
           .mockResolvedValueOnce({ id: "purchase_totalpass" }),
       },
     };
 
     mocks.prisma.user.findMany.mockResolvedValue([
-      { id: "wellhub_gold", affiliation: "WELLHUB", wellhubPlan: "GOLD_PLUS" },
-      { id: "wellhub_platinum", affiliation: "WELLHUB", wellhubPlan: "PLATINUM" },
-      { id: "wellhub_diamond", affiliation: "WELLHUB", wellhubPlan: "DIAMOND" },
-      {
-        id: "wellhub_diamond_plus",
-        affiliation: "WELLHUB",
-        wellhubPlan: "DIAMOND_PLUS",
-      },
-      { id: "totalpass_1", affiliation: "TOTALPASS", wellhubPlan: null },
-      { id: "none_1", affiliation: "NONE", wellhubPlan: null },
+      { id: "wellhub_1", affiliation: "WELLHUB" },
+      { id: "totalpass_1", affiliation: "TOTALPASS" },
+      { id: "none_1", affiliation: "NONE" },
     ]);
     mocks.prisma.$transaction.mockImplementation(async (callback: any) =>
       callback(tx)
@@ -130,41 +102,17 @@ describe("GET /api/internal/monthly-renewal", () => {
     expect(body).toMatchObject({
       ok: true,
       periodKey: "2026-05",
-      renewedUsers: 5,
+      renewedUsers: 2,
       skippedNoneAffiliation: 1,
       expiresAt: "2026-06-01T05:00:00.000Z",
     });
 
     expect(tx.packPurchase.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        userId: "wellhub_gold",
-        packId: "corp_wellhub_gold_plus_monthly",
-        classesLeft: 2,
+        userId: "wellhub_1",
+        packId: "corp_wellhub_monthly",
+        classesLeft: 15,
         expiresAt: new Date("2026-06-01T05:00:00.000Z"),
-      }),
-      select: { id: true },
-    });
-    expect(tx.packPurchase.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        userId: "wellhub_platinum",
-        packId: "corp_wellhub_platinum_monthly",
-        classesLeft: 8,
-      }),
-      select: { id: true },
-    });
-    expect(tx.packPurchase.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        userId: "wellhub_diamond",
-        packId: "corp_wellhub_diamond_monthly",
-        classesLeft: 30,
-      }),
-      select: { id: true },
-    });
-    expect(tx.packPurchase.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        userId: "wellhub_diamond_plus",
-        packId: "corp_wellhub_diamond_plus_monthly",
-        classesLeft: 30,
       }),
       select: { id: true },
     });
@@ -178,7 +126,7 @@ describe("GET /api/internal/monthly-renewal", () => {
     });
     expect(tx.tokenLedger.findFirst).toHaveBeenCalledWith({
       where: {
-        userId: "wellhub_gold",
+        userId: "wellhub_1",
         reason: "CORPORATE_MONTHLY",
         createdAt: {
           gte: new Date("2026-05-01T05:00:00.000Z"),
@@ -192,10 +140,7 @@ describe("GET /api/internal/monthly-renewal", () => {
   it("does not duplicate credits when a ledger row already exists for the target month", async () => {
     const tx = {
       user: {
-        findUnique: vi.fn().mockResolvedValue({
-          affiliation: "WELLHUB",
-          wellhubPlan: "GOLD_PLUS",
-        }),
+        findUnique: vi.fn().mockResolvedValue({ affiliation: "WELLHUB" }),
       },
       tokenLedger: {
         findFirst: vi.fn().mockResolvedValue({ id: "existing_ledger" }),
@@ -208,7 +153,7 @@ describe("GET /api/internal/monthly-renewal", () => {
     };
 
     mocks.prisma.user.findMany.mockResolvedValue([
-      { id: "wellhub_1", affiliation: "WELLHUB", wellhubPlan: "GOLD_PLUS" },
+      { id: "wellhub_1", affiliation: "WELLHUB" },
     ]);
     mocks.prisma.$transaction.mockImplementation(async (callback: any) =>
       callback(tx)
@@ -225,21 +170,5 @@ describe("GET /api/internal/monthly-renewal", () => {
     });
     expect(tx.packPurchase.create).not.toHaveBeenCalled();
     expect(tx.tokenLedger.create).not.toHaveBeenCalled();
-  });
-
-  it("skips WellHub users that do not have a plan", async () => {
-    mocks.prisma.user.findMany.mockResolvedValue([
-      { id: "wellhub_missing", affiliation: "WELLHUB", wellhubPlan: null },
-    ]);
-
-    const res = await GET(cronReq());
-    const body = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(body).toMatchObject({
-      renewedUsers: 0,
-      skippedMissingWellhubPlan: 1,
-    });
-    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 });

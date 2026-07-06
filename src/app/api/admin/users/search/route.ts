@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 
-import { prisma, requireClassManager } from "../../_utils";
+import { prisma, requireAdmin } from "../../_utils";
 
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
-  const auth = await requireClassManager(req);
+  const auth = await requireAdmin(req);
   if (auth) return auth;
 
   const { searchParams } = new URL(req.url);

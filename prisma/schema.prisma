@@ -15,7 +15,6 @@ generator client {
  */
 enum Role {
   USER
-  COACH
   ADMIN
 }
 
@@ -23,13 +22,6 @@ enum Affiliation {
   NONE
   WELLHUB
   TOTALPASS
-}
-
-enum WellhubPlan {
-  GOLD_PLUS
-  PLATINUM
-  DIAMOND
-  DIAMOND_PLUS
 }
 
 enum BookingStatus {
@@ -106,8 +98,6 @@ model User {
   phone          String?     @db.VarChar(20)
   emergencyPhone String?     @db.VarChar(20)
   affiliation    Affiliation @default(NONE)
-  wellhubPlan    WellhubPlan?
-  affiliationConfirmedAt DateTime?
 }
 
 model Instructor {

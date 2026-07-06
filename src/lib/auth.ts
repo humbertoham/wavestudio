@@ -12,7 +12,7 @@ import { verifyToken, type JWTPayload } from "./jwt";
  * Modelo de payload esperado por tu JWT:
  * interface JWTPayload {
  *   sub: string;       // user id
- *   role: "USER" | "COACH" | "ADMIN";
+ *   role: "USER" | "ADMIN";
  *   email?: string;
  *   // ...otros campos que firmes
  * }
@@ -172,22 +172,9 @@ export async function requireAdmin(req?: AnyReq): Promise<JWTPayload> {
   return auth;
 }
 
-export async function requireAdminOrCoach(req?: AnyReq): Promise<JWTPayload> {
-  const auth = await requireAuth(req);
-  if (auth.role !== "ADMIN" && auth.role !== "COACH") {
-    throw new Error("FORBIDDEN");
-  }
-  return auth;
-}
-
 export async function isAdmin(req?: AnyReq): Promise<boolean> {
   const auth = req ? await getAuthFromRequest(req) : await getAuth();
   return auth?.role === "ADMIN";
-}
-
-export async function isAdminOrCoach(req?: AnyReq): Promise<boolean> {
-  const auth = req ? await getAuthFromRequest(req) : await getAuth();
-  return auth?.role === "ADMIN" || auth?.role === "COACH";
 }
 
 /**

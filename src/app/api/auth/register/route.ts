@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
+import { Affiliation, Prisma } from "@prisma/client";
 
-import { normalizeAffiliationAndPlan } from "@/lib/affiliation";
 import { hash } from "@/lib/hash";
 import { getMonthlyRenewalPeriod } from "@/lib/package-expiration";
 import { prisma } from "@/lib/prisma";
 import { consumeRateLimit, getClientIp } from "@/lib/rate-limit";
-import { ensureCorporatePacks, getCorporateGrantConfig } from "@/lib/wellhub";
 import { registerSchema } from "@/lib/zod";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const WELLHUB_PACK_ID = "corp_wellhub_monthly";
+const TOTALPASS_PACK_ID = "corp_totalpass_monthly";
 
 type RegisterResult = {
   user: {
@@ -49,6 +50,20 @@ function cleanPhone(value: unknown) {
   return digits.slice(0, 20);
 }
 
+function parseAffiliation(value: unknown): Affiliation {
+  const map: Record<string, Affiliation> = {
+    NONE: Affiliation.NONE,
+    WELLHUB: Affiliation.WELLHUB,
+    TOTALPASS: Affiliation.TOTALPASS,
+    none: Affiliation.NONE,
+    wellhub: Affiliation.WELLHUB,
+    totalpass: Affiliation.TOTALPASS,
+  };
+
+  const key = typeof value === "string" ? value : "NONE";
+  return map[key] ?? Affiliation.NONE;
+}
+
 function parseDOB(value: string): Date {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) {
@@ -58,13 +73,7 @@ function parseDOB(value: string): Date {
   const [, y, mo, d] = match;
   const date = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
 
-  if (
-    Number.isNaN(date.getTime()) ||
-    date.getUTCFullYear() !== Number(y) ||
-    date.getUTCMonth() !== Number(mo) - 1 ||
-    date.getUTCDate() !== Number(d) ||
-    date > new Date()
-  ) {
+  if (Number.isNaN(date.getTime()) || date > new Date()) {
     throw new RegisterHttpError(400, "INVALID_DATE_OF_BIRTH");
   }
 
@@ -88,22 +97,56 @@ function json(status: number, body: Record<string, unknown>) {
   });
 }
 
-function firstFieldMessage(fieldErrors: Record<string, string[] | undefined>) {
-  for (const key of [
-    "name",
-    "email",
-    "password",
-    "dateOfBirth",
-    "phone",
-    "emergencyPhone",
-    "affiliation",
-    "wellhubPlan",
-  ]) {
-    const messages = fieldErrors[key];
-    if (messages?.[0]) return messages[0];
-  }
+async function ensureCorporatePacks(tx: Prisma.TransactionClient) {
+  await tx.pack.upsert({
+    where: { id: WELLHUB_PACK_ID },
+    update: {
+      name: "WellHub Mensual (Interno)",
+      classes: 15,
+      price: 0,
+      validityDays: 31,
+      isActive: false,
+      isVisible: false,
+      oncePerUser: false,
+      classesLabel: "15 clases",
+    },
+    create: {
+      id: WELLHUB_PACK_ID,
+      name: "WellHub Mensual (Interno)",
+      classes: 15,
+      price: 0,
+      validityDays: 31,
+      isActive: false,
+      isVisible: false,
+      oncePerUser: false,
+      classesLabel: "15 clases",
+    },
+  });
 
-  return "Revisa los datos del formulario.";
+  await tx.pack.upsert({
+    where: { id: TOTALPASS_PACK_ID },
+    update: {
+      name: "TotalPass Mensual (Interno)",
+      classes: 10,
+      price: 0,
+      validityDays: 31,
+      isActive: false,
+      isVisible: false,
+      oncePerUser: false,
+      classesLabel: "10 clases",
+    },
+    create: {
+      id: TOTALPASS_PACK_ID,
+      name: "TotalPass Mensual (Interno)",
+      classes: 10,
+      price: 0,
+      validityDays: 31,
+      isActive: false,
+      isVisible: false,
+      oncePerUser: false,
+      classesLabel: "10 clases",
+    },
+  });
 }
 
 export async function POST(req: Request) {
@@ -155,7 +198,7 @@ export async function POST(req: Request) {
 
       return json(400, {
         error: "INVALID_BODY",
-        message: firstFieldMessage(fieldErrors),
+        message: "Los datos de registro no son validos.",
         fields: fieldErrors,
         requestId,
       });
@@ -167,29 +210,12 @@ export async function POST(req: Request) {
     const dateOfBirth = parseDOB(parsed.data.dateOfBirth);
     const phone = cleanPhone(parsed.data.phone);
     const emergencyPhone = cleanPhone(parsed.data.emergencyPhone);
-    const affiliationSelection = normalizeAffiliationAndPlan(
-      parsed.data.affiliation,
-      parsed.data.wellhubPlan
-    );
-
-    if (!affiliationSelection.ok) {
-      return json(400, {
-        error: affiliationSelection.code,
-        message: affiliationSelection.message,
-        fields: {
-          [affiliationSelection.field]: [affiliationSelection.message],
-        },
-        requestId,
-      });
-    }
-
-    const { affiliation, wellhubPlan } = affiliationSelection;
+    const affiliation = parseAffiliation(parsed.data.affiliation);
 
     console.info("[register] normalized_input", {
       requestId,
       email: maskEmail(email),
       affiliation,
-      wellhubPlan,
       hasDateOfBirth: true,
       phoneDigits: phone.length,
       emergencyPhoneDigits: emergencyPhone.length,
@@ -209,7 +235,7 @@ export async function POST(req: Request) {
 
       return json(409, {
         error: "EMAIL_IN_USE",
-        message: "Ya existe una cuenta con este correo.",
+        message: "Este correo ya esta registrado.",
         requestId,
       });
     }
@@ -220,11 +246,9 @@ export async function POST(req: Request) {
       requestId,
       email: maskEmail(email),
       affiliation,
-      wellhubPlan,
     });
 
     const result = await prisma.$transaction<RegisterResult>(async (tx) => {
-      const affiliationConfirmedAt = new Date();
       const user = await tx.user.create({
         data: {
           name,
@@ -234,25 +258,30 @@ export async function POST(req: Request) {
           phone,
           emergencyPhone,
           affiliation,
-          wellhubPlan,
-          affiliationConfirmedAt,
         },
         select: { id: true, email: true },
       });
 
-      const grant = getCorporateGrantConfig(affiliation, wellhubPlan);
-
-      if (!grant) {
+      if (
+        affiliation !== Affiliation.WELLHUB &&
+        affiliation !== Affiliation.TOTALPASS
+      ) {
         return { user, corporateGrant: null };
       }
 
       await ensureCorporatePacks(tx);
 
+      const classesGranted = affiliation === Affiliation.WELLHUB ? 15 : 10;
+      const packId =
+        affiliation === Affiliation.WELLHUB
+          ? WELLHUB_PACK_ID
+          : TOTALPASS_PACK_ID;
+
       const purchase = await tx.packPurchase.create({
         data: {
           userId: user.id,
-          packId: grant.packId,
-          classesLeft: grant.classesGranted,
+          packId,
+          classesLeft: classesGranted,
           expiresAt: getMonthlyRenewalPeriod().expiresAt,
         },
         select: { id: true },
@@ -262,7 +291,7 @@ export async function POST(req: Request) {
         data: {
           userId: user.id,
           packPurchaseId: purchase.id,
-          delta: grant.classesGranted,
+          delta: classesGranted,
           reason: "CORPORATE_MONTHLY",
         },
       });
@@ -270,9 +299,9 @@ export async function POST(req: Request) {
       return {
         user,
         corporateGrant: {
-          packId: grant.packId,
+          packId,
           packPurchaseId: purchase.id,
-          classesGranted: grant.classesGranted,
+          classesGranted,
         },
       };
     });
@@ -298,10 +327,7 @@ export async function POST(req: Request) {
 
       return json(error.status, {
         error: error.code,
-        message:
-          error.code === "INVALID_DATE_OF_BIRTH"
-            ? "Ingresa una fecha de nacimiento válida."
-            : "No se pudo completar el registro.",
+        message: "No se pudo completar el registro.",
         details: error.details ?? null,
         requestId,
       });
@@ -327,16 +353,7 @@ export async function POST(req: Request) {
       ) {
         return json(409, {
           error: "EMAIL_IN_USE",
-          message: "Ya existe una cuenta con este correo.",
-          requestId,
-        });
-      }
-
-      if (error.code === "P2021" || error.code === "P2022") {
-        return json(503, {
-          error: "SCHEMA_MIGRATION_REQUIRED",
-          message:
-            "La base de datos de este ambiente no tiene las migraciones requeridas. Ejecuta las migraciones antes de registrar usuarios.",
+          message: "Este correo ya esta registrado.",
           requestId,
         });
       }

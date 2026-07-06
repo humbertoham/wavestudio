@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
-
-import { normalizeAffiliationAndPlan } from "@/lib/affiliation";
+import { Affiliation, Prisma } from "@prisma/client";
 import { prisma, requireAdmin } from "../../../_utils";
 
 export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
+
+function parseAffiliation(value: unknown): Affiliation | null {
+  if (value === Affiliation.NONE) return Affiliation.NONE;
+  if (value === Affiliation.WELLHUB) return Affiliation.WELLHUB;
+  if (value === Affiliation.TOTALPASS) return Affiliation.TOTALPASS;
+  return null;
+}
 
 function j(status: number, body: any) {
   return NextResponse.json(body, { status });
@@ -27,14 +32,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       id: true,
       name: true,
       email: true,
-      role: true,
       createdAt: true,
       dateOfBirth: true,
       phone: true,
       emergencyPhone: true,
       affiliation: true,
-      wellhubPlan: true,
-      affiliationConfirmedAt: true,
       bookingBlocked: true,
       bookingBlockedAt: true,
       bookingBlockLogs: {
@@ -159,36 +161,26 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const { id } = await ctx.params;
   const body = await req.json().catch(() => null);
-  const input = body && typeof body === "object" ? body : {};
-  const normalized = normalizeAffiliationAndPlan(
-    (input as { affiliation?: unknown }).affiliation,
-    (input as { wellhubPlan?: unknown }).wellhubPlan
+  const affiliation = parseAffiliation(
+    body && typeof body === "object"
+      ? (body as { affiliation?: unknown }).affiliation
+      : null
   );
 
-  if (!normalized.ok) {
+  if (!affiliation) {
     return j(400, {
       ok: false,
-      error: normalized.code,
-      message: normalized.message,
-      fields: {
-        [normalized.field]: [normalized.message],
-      },
+      message: "Afiliacion invalida",
     });
   }
 
   try {
     const user = await prisma.user.update({
       where: { id },
-      data: {
-        affiliation: normalized.affiliation,
-        wellhubPlan: normalized.wellhubPlan,
-        affiliationConfirmedAt: new Date(),
-      },
+      data: { affiliation },
       select: {
         id: true,
         affiliation: true,
-        wellhubPlan: true,
-        affiliationConfirmedAt: true,
       },
     });
 
@@ -197,22 +189,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       user,
     });
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === "P2025") {
-        return j(404, {
-          ok: false,
-          message: "Usuario no encontrado",
-        });
-      }
-
-      if (error.code === "P2021" || error.code === "P2022") {
-        return j(503, {
-          ok: false,
-          error: "SCHEMA_MIGRATION_REQUIRED",
-          message:
-            "La base de datos de este ambiente no tiene las migraciones requeridas.",
-        });
-      }
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      return j(404, {
+        ok: false,
+        message: "Usuario no encontrado",
+      });
     }
 
     console.error("PATCH /api/admin/users/[id]/details error:", error);

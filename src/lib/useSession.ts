@@ -7,7 +7,6 @@ type Me = {
   id: string;
   name: string;
   email: string;
-  role: "USER" | "COACH" | "ADMIN";
 };
 
 const fetcher = (url: string) =>

@@ -71,23 +71,19 @@ function periodForMonth(month: BusinessMonth) {
   const previous = previousMonth(month);
   const previousLastDay = lastDayOfMonth(previous);
   const targetLastDay = lastDayOfMonth(month);
+  const previousExpiresAt = businessLocalToUtc(
+    previous.year,
+    previous.month,
+    previousLastDay,
+    23
+  );
 
   return {
     periodKey: `${pad(month.year, 4)}-${pad(month.month)}`,
     periodStart: businessLocalToUtc(month.year, month.month, 1, 0),
     nextPeriodStart: businessLocalToUtc(next.year, next.month, 1, 0),
-    renewalWindowStart: businessLocalToUtc(
-      previous.year,
-      previous.month,
-      previousLastDay,
-      23
-    ),
-    previousPeriodExpiresAt: businessLocalToUtc(
-      previous.year,
-      previous.month,
-      previousLastDay,
-      23
-    ),
+    renewalWindowStart: previousExpiresAt,
+    previousPeriodExpiresAt: previousExpiresAt,
     expiresAt: businessLocalToUtc(month.year, month.month, targetLastDay, 23),
   };
 }

@@ -16,7 +16,7 @@ import {
 } from "react-icons/fi";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
-const MX_TZ = "America/Monterrey";
+const MX_TZ = "America/Mexico_City";
 const MX_LOCALE: Intl.LocalesArgument = "es-MX";
 const CANCEL_WINDOW_MIN = 240;
 
@@ -51,7 +51,6 @@ type ClassApi = {
     status?: "ACTIVE" | "CANCELED";
     attended?: boolean;
     canceledAt?: string | null;
-    isFirstBooking?: boolean;
     user: {
       id: string;
       name: string;
@@ -83,7 +82,6 @@ type AttendeeRow = {
   attended: boolean;
   quantity: number;
   affiliation: Affiliation;
-  isFirstBooking: boolean;
 };
 
 type CanceledRow = {
@@ -135,12 +133,9 @@ function hhmmFromISOInMX(iso: string) {
   }).format(new Date(iso));
 }
 
-function fmtFullDateTimeMX(iso: string) {
+function fmtTimeMX(iso: string) {
   return new Intl.DateTimeFormat(MX_LOCALE, {
     timeZone: MX_TZ,
-    day: "numeric",
-    month: "long",
-    year: "numeric",
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
@@ -528,7 +523,6 @@ export default function ClassAdminPage() {
         attended: !!booking.attended,
         quantity: booking.quantity ?? 1,
         affiliation: booking.user?.affiliation ?? "NONE",
-        isFirstBooking: !!booking.isFirstBooking,
       }));
   }, [cls]);
 
@@ -881,12 +875,6 @@ export default function ClassAdminPage() {
                       <AffiliationBadge affiliation={attendee.affiliation} />
                     </p>
 
-                    {attendee.isFirstBooking && (
-                      <p className="mt-1 text-[11px] font-bold text-[color:var(--color-primary)]">
-                        NEW USER
-                      </p>
-                    )}
-
                     {attendee.email && (
                       <p className="truncate text-xs text-muted-foreground">
                         {attendee.email}
@@ -969,7 +957,7 @@ export default function ClassAdminPage() {
                   booking.affiliation === "TOTALPASS") &&
                 isLateCanceledBooking(cls.date, booking.canceledAt);
               const canceledTime = booking.canceledAt
-                ? fmtFullDateTimeMX(booking.canceledAt)
+                ? fmtTimeMX(booking.canceledAt)
                 : null;
 
               return (

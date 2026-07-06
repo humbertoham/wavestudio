@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, requireClassManager } from "../../../_utils";
+import { prisma, requireAdmin } from "../../../_utils";
 
 export const runtime = "nodejs";
 
@@ -10,7 +10,7 @@ function j(status: number, body: any) {
 }
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
-  const auth = await requireClassManager(req);
+  const auth = await requireAdmin(req);
   if (auth) return auth;
 
   const { id } = await ctx.params;

@@ -33,6 +33,7 @@ export async function POST(req: Request) {
     if (!user) return j(404, { error: "User not found" });
     if (!pack) return j(404, { error: "Pack not found" });
 
+    // Calcula expiración (hoy + validityDays)
     const now = new Date();
     const expiresAt = getPackageExpirationAt11Pm(now, pack.validityDays);
 

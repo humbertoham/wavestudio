@@ -1,6 +1,6 @@
 // src/app/api/admin/whoami/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromSession, requireClassManager } from "../_utils";
+import { getUserFromSession, requireAdmin } from "../_utils";
 
 export const runtime = "nodejs";
 
@@ -19,7 +19,7 @@ function sanitizeUser(
 export async function GET(req: NextRequest) {
   const hasCookie = !!req.cookies.get("session")?.value;
 
-  const authError = await requireClassManager(req);
+  const authError = await requireAdmin(req);
   if (authError) {
     const user = await getUserFromSession(req);
     return NextResponse.json(

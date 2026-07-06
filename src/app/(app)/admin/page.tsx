@@ -86,8 +86,6 @@ function formatMoneyMXN(value?: number | null) {
 }
 
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
-type WellhubPlan = "GOLD_PLUS" | "PLATINUM" | "DIAMOND" | "DIAMOND_PLUS";
-type Role = "USER" | "COACH" | "ADMIN";
 type AdminTab =
   | "classes"
   | "instructors"
@@ -110,26 +108,6 @@ const AFFILIATION_LABELS: Record<Affiliation, string> = {
   NONE: "Ninguna",
   WELLHUB: "WellHub",
   TOTALPASS: "TotalPass",
-};
-
-const WELLHUB_PLAN_LABELS: Record<WellhubPlan, string> = {
-  GOLD_PLUS: "Gold+",
-  PLATINUM: "Platinum",
-  DIAMOND: "Diamond",
-  DIAMOND_PLUS: "Diamond+",
-};
-
-const WELLHUB_PLAN_CREDITS: Record<WellhubPlan, number> = {
-  GOLD_PLUS: 2,
-  PLATINUM: 8,
-  DIAMOND: 30,
-  DIAMOND_PLUS: 30,
-};
-
-const ROLE_LABELS: Record<Role, string> = {
-  USER: "User",
-  COACH: "Coach",
-  ADMIN: "Admin",
 };
 
 const PURCHASE_PAYMENT_STATUS_LABELS: Record<
@@ -231,7 +209,6 @@ type User = {
   id: string;
   name: string | null;
   email: string;
-  role: Role;
   phone?: string | null;
   dateOfBirth?: string | null;
   bookingBlocked?: boolean;
@@ -248,13 +225,10 @@ type UserDetails = {
     id: string;
     name: string | null;
     email: string;
-    role: Role;
     dateOfBirth?: string | null;
     phone?: string | null;
     emergencyPhone?: string | null;
     affiliation: Affiliation;
-    wellhubPlan?: WellhubPlan | null;
-    affiliationConfirmedAt?: string | null;
     bookingBlocked: boolean;
     bookingBlockedAt?: string | null;
     bookingBlockLogs?: Array<{
@@ -1882,9 +1856,6 @@ function UserInspectorSection() {
   } | null>(null);
   const [togglingBlock, setTogglingBlock] = useState(false);
   const [savingAffiliation, setSavingAffiliation] = useState(false);
-  const [affiliationDraft, setAffiliationDraft] = useState<Affiliation>("NONE");
-  const [wellhubPlanDraft, setWellhubPlanDraft] = useState<WellhubPlan | "">("");
-  const [savingRole, setSavingRole] = useState(false);
   const [pauseDaysById, setPauseDaysById] = useState<Record<string, number>>({});
   const [pausingPackId, setPausingPackId] = useState<string | null>(null);
 
@@ -1916,12 +1887,6 @@ function UserInspectorSection() {
 
   const list = usersData?.items;
   const userTotalPages = usersData?.totalPages ?? 1;
-
-  useEffect(() => {
-    if (!details?.user) return;
-    setAffiliationDraft(details.user.affiliation);
-    setWellhubPlanDraft(details.user.wellhubPlan ?? "");
-  }, [details?.user.id, details?.user.affiliation, details?.user.wellhubPlan]);
 
   async function updateBookingBlocked(next: boolean) {
     if (!selectedId) return;
@@ -1960,26 +1925,8 @@ function UserInspectorSection() {
     }
   }
 
-  async function saveAffiliation() {
-    if (!selectedId || !details) return;
-
-    const nextPlan = affiliationDraft === "WELLHUB" ? wellhubPlanDraft : null;
-    const currentPlan = details.user.wellhubPlan ?? null;
-
-    if (
-      affiliationDraft === details.user.affiliation &&
-      nextPlan === currentPlan
-    ) {
-      return;
-    }
-
-    if (affiliationDraft === "WELLHUB" && !wellhubPlanDraft) {
-      setFeedback({
-        type: "error",
-        text: "Selecciona un plan de WellHub.",
-      });
-      return;
-    }
+  async function updateAffiliation(next: Affiliation) {
+    if (!selectedId || next === details?.user.affiliation) return;
 
     setSavingAffiliation(true);
     setFeedback(null);
@@ -1988,10 +1935,7 @@ function UserInspectorSection() {
       const res = await fetch(`/api/admin/users/${selectedId}/details`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          affiliation: affiliationDraft,
-          wellhubPlan: nextPlan,
-        }),
+        body: JSON.stringify({ affiliation: next }),
       });
 
       if (!res.ok) {
@@ -2004,7 +1948,7 @@ function UserInspectorSection() {
       setFeedback({
         type: "success",
         text:
-          affiliationDraft === "NONE"
+          next === "NONE"
             ? "Afiliacion actualizada. Las renovaciones corporativas futuras quedan detenidas."
             : "Afiliacion actualizada.",
       });
@@ -2018,45 +1962,6 @@ function UserInspectorSection() {
       });
     } finally {
       setSavingAffiliation(false);
-    }
-  }
-
-  async function updateRole(next: Role) {
-    if (!selectedId || next === details?.user.role) return;
-
-    setSavingRole(true);
-    setFeedback(null);
-
-    try {
-      const res = await fetch(`/api/admin/users/${selectedId}/role`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: next }),
-      });
-
-      if (!res.ok) {
-        throw new Error(await readApiMessage(res, "No se pudo actualizar el rol."));
-      }
-
-      const payload = await res.json().catch(() => null);
-      await Promise.all([mutate(), mutateUsers()]);
-      setFeedback({
-        type: "success",
-        text:
-          payload && typeof payload.message === "string"
-            ? payload.message
-            : "Rol actualizado.",
-      });
-    } catch (error) {
-      setFeedback({
-        type: "error",
-        text:
-          error instanceof Error
-            ? error.message
-            : "No se pudo actualizar el rol.",
-      });
-    } finally {
-      setSavingRole(false);
     }
   }
 
@@ -2157,9 +2062,6 @@ function UserInspectorSection() {
                       </div>
                       <div className="truncate text-sm text-muted-foreground">
                         {u.email}
-                      </div>
-                      <div className="mt-1 text-xs font-medium text-muted-foreground">
-                        {ROLE_LABELS[u.role]}
                       </div>
                     </button>
 
@@ -2262,33 +2164,15 @@ function UserInspectorSection() {
                     <dt className="text-muted-foreground">Email</dt>
                     <dd className="col-span-2">{details.user.email}</dd>
 
-                    <dt className="text-muted-foreground">Rol</dt>
-                    <dd className="col-span-2 space-y-1">
-                      <select
-                        className="input w-full"
-                        value={details.user.role}
-                        disabled={savingRole}
-                        onChange={(e) => updateRole(e.target.value as Role)}
-                      >
-                        {(Object.keys(ROLE_LABELS) as Role[]).map((value) => (
-                          <option key={value} value={value}>
-                            {ROLE_LABELS[value]}
-                          </option>
-                        ))}
-                      </select>
-                    </dd>
-
                     <dt className="text-muted-foreground">Afiliación</dt>
                     <dd className="col-span-2 space-y-1">
                       <select
                         className="input w-full"
-                        value={affiliationDraft}
+                        value={details.user.affiliation}
                         disabled={savingAffiliation}
-                        onChange={(e) => {
-                          const next = e.target.value as Affiliation;
-                          setAffiliationDraft(next);
-                          if (next !== "WELLHUB") setWellhubPlanDraft("");
-                        }}
+                        onChange={(e) =>
+                          updateAffiliation(e.target.value as Affiliation)
+                        }
                       >
                         {(Object.keys(AFFILIATION_LABELS) as Affiliation[]).map(
                           (value) => (
@@ -2298,34 +2182,6 @@ function UserInspectorSection() {
                           )
                         )}
                       </select>
-                      {affiliationDraft === "WELLHUB" && (
-                        <select
-                          className="input w-full"
-                          value={wellhubPlanDraft}
-                          disabled={savingAffiliation}
-                          onChange={(e) =>
-                            setWellhubPlanDraft(e.target.value as WellhubPlan)
-                          }
-                        >
-                          <option value="">Selecciona plan WellHub</option>
-                          {(Object.keys(WELLHUB_PLAN_LABELS) as WellhubPlan[]).map(
-                            (value) => (
-                              <option key={value} value={value}>
-                                {WELLHUB_PLAN_LABELS[value]} -{" "}
-                                {WELLHUB_PLAN_CREDITS[value]} creditos
-                              </option>
-                            )
-                          )}
-                        </select>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        disabled={savingAffiliation}
-                        onClick={saveAffiliation}
-                      >
-                        {savingAffiliation ? "Guardando..." : "Guardar afiliacion"}
-                      </button>
                       <p className="text-xs text-muted-foreground">
                         Ninguna detiene renovaciones corporativas futuras.
                       </p>

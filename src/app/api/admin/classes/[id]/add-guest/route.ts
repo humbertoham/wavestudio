@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
-import { prisma, requireClassManager } from "../../../_utils";
+import { prisma, requireAdmin } from "../../../_utils";
 
 export const runtime = "nodejs";
 
@@ -28,7 +28,7 @@ function isRetryableTransactionError(error: unknown) {
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
-  const auth = await requireClassManager(req);
+  const auth = await requireAdmin(req);
   if (auth) return auth;
 
   const { id: classId } = await ctx.params;
