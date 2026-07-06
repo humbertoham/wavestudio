@@ -53,6 +53,25 @@ No NEXT_PUBLIC variables are currently required.
 
 Prisma currently uses `env("DATABASE_URL")` in `prisma/schema.prisma`. The schema does not currently use `directUrl`, so DIRECT_URL and DATABASE_URL_UNPOOLED are documented placeholders for Neon direct/unpooled connections if your migration workflow needs them.
 
+## Local Branch Database Files
+
+For local migration checks, create these untracked files as needed:
+
+- `.env.dev.local`
+- `.env.uat.local`
+
+Use branch-specific keys only:
+
+```dotenv
+DATABASE_URL_DEV_BRANCH="postgresql://..."
+DIRECT_URL_DEV_BRANCH="postgresql://..."
+
+DATABASE_URL_UAT_BRANCH="postgresql://..."
+DIRECT_URL_UAT_BRANCH="postgresql://..."
+```
+
+Do not commit these files. They are ignored by `.gitignore`.
+
 ## Manual Vercel Checklist
 
 1. Create Neon project/database wave-uat.
@@ -79,5 +98,9 @@ Prisma currently uses `env("DATABASE_URL")` in `prisma/schema.prisma`. The schem
 - `npm run db:validate` validates the Prisma schema without mutating data.
 - `npm run db:generate` regenerates the Prisma client without mutating data.
 - `npm run db:migrate:deploy` applies committed migrations to whichever database is in the current environment. Run it only when you intentionally want to migrate that selected environment.
+- `npm run db:status:dev` checks migrations using `.env.dev.local`.
+- `npm run db:status:uat` checks migrations using `.env.uat.local`.
+- `npm run db:migrate:dev` applies committed migrations using `.env.dev.local`.
+- `npm run db:migrate:uat` applies committed migrations using `.env.uat.local`.
 
 Do not run `prisma migrate reset` or `prisma db push` against production.

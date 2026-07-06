@@ -337,6 +337,15 @@ export async function POST(req: Request) {
         });
       }
 
+      if (error.code === "P2021" || error.code === "P2022") {
+        return json(503, {
+          error: "SCHEMA_MIGRATION_REQUIRED",
+          message:
+            "La base de datos de este ambiente no tiene las migraciones requeridas. Ejecuta las migraciones antes de registrar usuarios.",
+          requestId,
+        });
+      }
+
       return json(500, {
         error: "DATABASE_ERROR",
         message: "Ocurrio un error al guardar el usuario.",
