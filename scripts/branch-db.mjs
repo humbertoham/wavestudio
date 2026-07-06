@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 
 const [, , target, action] = process.argv;
 const allowedTargets = new Set(["dev", "uat"]);
@@ -106,11 +107,24 @@ if (!targetInfo.valid || isPlaceholderDatabaseUrl(databaseUrl)) {
   process.exit(1);
 }
 
-const command = process.platform === "win32" ? "npx.cmd" : "npx";
+const prismaCommand = process.platform === "win32"
+  ? join(process.cwd(), "node_modules", ".bin", "prisma.cmd")
+  : join(process.cwd(), "node_modules", ".bin", "prisma");
 const prismaArgs =
   action === "status"
-    ? ["prisma", "migrate", "status"]
-    : ["prisma", "migrate", "deploy"];
+    ? ["migrate", "status"]
+    : ["migrate", "deploy"];
+
+if (!existsSync(prismaCommand)) {
+  console.error("Local Prisma CLI was not found. Run npm install first.");
+  process.exit(1);
+}
+
+const command = process.platform === "win32" ? "cmd.exe" : prismaCommand;
+const commandArgs =
+  process.platform === "win32"
+    ? ["/c", prismaCommand, ...prismaArgs]
+    : prismaArgs;
 
 console.log(
   `Running prisma migrate ${action === "status" ? "status" : "deploy"} for ${target.toUpperCase()} using ${envFile}.`
@@ -128,7 +142,7 @@ console.log(
   )
 );
 
-const result = spawnSync(command, prismaArgs, {
+const result = spawnSync(command, commandArgs, {
   cwd: process.cwd(),
   encoding: "utf8",
   env: {
@@ -141,5 +155,8 @@ const result = spawnSync(command, prismaArgs, {
 
 if (result.stdout) process.stdout.write(redactSecrets(result.stdout));
 if (result.stderr) process.stderr.write(redactSecrets(result.stderr));
+if (result.error) {
+  console.error(`Failed to run Prisma CLI: ${result.error.message}`);
+}
 
 process.exit(result.status ?? 1);
