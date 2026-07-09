@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, requireAdmin } from "../../../_utils";
+import { prisma, requireClassManager } from "../../../_utils";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
-  const auth = await requireAdmin(req);
+  const auth = await requireClassManager(req);
   if (auth) return auth;
 
   const { id } = await ctx.params;

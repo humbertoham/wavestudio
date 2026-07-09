@@ -5,7 +5,9 @@ import { getRequiredServerEnv } from "./env";
 
 const SECRET: Secret = getRequiredServerEnv("JWT_SECRET");
 
-export type JWTPayload = { sub: string; role: "USER" | "ADMIN" };
+export type AppRole = "USER" | "COACH" | "ADMIN";
+
+export type JWTPayload = { sub: string; role: AppRole };
 
 export function signToken(
   payload: JWTPayload,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, requireAdmin } from "../../admin/_utils";
+import { prisma, requireAdmin, requireClassManager } from "../../admin/_utils";
 
 type Ctx = {
   params: Promise<{ id: string }>;
@@ -8,11 +8,11 @@ type Ctx = {
 /**
  * =========================
  * GET /api/classes/:id
- * Detalle de clase (ADMIN)
+ * Detalle de clase (ADMIN/COACH)
  * =========================
  */
 export async function GET(req: NextRequest, ctx: Ctx) {
-  const auth = await requireAdmin(req);
+  const auth = await requireClassManager(req);
   if (auth) return auth;
 
   const { id } = await ctx.params;
