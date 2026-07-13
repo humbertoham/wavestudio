@@ -8,6 +8,7 @@
     "dev:no-turbo": "node scripts/clean-next-dev.mjs && next dev",
     "booking:dedupe:dry": "node scripts/reconcile-active-booking-duplicates.mjs",
     "booking:dedupe:apply": "node scripts/reconcile-active-booking-duplicates.mjs --execute",
+    "wellhub:repair": "node scripts/repair-wellhub-renewal-state.mjs",
     "env:check": "node scripts/check-env.mjs",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",

@@ -43,6 +43,7 @@ enum TokenReason {
   CANCEL_REFUND // reembolso por cancelación válida
   ADMIN_ADJUST // ajustes manuales
   CORPORATE_MONTHLY
+  ADMIN_WELLHUB_PLAN_CHANGE
 }
 
 enum PackHighlight {
@@ -265,9 +266,12 @@ model TokenLedger {
 
   delta     Int
   reason    TokenReason
+  idempotencyKey String? @unique
+  metadata  Json?
   createdAt DateTime    @default(now())
 
   @@index([userId, packPurchaseId])
+  @@index([userId, reason, createdAt])
   @@index([bookingId])
 }
 

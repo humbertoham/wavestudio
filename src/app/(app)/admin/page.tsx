@@ -5,6 +5,11 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FiMessageCircle } from "react-icons/fi";
 import { getWhatsAppHref } from "@/lib/whatsapp";
+import {
+  WELLHUB_PLAN_CREDITS,
+  WELLHUB_PLAN_LABELS,
+  WELLHUB_PLANS,
+} from "@/lib/wellhub-config";
 
 // --- helpers ---
 const USER_PAGE_SIZE = 25;
@@ -85,6 +90,27 @@ function formatMoneyMXN(value?: number | null) {
     : "—";
 }
 
+function formatCreditReason(reason: string) {
+  const labels: Record<string, string> = {
+    PURCHASE_CREDIT: "Compra",
+    BOOKING_DEBIT: "Reserva",
+    CANCEL_REFUND: "Cancelacion",
+    ADMIN_ADJUST: "Ajuste admin",
+    CORPORATE_MONTHLY: "Renovacion corporativa",
+    ADMIN_WELLHUB_PLAN_CHANGE: "Cambio WellHub",
+  };
+
+  return labels[reason] ?? reason;
+}
+
+function metadataText(value: unknown) {
+  return typeof value === "string" && value !== "NONE" ? value : "Ninguno";
+}
+
+function metadataNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
 type WellhubPlan = "GOLD_PLUS" | "PLATINUM" | "DIAMOND" | "DIAMOND_PLUS";
 type Role = "USER" | "COACH" | "ADMIN";
@@ -110,20 +136,6 @@ const AFFILIATION_LABELS: Record<Affiliation, string> = {
   NONE: "Ninguna",
   WELLHUB: "WellHub",
   TOTALPASS: "TotalPass",
-};
-
-const WELLHUB_PLAN_LABELS: Record<WellhubPlan, string> = {
-  GOLD_PLUS: "Gold+",
-  PLATINUM: "Platinum",
-  DIAMOND: "Diamond",
-  DIAMOND_PLUS: "Diamond+",
-};
-
-const WELLHUB_PLAN_CREDITS: Record<WellhubPlan, number> = {
-  GOLD_PLUS: 2,
-  PLATINUM: 8,
-  DIAMOND: 30,
-  DIAMOND_PLUS: 30,
 };
 
 const ROLE_LABELS: Record<Role, string> = {
@@ -291,6 +303,21 @@ type UserDetails = {
       instructor?: { id: string; name: string } | null;
     };
     packPurchase?: { id: string; pack?: { id: string; name: string } | null } | null;
+  }>;
+  creditHistory: Array<{
+    id: string;
+    delta: number;
+    reason: string;
+    metadata?: Record<string, unknown> | null;
+    createdAt: string;
+    packPurchase?: {
+      id: string;
+      pack?: { id: string; name: string } | null;
+    } | null;
+    booking?: {
+      id: string;
+      class?: { title: string; date: string } | null;
+    } | null;
   }>;
 };
 type PurchasedPackage = {
@@ -1933,6 +1960,13 @@ function UserInspectorSection() {
     setWellhubPlanDraft(details.user.wellhubPlan ?? "");
   }, [details?.user.id, details?.user.affiliation, details?.user.wellhubPlan]);
 
+  const affiliationSaveDisabled =
+    savingAffiliation ||
+    !details ||
+    (affiliationDraft === details.user.affiliation &&
+      (affiliationDraft === "WELLHUB" ? wellhubPlanDraft : null) ===
+        (details.user.wellhubPlan ?? null));
+
   async function updateBookingBlocked(next: boolean) {
     if (!selectedId) return;
 
@@ -2010,13 +2044,38 @@ function UserInspectorSection() {
         );
       }
 
+      const payload = await res.json().catch(() => null);
+      const updatedBalance =
+        payload &&
+        typeof payload === "object" &&
+        "tokenBalance" in payload &&
+        typeof payload.tokenBalance === "number"
+          ? payload.tokenBalance
+          : null;
+      const creditDelta =
+        payload &&
+        typeof payload === "object" &&
+        "wellhubSync" in payload &&
+        payload.wellhubSync &&
+        typeof payload.wellhubSync === "object" &&
+        "creditDeltaApplied" in payload.wellhubSync &&
+        typeof payload.wellhubSync.creditDeltaApplied === "number"
+          ? payload.wellhubSync.creditDeltaApplied
+          : null;
+
       await Promise.all([mutate(), mutateUsers()]);
       setFeedback({
         type: "success",
         text:
           affiliationDraft === "NONE"
-            ? "Afiliacion actualizada. Las renovaciones corporativas futuras quedan detenidas."
-            : "Afiliacion actualizada.",
+            ? `Afiliacion actualizada. Saldo: ${
+                updatedBalance ?? details.tokenBalance
+              } creditos. Las renovaciones corporativas futuras quedan detenidas.`
+            : `Afiliacion actualizada. Saldo: ${
+                updatedBalance ?? details.tokenBalance
+              } creditos.${
+                creditDelta != null ? ` Delta WellHub: ${creditDelta}.` : ""
+              }`,
       });
     } catch (error) {
       setFeedback({
@@ -2167,7 +2226,7 @@ function UserInspectorSection() {
                 }}
               >
                 <option value="ALL">Todos</option>
-                {(Object.keys(WELLHUB_PLAN_LABELS) as WellhubPlan[]).map((value) => (
+                {WELLHUB_PLANS.map((value) => (
                   <option key={value} value={value}>
                     {WELLHUB_PLAN_LABELS[value]}
                   </option>
@@ -2376,7 +2435,7 @@ function UserInspectorSection() {
                           }
                         >
                           <option value="">Selecciona plan</option>
-                          {(Object.keys(WELLHUB_PLAN_LABELS) as WellhubPlan[]).map(
+                          {WELLHUB_PLANS.map(
                             (value) => (
                               <option key={value} value={value}>
                                 {WELLHUB_PLAN_LABELS[value]} -{" "}
@@ -2395,7 +2454,7 @@ function UserInspectorSection() {
                       <button
                         type="button"
                         className="btn btn-outline w-full"
-                        disabled={savingAffiliation}
+                        disabled={affiliationSaveDisabled}
                         onClick={saveAffiliationSettings}
                       >
                         {savingAffiliation ? "Guardando..." : "Guardar afiliacion"}
@@ -2716,6 +2775,103 @@ function UserInspectorSection() {
     </table>
   </div>
 </div>
+
+              {/* HISTORIAL DE CREDITOS */}
+              <div className="p-4 border rounded-[var(--radius)]">
+                <h3 className="font-semibold mb-3">Historial de creditos</h3>
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-[900px] w-full text-sm border-collapse">
+                    <thead className="border-b text-left">
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Motivo</th>
+                        <th>Delta</th>
+                        <th>Detalle</th>
+                        <th>Saldo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {details.creditHistory.map((entry) => {
+                        const metadata = entry.metadata ?? {};
+                        const resultingBalance = metadataNumber(
+                          metadata.resultingAvailableBalance
+                        );
+                        const previousEntitlement = metadataNumber(
+                          metadata.previousMonthlyEntitlement
+                        );
+                        const newEntitlement = metadataNumber(
+                          metadata.newMonthlyEntitlement
+                        );
+                        const actorId = metadataText(metadata.adminActorId);
+                        const isWellhubChange =
+                          entry.reason === "ADMIN_WELLHUB_PLAN_CHANGE";
+                        const deltaText =
+                          entry.delta > 0 ? `+${entry.delta}` : String(entry.delta);
+
+                        return (
+                          <tr key={entry.id} className="border-b align-top">
+                            <td className="py-2 whitespace-nowrap">
+                              {formatAdminDate(entry.createdAt)}
+                            </td>
+                            <td className="py-2">
+                              {formatCreditReason(entry.reason)}
+                            </td>
+                            <td
+                              className={`py-2 font-medium ${
+                                entry.delta < 0
+                                  ? "text-red-600"
+                                  : entry.delta > 0
+                                    ? "text-green-600"
+                                    : ""
+                              }`}
+                            >
+                              {deltaText}
+                            </td>
+                            <td className="py-2">
+                              {isWellhubChange ? (
+                                <div className="space-y-1">
+                                  <div>
+                                    {metadataText(metadata.previousAffiliation)} /{" "}
+                                    {metadataText(metadata.previousWellhubPlan)} {"->"}{" "}
+                                    {metadataText(metadata.newAffiliation)} /{" "}
+                                    {metadataText(metadata.newWellhubPlan)}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Entitlement: {previousEntitlement ?? 0} {"->"}{" "}
+                                    {newEntitlement ?? 0} - Actor: {actorId} - Ciclo:{" "}
+                                    {metadataText(metadata.cycleId)}
+                                  </div>
+                                </div>
+                              ) : entry.packPurchase?.pack?.name ? (
+                                entry.packPurchase.pack.name
+                              ) : entry.booking?.class?.title ? (
+                                entry.booking.class.title
+                              ) : (
+                                "Sin referencia"
+                              )}
+                            </td>
+                            <td className="py-2">
+                              {resultingBalance != null ? resultingBalance : "-"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                      {details.creditHistory.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="py-3 text-center text-muted-foreground"
+                          >
+                            Sin historial
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
 
               
               {/* RESERVAS */}

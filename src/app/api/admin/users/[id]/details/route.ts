@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { normalizeAffiliationAndPlan } from "@/lib/affiliation";
-import { prisma, requireAdmin } from "../../../_utils";
+import {
+  CorporateCreditError,
+  applyAdminAffiliationAndWellhubSync,
+} from "@/lib/corporate-credits";
+import { prisma, getUserFromSession, requireAdmin } from "../../../_utils";
 
 export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
+const MAX_SERIALIZABLE_RETRIES = 3;
 
 function j(status: number, body: any) {
   return NextResponse.json(body, { status });
@@ -114,6 +119,41 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     },
   });
 
+  const creditHistory = await prisma.tokenLedger.findMany({
+    where: { userId: id },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    select: {
+      id: true,
+      delta: true,
+      reason: true,
+      metadata: true,
+      createdAt: true,
+      packPurchase: {
+        select: {
+          id: true,
+          pack: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+      booking: {
+        select: {
+          id: true,
+          class: {
+            select: {
+              title: true,
+              date: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
   // 5️⃣ Response
   return j(200, {
     ok: true,
@@ -149,6 +189,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       },
       packPurchase: b.packPurchase ?? null,
     })),
+
+    creditHistory: creditHistory.map((entry) => ({
+      id: entry.id,
+      delta: entry.delta,
+      reason: entry.reason,
+      metadata: entry.metadata,
+      createdAt: entry.createdAt,
+      packPurchase: entry.packPurchase ?? null,
+      booking: entry.booking ?? null,
+    })),
   });
 }
 
@@ -176,26 +226,82 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   }
 
   try {
-    const user = await prisma.user.update({
-      where: { id },
-      data: {
-        affiliation: normalized.affiliation,
-        wellhubPlan: normalized.wellhubPlan,
-        affiliationConfirmedAt: new Date(),
-      },
-      select: {
-        id: true,
-        affiliation: true,
-        wellhubPlan: true,
-        affiliationConfirmedAt: true,
-      },
-    });
+    const actor = await getUserFromSession(req);
+    let result: Awaited<
+      ReturnType<typeof applyAdminAffiliationAndWellhubSync>
+    > | null = null;
+
+    for (let attempt = 1; attempt <= MAX_SERIALIZABLE_RETRIES; attempt += 1) {
+      try {
+        result = await prisma.$transaction(
+          (tx) =>
+            applyAdminAffiliationAndWellhubSync(tx, {
+              userId: id,
+              nextAffiliation: normalized.affiliation,
+              nextWellhubPlan: normalized.wellhubPlan,
+              adminActorId: actor?.id ?? null,
+            }),
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+        );
+        break;
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2034" &&
+          attempt < MAX_SERIALIZABLE_RETRIES
+        ) {
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    if (!result) {
+      return j(409, {
+        ok: false,
+        message: "No se pudo sincronizar la afiliacion. Intenta de nuevo.",
+      });
+    }
 
     return j(200, {
       ok: true,
-      user,
+      user: result.user,
+      tokenBalance: result.tokenBalance,
+      wellhubSync: {
+        previousBalance: result.previousBalance,
+        tokenBalance: result.tokenBalance,
+        previousAffiliation: result.previousAffiliation,
+        newAffiliation: result.newAffiliation,
+        previousWellhubPlan: result.previousWellhubPlan,
+        newWellhubPlan: result.newWellhubPlan,
+        previousMonthlyEntitlement: result.previousMonthlyEntitlement,
+        newMonthlyEntitlement: result.newMonthlyEntitlement,
+        creditDeltaApplied: result.creditDeltaApplied,
+        traceabilityCreated: result.traceabilityCreated,
+        ledgerEntryId: result.ledgerEntryId,
+        cycleId: result.cycleId,
+      },
     });
   } catch (error) {
+    if (error instanceof CorporateCreditError && error.code === "USER_NOT_FOUND") {
+      return j(404, {
+        ok: false,
+        message: "Usuario no encontrado",
+      });
+    }
+
+    if (
+      error instanceof CorporateCreditError &&
+      error.code === "INSUFFICIENT_WELLHUB_CREDITS"
+    ) {
+      return j(409, {
+        ok: false,
+        message:
+          "No se pudo ajustar el saldo WellHub porque los creditos cambiaron durante la operacion.",
+      });
+    }
+
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2025"

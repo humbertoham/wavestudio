@@ -4,6 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/useSession";
+import {
+  WELLHUB_PLAN_CREDITS,
+  WELLHUB_PLAN_LABELS,
+  WELLHUB_PLANS,
+  type WellhubPlanValue,
+} from "@/lib/wellhub-config";
 
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_LENGTH = 64;
@@ -71,9 +77,7 @@ export default function RegisterPage() {
   const [phone, setPhone] = useState("");
   const [emergencyPhone, setEmergencyPhone] = useState("");
   const [affiliation, setAffiliation] = useState<"none" | "wellhub" | "totalpass">("none");
-  const [wellhubPlan, setWellhubPlan] = useState<
-    "" | "GOLD_PLUS" | "PLATINUM" | "DIAMOND" | "DIAMOND_PLUS"
-  >("");
+  const [wellhubPlan, setWellhubPlan] = useState<"" | WellhubPlanValue>("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -307,10 +311,12 @@ export default function RegisterPage() {
                   className="w-full rounded-xl border border-[color:var(--color-input)] bg-[color:var(--color-card)] px-4 py-2.5 text-[color:var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
                 >
                   <option value="">Selecciona tu plan</option>
-                  <option value="GOLD_PLUS">Gold+ - 2 creditos mensuales</option>
-                  <option value="PLATINUM">Platinum - 8 creditos mensuales</option>
-                  <option value="DIAMOND">Diamond - 30 creditos mensuales</option>
-                  <option value="DIAMOND_PLUS">Diamond+ - 30 creditos mensuales</option>
+                  {WELLHUB_PLANS.map((plan) => (
+                    <option key={plan} value={plan}>
+                      {WELLHUB_PLAN_LABELS[plan]} -{" "}
+                      {WELLHUB_PLAN_CREDITS[plan]} creditos mensuales
+                    </option>
+                  ))}
                 </select>
                 <p className="text-xs text-[color:var(--color-muted-foreground)]">
                   Este plan determina tus creditos mensuales automaticos.

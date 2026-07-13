@@ -4,20 +4,15 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { useSession } from "@/lib/useSession";
+import {
+  WELLHUB_PLAN_CREDITS,
+  WELLHUB_PLAN_LABELS,
+  WELLHUB_PLANS,
+  type WellhubPlanValue,
+} from "@/lib/wellhub-config";
 
 type Affiliation = "" | "NONE" | "WELLHUB" | "TOTALPASS";
-type WellhubPlan = "GOLD_PLUS" | "PLATINUM" | "DIAMOND" | "DIAMOND_PLUS";
-
-const WELLHUB_PLANS: Array<{
-  value: WellhubPlan;
-  label: string;
-  credits: number;
-}> = [
-  { value: "GOLD_PLUS", label: "Gold+", credits: 2 },
-  { value: "PLATINUM", label: "Platinum", credits: 8 },
-  { value: "DIAMOND", label: "Diamond", credits: 30 },
-  { value: "DIAMOND_PLUS", label: "Diamond+", credits: 30 },
-];
+type WellhubPlan = WellhubPlanValue;
 
 function readApiMessage(payload: unknown, fallback: string) {
   if (
@@ -170,8 +165,9 @@ function AffiliationOnboardingInner() {
                 >
                   <option value="">Selecciona tu plan</option>
                   {WELLHUB_PLANS.map((plan) => (
-                    <option key={plan.value} value={plan.value}>
-                      {plan.label} - {plan.credits} creditos mensuales
+                    <option key={plan} value={plan}>
+                      {WELLHUB_PLAN_LABELS[plan]} -{" "}
+                      {WELLHUB_PLAN_CREDITS[plan]} creditos mensuales
                     </option>
                   ))}
                 </select>

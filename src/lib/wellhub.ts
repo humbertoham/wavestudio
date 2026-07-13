@@ -1,22 +1,20 @@
 import { Affiliation, Prisma, WellhubPlan } from "@prisma/client";
 
+import {
+  WELLHUB_PLAN_CREDITS as SHARED_WELLHUB_PLAN_CREDITS,
+  WELLHUB_PLAN_LABELS as SHARED_WELLHUB_PLAN_LABELS,
+  WELLHUB_PLANS as SHARED_WELLHUB_PLANS,
+} from "@/lib/wellhub-config";
+
 export const LEGACY_WELLHUB_PACK_ID = "corp_wellhub_monthly";
 export const TOTALPASS_PACK_ID = "corp_totalpass_monthly";
 export const TOTALPASS_MONTHLY_CREDITS = 10;
 
-export const WELLHUB_PLAN_LABELS: Record<WellhubPlan, string> = {
-  GOLD_PLUS: "Gold+",
-  PLATINUM: "Platinum",
-  DIAMOND: "Diamond",
-  DIAMOND_PLUS: "Diamond+",
-};
+export const WELLHUB_PLAN_LABELS =
+  SHARED_WELLHUB_PLAN_LABELS as Record<WellhubPlan, string>;
 
-export const WELLHUB_PLAN_CREDITS: Record<WellhubPlan, number> = {
-  GOLD_PLUS: 2,
-  PLATINUM: 8,
-  DIAMOND: 30,
-  DIAMOND_PLUS: 30,
-};
+export const WELLHUB_PLAN_CREDITS =
+  SHARED_WELLHUB_PLAN_CREDITS as Record<WellhubPlan, number>;
 
 export const WELLHUB_PLAN_PACK_IDS: Record<WellhubPlan, string> = {
   GOLD_PLUS: "corp_wellhub_gold_plus_monthly",
@@ -25,9 +23,7 @@ export const WELLHUB_PLAN_PACK_IDS: Record<WellhubPlan, string> = {
   DIAMOND_PLUS: "corp_wellhub_diamond_plus_monthly",
 };
 
-export const WELLHUB_PLANS = Object.keys(
-  WELLHUB_PLAN_LABELS
-) as WellhubPlan[];
+export const WELLHUB_PLANS = [...SHARED_WELLHUB_PLANS] as WellhubPlan[];
 
 export const WELLHUB_INTERNAL_PACK_IDS = [
   LEGACY_WELLHUB_PACK_ID,
