@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdmin, requireClassManager } from "../../admin/_utils";
+import { getNewUserBookingIds } from "@/lib/new-user";
 
 type Ctx = {
   params: Promise<{ id: string }>;
@@ -59,44 +60,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     );
   }
 
-  const bookedUserIds = Array.from(
-    new Set(
-      cls.bookings
-        .map((booking) => booking.userId)
-        .filter((userId): userId is string => Boolean(userId))
-    )
+  const newUserBookingIds = await getNewUserBookingIds(
+    prisma,
+    cls.bookings,
+    cls.isCanceled
   );
 
-  const bookingHistory = bookedUserIds.length
-    ? await prisma.booking.findMany({
-        where: {
-          userId: { in: bookedUserIds },
-        },
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        select: {
-          id: true,
-          userId: true,
-        },
-      })
-    : [];
-
-  const firstBookingIdByUserId = new Map<string, string>();
-  for (const booking of bookingHistory) {
-    if (booking.userId && !firstBookingIdByUserId.has(booking.userId)) {
-      firstBookingIdByUserId.set(booking.userId, booking.id);
-    }
-  }
-
-  // NEW USER is tied to the first-ever reservation row, even if that first
-  // reservation was later canceled, so later bookings do not show the label.
   return NextResponse.json({
     ...cls,
-    bookings: cls.bookings.map((booking) => ({
-      ...booking,
-      isFirstBooking:
-        !!booking.userId &&
-        firstBookingIdByUserId.get(booking.userId) === booking.id,
-    })),
+    bookings: cls.bookings.map((booking) => {
+      const isNewUser = newUserBookingIds.has(booking.id);
+
+      return {
+        ...booking,
+        isNewUser,
+        // Backward-compatible alias for existing class-management clients.
+        isFirstBooking: isNewUser,
+      };
+    }),
   });
 }
 
