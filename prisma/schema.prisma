@@ -72,6 +72,11 @@ enum CheckoutStatus {
   CANCELED
 }
 
+enum ChallengePointReason {
+  ATTENDANCE_AWARD
+  ATTENDANCE_REVERSAL
+}
+
 /**
  * =========================
  * Modelos base
@@ -97,6 +102,12 @@ model User {
   payments      Payment[]
   checkoutLinks CheckoutLink[]
   bookingBlockLogs BookingBlockLog[]
+  challengeTotals ChallengeUserTotal[]
+  challengeAwards ChallengeBookingAward[]
+  challengePointLedger ChallengePointLedger[] @relation("ChallengePointUser")
+  challengePointActions ChallengePointLedger[] @relation("ChallengePointActor")
+  challengeActivations Challenge[] @relation("ChallengeActivatedBy")
+  challengeDeactivations Challenge[] @relation("ChallengeDeactivatedBy")
 
 
   // password reset
@@ -145,7 +156,17 @@ model Class {
   cancelBeforeMin Int? // minutos antes del inicio para permitir reembolso de token
   waitlist        Waitlist[]
 
+  // Eligibility is snapshotted only when the class is created while active.
+  challenge                    Challenge? @relation(fields: [challengeId], references: [id])
+  challengeId                  String?
+  challengePoints              Int?
+  challengeEligibleAt          DateTime?
+  challengeActivationVersion   Int?
+  challengeAwards              ChallengeBookingAward[]
+  challengePointLedger         ChallengePointLedger[]
+
   @@index([date])
+  @@index([challengeId])
 }
 
 model Booking {
@@ -174,6 +195,8 @@ model Booking {
   refundToken Boolean?
 
   ledgerEntries TokenLedger[]
+  challengeAwards ChallengeBookingAward[]
+  challengePointLedger ChallengePointLedger[]
 
   // IMPORTANT:
   // A PostgreSQL CHECK constraint is created manually in SQL migration
@@ -184,6 +207,100 @@ model Booking {
   // ("userId", "classId") WHERE "status" = 'ACTIVE' AND "userId" IS NOT NULL
   @@index([classId])
   @@index([userId])
+}
+
+/**
+ * =========================
+ * Challenge
+ * =========================
+ */
+model Challenge {
+  id                String   @id @default(cuid())
+  key               String   @unique
+  name              String
+  isActive          Boolean  @default(false)
+  activationVersion Int      @default(0)
+  activatedAt       DateTime?
+  deactivatedAt     DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  activatedBy   User?   @relation("ChallengeActivatedBy", fields: [activatedById], references: [id], onDelete: SetNull)
+  activatedById String?
+  deactivatedBy   User? @relation("ChallengeDeactivatedBy", fields: [deactivatedById], references: [id], onDelete: SetNull)
+  deactivatedById String?
+
+  classes     Class[]
+  userTotals  ChallengeUserTotal[]
+  awards      ChallengeBookingAward[]
+  pointLedger ChallengePointLedger[]
+
+  @@index([isActive])
+}
+
+model ChallengeUserTotal {
+  challenge   Challenge @relation(fields: [challengeId], references: [id])
+  challengeId String
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+  points      Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@id([challengeId, userId])
+  @@index([challengeId, points])
+  @@index([userId, challengeId])
+}
+
+// Mutable per-booking state supports safe reversal and re-award cycles. The
+// immutable audit history lives in ChallengePointLedger.
+model ChallengeBookingAward {
+  id             String    @id @default(cuid())
+  challenge      Challenge @relation(fields: [challengeId], references: [id])
+  challengeId    String
+  booking        Booking   @relation(fields: [bookingId], references: [id])
+  bookingId      String
+  class          Class     @relation(fields: [classId], references: [id])
+  classId        String
+  user           User      @relation(fields: [userId], references: [id])
+  userId         String
+  pointsSnapshot Int
+  cycle          Int       @default(1)
+  isAwarded      Boolean   @default(true)
+  awardedAt      DateTime  @default(now())
+  reversedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([challengeId, bookingId])
+  @@index([challengeId, userId])
+  @@index([classId])
+}
+
+model ChallengePointLedger {
+  id             String               @id @default(cuid())
+  challenge      Challenge            @relation(fields: [challengeId], references: [id])
+  challengeId    String
+  booking        Booking              @relation(fields: [bookingId], references: [id])
+  bookingId      String
+  class          Class                @relation(fields: [classId], references: [id])
+  classId        String
+  user           User                 @relation("ChallengePointUser", fields: [userId], references: [id])
+  userId         String
+  actor          User?                @relation("ChallengePointActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorUserId     String?
+  delta          Int
+  reason         ChallengePointReason
+  pointsSnapshot Int
+  cycle          Int
+  idempotencyKey String               @unique
+  metadata       Json?
+  createdAt      DateTime             @default(now())
+
+  @@unique([challengeId, bookingId, reason, cycle])
+  @@index([challengeId, userId, createdAt])
+  @@index([challengeId, classId])
+  @@index([bookingId])
 }
 
 

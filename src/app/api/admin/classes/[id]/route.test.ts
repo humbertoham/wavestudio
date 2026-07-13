@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
     waitlist,
     class: classDelegate,
     tokenLedger,
+    $executeRaw: vi.fn(),
   };
 
   return {

@@ -6,6 +6,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { FiMessageCircle } from "react-icons/fi";
 import { getWhatsAppHref } from "@/lib/whatsapp";
 import {
+  confirmChallengeLifecycleAction,
+  shouldShowChallengePointControl,
+} from "@/lib/challenge-ui";
+import {
   WELLHUB_PLAN_CREDITS,
   WELLHUB_PLAN_LABELS,
   WELLHUB_PLANS,
@@ -120,7 +124,8 @@ type AdminTab =
   | "packs"
   | "purchases"
   | "revenue"
-  | "users";
+  | "users"
+  | "challenge";
 type PurchasePaymentStatusFilter =
   | "ALL"
   | "PENDING"
@@ -170,7 +175,8 @@ function isAdminTab(value: string | null): value is AdminTab {
     value === "packs" ||
     value === "purchases" ||
     value === "revenue" ||
-    value === "users"
+    value === "users" ||
+    value === "challenge"
   );
 }
 
@@ -224,6 +230,32 @@ type ClassItem = {
   id: string; title: string; focus: string; date: string; durationMin: number; capacity: number;
   instructorId: string; instructor?: { id: string; name: string };
   isCanceled?: boolean; // ← agregar
+  challengeId?: string | null;
+  challengePoints?: number | null;
+  challengeEligibleAt?: string | null;
+  challengeActivationVersion?: number | null;
+  challengePointsLocked?: boolean;
+};
+type ChallengeAdminState = {
+  id: string | null;
+  name: string;
+  active: boolean;
+  activationVersion: number;
+  activatedAt: string | null;
+  deactivatedAt: string | null;
+};
+type ChallengeLeaderboard = {
+  items: Array<{
+    rank: number;
+    id: string;
+    name: string;
+    email: string;
+    points: number;
+  }>;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 };
 type Pack = {
   id: string;
@@ -392,7 +424,8 @@ function AdminPageContent() {
     ["packs", "Paquetes"],
     ["purchases", "Compras"],
     ["revenue", "Ingresos"],
-     ["users", "Usuarios"],
+    ["users", "Usuarios"],
+    ["challenge", "CHALLENGE"],
   ];
 
   function selectTab(next: AdminTab) {
@@ -496,6 +529,15 @@ function AdminPageContent() {
 >
   {tab === "users" && <UserInspectorSection />}
 </section>
+      <section
+        id="panel-challenge"
+        role="tabpanel"
+        hidden={tab !== "challenge"}
+        aria-labelledby="challenge"
+        className="space-y-6"
+      >
+        {tab === "challenge" && <ChallengeSection />}
+      </section>
     </main>
   );
 }
@@ -503,9 +545,200 @@ function AdminPageContent() {
 /* ---------------------------------------------------
    CLASES — listar / crear / editar por fila / eliminar
 ---------------------------------------------------- */
+function ChallengeSection() {
+  const [page, setPage] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const status = useSWR<{ challenge: ChallengeAdminState }>(
+    "/api/admin/challenge",
+    fetcher
+  );
+  const challenge = status.data?.challenge;
+  const leaderboard = useSWR<ChallengeLeaderboard>(
+    challenge?.active
+      ? "/api/admin/challenge/leaderboard?page=" + page + "&pageSize=25"
+      : null,
+    fetcher
+  );
+
+  async function changeChallenge(method: "POST" | "DELETE") {
+    if (
+      !confirmChallengeLifecycleAction(
+        method === "POST" ? "activate" : "deactivate",
+        (message) => window.confirm(message)
+      )
+    ) return;
+
+    setBusy(true);
+    setNotice(null);
+    setActionError(null);
+
+    try {
+      const response = await fetch("/api/admin/challenge", {
+        method,
+        credentials: "include",
+      });
+      if (!response.ok) {
+        throw new Error(
+          await readApiMessage(response, "No se pudo actualizar el Challenge.")
+        );
+      }
+
+      setPage(1);
+      setNotice(
+        method === "POST"
+          ? "Challenge activado correctamente."
+          : "Challenge desactivado. Los puntos y el historial se conservaron."
+      );
+      await status.mutate();
+      await leaderboard.mutate();
+      window.dispatchEvent(new Event("challenge-updated"));
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo actualizar el Challenge."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (status.isLoading) {
+    return <Section><p className="text-sm text-muted-foreground">Cargando Challenge...</p></Section>;
+  }
+
+  if (status.error || !challenge) {
+    return <Section><p className="text-sm text-red-600">No se pudo cargar el Challenge.</p></Section>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <Section>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold">CHALLENGE</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Estado actual:{" "}
+              <span className={challenge.active ? "font-bold text-green-600" : "font-bold text-gray-600"}>
+                {challenge.active ? "Activo" : "Inactivo"}
+              </span>
+            </p>
+            {challenge.active && challenge.activatedAt && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                Activado: {formatAdminDate(challenge.activatedAt)} · periodo {challenge.activationVersion}
+              </p>
+            )}
+          </div>
+          {challenge.active ? (
+            <button
+              className="btn-danger"
+              type="button"
+              disabled={busy}
+              onClick={() => changeChallenge("DELETE")}
+            >
+              {busy ? "Desactivando..." : "Desactivar Challenge"}
+            </button>
+          ) : (
+            <button
+              className="btn-primary"
+              type="button"
+              disabled={busy}
+              onClick={() => changeChallenge("POST")}
+            >
+              {busy ? "Activando..." : "Activar Challenge"}
+            </button>
+          )}
+        </div>
+
+        <p className="mt-5 text-sm text-muted-foreground">
+          {challenge.active
+            ? "Solo las clases creadas durante un periodo activo son elegibles. Inician en 1 punto y su valor se bloquea después de la primera asignación."
+            : "Al activarlo se habilitan los puntos por asistencia, la configuración de puntos para clases nuevas elegibles y la visualización de puntos en perfiles."}
+        </p>
+        {notice && <p role="status" className="mt-4 text-sm font-medium text-green-700">{notice}</p>}
+        {actionError && <p role="alert" className="mt-4 text-sm text-red-600">{actionError}</p>}
+      </Section>
+
+      {challenge.active && (
+        <Section>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold">Leaderboard privado</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Usuarios registrados, ordenados de mayor a menor puntaje.
+              </p>
+            </div>
+            <span className="text-sm text-muted-foreground">
+              {leaderboard.data?.total ?? 0} usuarios
+            </span>
+          </div>
+
+          {leaderboard.isLoading && <p className="mt-5 text-sm text-muted-foreground">Cargando leaderboard...</p>}
+          {leaderboard.error && <p className="mt-5 text-sm text-red-600">No se pudo cargar el leaderboard.</p>}
+
+          {leaderboard.data && (
+            <>
+              <div className="mt-5 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="border-b text-left">
+                    <tr>
+                      <th className="py-2 pr-4">Posición</th>
+                      <th className="py-2 pr-4">Usuario</th>
+                      <th className="py-2 pr-4">Correo</th>
+                      <th className="py-2 text-right">Puntos</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leaderboard.data.items.map((item) => (
+                      <tr key={item.id} className="border-b">
+                        <td className="py-2 pr-4">#{item.rank}</td>
+                        <td className="py-2 pr-4 font-medium">{item.name}</td>
+                        <td className="py-2 pr-4 text-muted-foreground">{item.email}</td>
+                        <td className="py-2 text-right font-bold">{item.points}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <button
+                  className="btn-outline"
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  Anterior
+                </button>
+                <span className="text-sm text-muted-foreground">
+                  Página {leaderboard.data.page} de {leaderboard.data.totalPages}
+                </span>
+                <button
+                  className="btn-outline"
+                  type="button"
+                  disabled={page >= leaderboard.data.totalPages}
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  Siguiente
+                </button>
+              </div>
+            </>
+          )}
+        </Section>
+      )}
+    </div>
+  );
+}
+
 function ClassesSection() {
   const { data, error, isLoading, mutate } = useSWR<{items: ClassItem[]}>("/api/admin/classes", fetcher);
   const { data: instructors } = useSWR<{items: Instructor[]}>("/api/admin/instructors", fetcher);
+  const { data: challengeData } = useSWR<{ challenge: ChallengeAdminState }>(
+    "/api/admin/challenge",
+    fetcher
+  );
 
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState<Partial<ClassItem> & { repeatNextMonth?: boolean }>({
@@ -614,7 +847,7 @@ function ClassesSection() {
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="text-left border-b">
-            <tr><th>Título</th><th>Enfoque</th><th>Fecha</th><th>Dur.</th><th>Cupo</th><th>Instructor</th><th className="text-right">Acciones</th></tr>
+            <tr><th>Título</th><th>Enfoque</th><th>Fecha</th><th>Dur.</th><th>Cupo</th><th>Instructor</th><th>Challenge</th><th className="text-right">Acciones</th></tr>
           </thead>
           <tbody>
             {filtered.map(c=>(
@@ -622,12 +855,13 @@ function ClassesSection() {
                 key={c.id}
                 item={c}
                 instructors={instructors?.items ?? []}
+                challengeActive={challengeData?.challenge.active === true}
                 onDeleted={()=>deleteClass(c.id)}
                 onSaved={()=>mutate()}
               />
             ))}
             {!isLoading && filtered.length===0 && (
-              <tr><td colSpan={7} className="py-3 text-center text-gray-500">Sin resultados</td></tr>
+              <tr><td colSpan={8} className="py-3 text-center text-gray-500">Sin resultados</td></tr>
             )}
           </tbody>
         </table>
@@ -638,9 +872,10 @@ function ClassesSection() {
 
 
 function EditableClassRow({
-  item, instructors, onDeleted, onSaved
+  item, instructors, challengeActive, onDeleted, onSaved
 }: {
   item: ClassItem; instructors: Instructor[];
+  challengeActive: boolean;
   onDeleted: () => void; onSaved: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -653,6 +888,31 @@ function EditableClassRow({
     instructorId: item.instructorId
   });
   const [saving, setSaving] = useState(false);
+  const [challengePoints, setChallengePoints] = useState(item.challengePoints ?? 1);
+  const [savingChallengePoints, setSavingChallengePoints] = useState(false);
+
+  async function saveChallengePoints() {
+    if (!Number.isInteger(challengePoints) || challengePoints < 1 || challengePoints > 10) {
+      alert("Los puntos del Challenge deben ser un número entero entre 1 y 10.");
+      return;
+    }
+
+    setSavingChallengePoints(true);
+    const response = await fetch(`/api/admin/classes/${item.id}/challenge-points`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ points: challengePoints }),
+    });
+    setSavingChallengePoints(false);
+
+    if (!response.ok) {
+      alert(await readApiMessage(response, "No se pudieron guardar los puntos del Challenge."));
+      return;
+    }
+
+    onSaved();
+  }
 
   async function save() {
     setSaving(true);
@@ -704,6 +964,45 @@ function EditableClassRow({
               {instructors.map(i=> <option key={i.id} value={i.id}>{i.name}</option>)}
             </select>
           ) : (item.instructor?.name ?? "—")}
+      </td>
+      <td className="min-w-48 px-2 py-2">
+        {shouldShowChallengePointControl({
+          active: challengeActive,
+          challengeId: item.challengeId,
+          eligibleAt: item.challengeEligibleAt,
+        }) ? (
+          <div>
+            <label className="text-xs font-semibold" htmlFor={`challenge-points-${item.id}`}>
+              Puntos del Challenge
+            </label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                id={`challenge-points-${item.id}`}
+                className="input w-20"
+                type="number"
+                min={1}
+                max={10}
+                step={1}
+                value={challengePoints}
+                disabled={item.challengePointsLocked || savingChallengePoints}
+                onChange={(event) => setChallengePoints(Number(event.target.value))}
+              />
+              <button
+                type="button"
+                className="btn-outline"
+                disabled={item.challengePointsLocked || savingChallengePoints || challengePoints === item.challengePoints}
+                onClick={saveChallengePoints}
+              >
+                {savingChallengePoints ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {item.challengePointsLocked
+                ? "Valor bloqueado después de la primera asignación."
+                : "Esta clase otorgará esta cantidad al confirmar asistencia."}
+            </p>
+          </div>
+        ) : null}
       </td>
       <td className="py-2">
         <div className="flex justify-end gap-2">

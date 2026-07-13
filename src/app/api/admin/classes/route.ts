@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdmin } from "../_utils";
 import { zonedTimeToUtc, utcToZonedTime } from "date-fns-tz";
 import { addDays } from "date-fns";
+import {
+  getClassChallengeSnapshot,
+  runChallengeTransaction,
+} from "@/lib/challenge";
 
 export const runtime = "nodejs";
 
@@ -53,11 +57,20 @@ export async function GET(req: NextRequest) {
       },
       isCanceled: false, // opcional pero recomendable
     },
-    include: { instructor: true },
+    include: {
+      instructor: true,
+      _count: { select: { challengeAwards: true } },
+    },
     orderBy: { date: "asc" }, // 🔥 ahora ascendente tiene más sentido
   });
 
-  return NextResponse.json({ items });
+  return NextResponse.json({
+    items: items.map((item) => ({
+      ...item,
+      challengePointsLocked: item._count.challengeAwards > 0,
+      _count: undefined,
+    })),
+  });
 }
 
 
@@ -74,7 +87,8 @@ export async function POST(req: NextRequest) {
   const baseUtc = localStringToUtc(body.date);
   const safeFocus = body.focus ?? "";
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await runChallengeTransaction(async (tx) => {
+    const challengeSnapshot = await getClassChallengeSnapshot(tx);
     const created = await tx.class.create({
       data: {
         title: body.title,
@@ -83,6 +97,7 @@ export async function POST(req: NextRequest) {
         durationMin: body.durationMin,
         capacity: body.capacity,
         instructorId: body.instructorId,
+        ...challengeSnapshot,
       },
     });
 
@@ -98,6 +113,7 @@ export async function POST(req: NextRequest) {
         durationMin: body.durationMin,
         capacity: body.capacity,
         instructorId: body.instructorId,
+        ...challengeSnapshot,
       }));
 
       await tx.class.createMany({ data });

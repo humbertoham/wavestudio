@@ -2,6 +2,7 @@
 import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthFromRequest } from "@/lib/auth";
+import { getChallengeStatus } from "@/lib/challenge";
 
 export const runtime = "nodejs";
 
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest) {
           affiliation: "NONE",
           wellhubPlan: null,
           bookingBlocked: false,
+          challenge: { active: false, points: 0 },
         },
         { status: 200 }
       );
@@ -38,6 +40,7 @@ export async function GET(req: NextRequest) {
           affiliation: "NONE",
           wellhubPlan: null,
           bookingBlocked: false,
+          challenge: { active: false, points: 0 },
         },
         { status: 200 }
       );
@@ -46,15 +49,18 @@ export async function GET(req: NextRequest) {
     const now = new Date();
 
     // ✅ SALDO REAL DESDE PACKS
-    const packs = await prisma.packPurchase.findMany({
-      where: {
-        userId,
-        expiresAt: { gt: now },
-        classesLeft: { gt: 0 },
-        OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
-      },
-      select: { classesLeft: true },
-    });
+    const [packs, challenge] = await Promise.all([
+      prisma.packPurchase.findMany({
+        where: {
+          userId,
+          expiresAt: { gt: now },
+          classesLeft: { gt: 0 },
+          OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
+        },
+        select: { classesLeft: true },
+      }),
+      getChallengeStatus(userId),
+    ]);
 
     const tokens = packs.reduce((sum, p) => sum + p.classesLeft, 0);
 
@@ -65,6 +71,10 @@ export async function GET(req: NextRequest) {
         affiliation: user.affiliation ?? "NONE",
         wellhubPlan: user.wellhubPlan ?? null,
         bookingBlocked: user.bookingBlocked,
+        challenge: {
+          active: challenge.active,
+          points: challenge.points,
+        },
       },
       { status: 200 }
     );
@@ -78,6 +88,7 @@ export async function GET(req: NextRequest) {
         affiliation: "NONE",
         wellhubPlan: null,
         bookingBlocked: false,
+        challenge: { active: false, points: 0 },
         error: "TOKENS_FETCH_FAILED",
       },
       { status: 500 }

@@ -416,6 +416,7 @@ export default function ClassAdminPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [challengeNotice, setChallengeNotice] = useState<string | null>(null);
 
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
@@ -592,18 +593,32 @@ export default function ClassAdminPage() {
         throw new Error(await readErrorMessage(res, "No se pudo marcar asistencia."));
       }
 
+      const result = (await res.json()) as {
+        attended: boolean;
+        challenge?: { delta?: number; points?: number };
+      };
+
       setCls((prev) =>
         prev
           ? {
               ...prev,
               bookings: prev.bookings.map((booking) =>
                 booking.id === attendee.bookingId
-                  ? { ...booking, attended: !attendee.attended }
+                  ? { ...booking, attended: result.attended }
                   : booking
               ),
             }
           : prev
       );
+      const delta = result.challenge?.delta ?? 0;
+      setChallengeNotice(
+        delta > 0
+          ? `Se asignaron ${delta} punto${delta === 1 ? "" : "s"} del Challenge.`
+          : delta < 0
+            ? `Se revirtieron ${Math.abs(delta)} punto${Math.abs(delta) === 1 ? "" : "s"} del Challenge.`
+            : null
+      );
+      window.dispatchEvent(new Event("challenge-updated"));
     } catch (error) {
       alert(
         error instanceof Error ? error.message : "No se pudo marcar asistencia."
@@ -864,6 +879,11 @@ export default function ClassAdminPage() {
 
         <section className="mt-8">
           <h2 className="mb-4 font-display text-xl font-bold">Usuarios en clase</h2>
+          {challengeNotice && (
+            <p className="mb-4 text-sm font-medium text-green-700" role="status">
+              {challengeNotice}
+            </p>
+          )}
 
           <div className="grid gap-3">
             {attendees.map((attendee) => {
