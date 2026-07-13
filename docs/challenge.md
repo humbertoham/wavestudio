@@ -72,3 +72,22 @@ Remove-Item Env:RUN_CHALLENGE_INTEGRATION
 ```
 
 The integration suite creates uniquely named fixtures, verifies concurrency and rollback behavior against PostgreSQL, and removes all of its users, classes, bookings, totals, awards, and ledger entries afterward.
+
+## Manual UAT checklist
+
+Use controlled UAT-only users/classes and remove them after verification.
+
+1. While inactive, confirm the admin `CHALLENGE` tab shows `Inactivo`, an activation button, no leaderboard, and that an existing class has no point control.
+2. Select `Activar Challenge`; verify the Spanish confirmation dialog before accepting it.
+3. Confirm the active status, activation time, concise eligibility explanation, and private leaderboard appear.
+4. Create a future class through the admin class form and confirm it shows `Puntos del Challenge` with default `1`.
+5. Change the new class to `3`, save, and verify values outside integer range 1–10 are rejected.
+6. Add a registered UAT user with booking credits, mark attendance in the existing class-management view, and confirm the 3-point success status.
+7. Confirm the leaderboard shows that user with 3 points and deterministic ordering.
+8. Unmark attendance and confirm the 3-point reversal status; mark it again and confirm a single re-award.
+9. Sign in as the user and verify unchanged remaining booking credits and `3 puntos` with the accessible star on `/perfil` and `/clases`.
+10. Verify the desktop user menu and mobile menu show `¿Cómo funciona el Challenge?`; open it and review all centralized Spanish rules. Confirm no leaderboard appears there.
+11. Return as admin, deactivate through the Spanish confirmation, and confirm status becomes inactive and the leaderboard disappears.
+12. Return as the user and confirm the point badge and navbar link are hidden and direct `/challenge` access shows the paused state.
+13. Inspect UAT data: the preexisting class remains ineligible, the eligible class stores 3, the total is 3, award state is cycle 2/active, ledger history is `+3, -3, +3`, and token history contains only normal booking activity.
+14. Remove every UAT fixture, confirm the Challenge is inactive, and run `npm.cmd run db:status:uat`.
