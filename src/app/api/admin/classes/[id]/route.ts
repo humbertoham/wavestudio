@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdmin, requireClassManager } from "../../_utils";
 import { Prisma } from "@prisma/client";
+import {
+  countActiveClassDependencies,
+  inactiveBookingWhere,
+} from "@/lib/class-deletion";
 
 export const runtime = "nodejs";
 
@@ -45,53 +49,121 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 
   const { id } = await ctx.params;
 
-  // 1) Validación rápida: ¿hay dependencias?
-  const [bookings, waiters] = await Promise.all([
-    prisma.booking.count({ where: { classId: id, status: "ACTIVE" } }),
-    prisma.waitlist.count({ where: { classId: id } }),
-  ]);
+  const maxAttempts = 3;
 
-  if (bookings > 0 || waiters > 0) {
-    return j(409, {
-      ok: false,
-      code: "CLASS_HAS_DEPENDENCIES",
-      message:
-        "No se puede eliminar la clase porque tiene reservas o lista de espera. Cancélala (isCanceled=true) o elimina primero las dependencias.",
-      details: { bookings, waitlist: waiters },
-    });
-  }
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const result = await prisma.$transaction(
+        async (tx) => {
+          const cls = await tx.class.findUnique({
+            where: { id },
+            select: { id: true },
+          });
 
-  try {
-    // 2) Intento de hard delete (si no hay dependencias, esto pasa sin problema)
-    await prisma.class.delete({ where: { id } });
-    return NextResponse.json({ ok: true, hardDeleted: true });
-  } catch (e: unknown) {
-    // 3) Si truena por FK, hacemos soft delete en su lugar
-    if (
-      e instanceof Prisma.PrismaClientKnownRequestError &&
-      e.code === "P2003" // Foreign key constraint failed
-    ) {
-      // Soft delete: marcar cancelada para que no aparezca como disponible
-      return j(409, {
+          if (!cls) return { outcome: "not_found" as const };
+
+          const dependencies = await countActiveClassDependencies(tx, id);
+
+          if (
+            dependencies.activeBookingCount > 0 ||
+            dependencies.activeWaitlistCount > 0
+          ) {
+            return {
+              outcome: "blocked" as const,
+              ...dependencies,
+            };
+          }
+
+          const inactiveBookingCount = await tx.booking.count({
+            where: inactiveBookingWhere(id),
+          });
+
+          if (inactiveBookingCount > 0) {
+            // Preserve cancelled bookings, attendance, refunds, and ledger/audit
+            // relations. isCanceled is the existing flag excluded by the admin
+            // list and checked by every booking and waitlist creation flow.
+            await tx.class.update({
+              where: { id },
+              data: { isCanceled: true },
+            });
+
+            return {
+              outcome: "archived" as const,
+              inactiveBookingCount,
+            };
+          }
+
+          await tx.class.delete({ where: { id } });
+          return { outcome: "deleted" as const };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
+
+      if (result.outcome === "not_found") {
+        return j(404, {
+          ok: false,
+          code: "CLASS_NOT_FOUND",
+          message: "La clase no existe o ya fue eliminada.",
+        });
+      }
+
+      if (result.outcome === "blocked") {
+        return j(409, {
+          ok: false,
+          code: "CLASS_HAS_ACTIVE_DEPENDENCIES",
+          message:
+            "No se puede eliminar la clase porque todavía tiene reservas activas o personas en lista de espera.",
+          details: {
+            activeBookingCount: result.activeBookingCount,
+            activeWaitlistCount: result.activeWaitlistCount,
+          },
+        });
+      }
+
+      if (result.outcome === "archived") {
+        return NextResponse.json({
+          ok: true,
+          hardDeleted: false,
+          archived: true,
+          preservedInactiveBookingCount: result.inactiveBookingCount,
+        });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        hardDeleted: true,
+        archived: false,
+      });
+    } catch (error: unknown) {
+      const concurrentWrite =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.code === "P2034" || error.code === "P2003");
+
+      if (concurrentWrite && attempt < maxAttempts) continue;
+
+      if (concurrentWrite) {
+        return j(409, {
+          ok: false,
+          code: "CLASS_DELETE_CONFLICT",
+          message:
+            "La clase cambió mientras se intentaba eliminar. Intenta nuevamente.",
+        });
+      }
+
+      console.error("DELETE /classes/:id error", error);
+      return j(500, {
         ok: false,
-        code: "CLASS_HAS_DEPENDENCIES",
-        reason: "FOREIGN_KEY_CONSTRAINT",
-        legacyMessage:
-          "La clase tenía dependencias (reservas/lista de espera). Se marcó como cancelada (isCanceled=true).",
-        message:
-          "No se puede eliminar la clase porque tiene reservas o lista de espera.",
-        dependencies: { bookings, waitlist: waiters },
+        code: "UNEXPECTED_ERROR",
+        message: "No se pudo eliminar la clase.",
       });
     }
-
-    // Otros errores: regresarlos con detalle para depurar sin 500 silencioso
-    console.error("DELETE /classes/:id error", e);
-    return j(500, {
-      ok: false,
-      code: "UNEXPECTED_ERROR",
-      message: "No se pudo eliminar la clase.",
-    });
   }
+
+  return j(409, {
+    ok: false,
+    code: "CLASS_DELETE_CONFLICT",
+    message: "La clase cambió mientras se intentaba eliminar. Intenta nuevamente.",
+  });
 }
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
