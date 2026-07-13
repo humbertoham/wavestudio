@@ -5,6 +5,7 @@ import {
   countActiveClassDependencies,
   inactiveBookingWhere,
 } from "@/lib/class-deletion";
+import { lockChallengeTransaction } from "@/lib/challenge";
 
 export const runtime = "nodejs";
 
@@ -28,12 +29,19 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const raw = await req.json();
 
   // Si viene "date" en string, conviértelo a Date
-  const { date, ...rest } = raw ?? {};
-  const data: any = { ...rest };
+  const { title, focus, durationMin, capacity, instructorId, date } = raw ?? {};
+  const data: Prisma.ClassUpdateInput = {};
+  if (title !== undefined) data.title = String(title);
+  if (focus !== undefined) data.focus = String(focus);
+  if (durationMin !== undefined) data.durationMin = Number(durationMin);
+  if (capacity !== undefined) data.capacity = Number(capacity);
+  if (instructorId !== undefined) {
+    data.instructor = { connect: { id: String(instructorId) } };
+  }
   if (date) {
-  const localLike = date.replace("T", " ");
-  data.date = zonedTimeToUtc(localLike, USER_TZ);
-}
+    const localLike = String(date).replace("T", " ");
+    data.date = zonedTimeToUtc(localLike, USER_TZ);
+  }
 
   const item = await prisma.class.update({
     where: { id },
@@ -55,6 +63,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     try {
       const result = await prisma.$transaction(
         async (tx) => {
+          await lockChallengeTransaction(tx);
           const cls = await tx.class.findUnique({
             where: { id },
             select: { id: true },

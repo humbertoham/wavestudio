@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
     user: { findUnique: vi.fn() },
     booking: { count: vi.fn() },
     class: { update: vi.fn() },
+    $executeRaw: vi.fn(),
+    $transaction: vi.fn(),
   },
 }));
 
@@ -46,6 +48,9 @@ describe("PATCH /api/admin/classes/[id]/cancel regression", () => {
       bookings: [],
       instructor: { id: "instructor_1" },
     });
+    mocks.prisma.$transaction.mockImplementation(async (callback: any) =>
+      callback(mocks.prisma)
+    );
   });
 
   afterEach(() => {

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { motion, cubicBezier, type Variants } from "framer-motion";
 import { FiClock, FiUser } from "react-icons/fi";
+import { ChallengePointsBadge } from "@/components/challenge/ChallengePointsBadge";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
@@ -741,6 +742,7 @@ export default function ClassesPage() {
   const [days, setDays] = useState<Day[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tokens, setTokens] = useState(0);
+  const [challenge, setChallenge] = useState({ active: false, points: 0 });
   const [isAdmin, setIsAdmin] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
   const [bookingBlocked, setBookingBlocked] = useState(false);
@@ -1089,12 +1091,18 @@ export default function ClassesPage() {
 
           setIsAuthed(typeof tk.authenticated === "boolean" ? tk.authenticated : false);
           setTokens(typeof tk.tokens === "number" ? tk.tokens : 0);
+          setChallenge({
+            active: tk.challenge?.active === true,
+            points:
+              typeof tk.challenge?.points === "number" ? tk.challenge.points : 0,
+          });
           setBookingBlocked(
             typeof tk.bookingBlocked === "boolean" ? tk.bookingBlocked : false
           );
         } else {
           setIsAuthed(false);
           setTokens(0);
+          setChallenge({ active: false, points: 0 });
           setBookingBlocked(false);
         }
       } catch (err) {
@@ -1151,9 +1159,14 @@ export default function ClassesPage() {
             Elige tu sesion y reserva tu lugar.
           </p>
 
-          <div className="mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm">
-            <span className="opacity-70">Tus clases:</span>
-            <span className="font-bold">{tokens}</span>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+            <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm">
+              <span className="opacity-70">Tus clases:</span>
+              <span className="font-bold">{tokens}</span>
+            </span>
+            {isAuthed && challenge.active && (
+              <ChallengePointsBadge points={challenge.points} />
+            )}
           </div>
         </motion.div>
 
