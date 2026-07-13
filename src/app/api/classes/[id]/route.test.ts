@@ -91,11 +91,7 @@ describe("GET /api/classes/[id]", () => {
       name: "Coach",
     });
     mocks.prisma.class.findUnique.mockResolvedValue(classPayload());
-    mocks.prisma.booking.findMany.mockResolvedValue([
-      { id: "booking_first", userId: "user_1" },
-      { id: "older_booking", userId: "user_2" },
-      { id: "booking_later", userId: "user_2" },
-    ]);
+    mocks.prisma.booking.findMany.mockResolvedValue([{ userId: "user_2" }]);
   });
 
   afterEach(() => {
@@ -109,6 +105,19 @@ describe("GET /api/classes/[id]", () => {
     expect(mocks.prisma.class.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "class_1" } })
     );
+  });
+
+  it("allows admins to load class detail", async () => {
+    mocks.prisma.user.findUnique.mockResolvedValue({
+      id: "admin_1",
+      role: "ADMIN",
+      email: "admin@example.test",
+      name: "Admin",
+    });
+
+    const res = await GET(req(), ctx());
+
+    expect(res.status).toBe(200);
   });
 
   it("blocks regular users from class-management detail", async () => {
@@ -128,7 +137,7 @@ describe("GET /api/classes/[id]", () => {
     expect(mocks.prisma.class.findUnique).not.toHaveBeenCalled();
   });
 
-  it("marks only the user's first-ever booking for NEW USER display", async () => {
+  it("marks only a user's earliest qualifying booking for NEW USER display", async () => {
     const res = await GET(req(), ctx());
     const body = await res.json();
 
@@ -136,10 +145,55 @@ describe("GET /api/classes/[id]", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: "booking_first",
+          isNewUser: true,
           isFirstBooking: true,
         }),
         expect.objectContaining({
           id: "booking_later",
+          isNewUser: false,
+          isFirstBooking: false,
+        }),
+      ])
+    );
+    expect(mocks.prisma.booking.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses one batched query that excludes cancelled bookings and cancelled classes", async () => {
+    await GET(req(), ctx());
+
+    expect(mocks.prisma.booking.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: "ACTIVE",
+          class: { is: { isCanceled: false } },
+          OR: expect.any(Array),
+        }),
+        distinct: ["userId"],
+      })
+    );
+    expect(mocks.prisma.booking.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not classify guest bookings as NEW USER", async () => {
+    const payload = classPayload();
+    payload.bookings.push({
+      id: "guest_booking",
+      userId: null as any,
+      quantity: 1,
+      status: "ACTIVE",
+      createdAt: new Date("2026-06-03T10:00:00.000Z"),
+      user: null as any,
+    });
+    mocks.prisma.class.findUnique.mockResolvedValue(payload);
+
+    const res = await GET(req(), ctx());
+    const body = await res.json();
+
+    expect(body.bookings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "guest_booking",
+          isNewUser: false,
           isFirstBooking: false,
         }),
       ])

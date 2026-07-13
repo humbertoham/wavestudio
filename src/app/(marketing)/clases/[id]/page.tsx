@@ -14,6 +14,7 @@ import {
   FiUserPlus,
   FiX,
 } from "react-icons/fi";
+import { NewUserBadge } from "@/components/booking/NewUserBadge";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Monterrey";
@@ -51,6 +52,7 @@ type ClassApi = {
     status?: "ACTIVE" | "CANCELED";
     attended?: boolean;
     canceledAt?: string | null;
+    isNewUser?: boolean;
     isFirstBooking?: boolean;
     user: {
       id: string;
@@ -83,7 +85,7 @@ type AttendeeRow = {
   attended: boolean;
   quantity: number;
   affiliation: Affiliation;
-  isFirstBooking: boolean;
+  isNewUser: boolean;
 };
 
 type CanceledRow = {
@@ -528,7 +530,9 @@ export default function ClassAdminPage() {
         attended: !!booking.attended,
         quantity: booking.quantity ?? 1,
         affiliation: booking.user?.affiliation ?? "NONE",
-        isFirstBooking: !!booking.isFirstBooking,
+        isNewUser: !booking.user
+          ? false
+          : !!(booking.isNewUser ?? booking.isFirstBooking),
       }));
   }, [cls]);
 
@@ -881,11 +885,7 @@ export default function ClassAdminPage() {
                       <AffiliationBadge affiliation={attendee.affiliation} />
                     </p>
 
-                    {attendee.isFirstBooking && (
-                      <p className="mt-1 text-[11px] font-bold text-[color:var(--color-primary)]">
-                        NEW USER
-                      </p>
-                    )}
+                    <NewUserBadge isNewUser={attendee.isNewUser} />
 
                     {attendee.email && (
                       <p className="truncate text-xs text-muted-foreground">
