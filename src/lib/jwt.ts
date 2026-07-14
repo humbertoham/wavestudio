@@ -11,6 +11,9 @@ export type JWTPayload = {
   sub: string;
   role: AppRole;
   affiliationConfirmed?: boolean;
+  sessionVersion?: number;
+  wellhubPlanConfirmationRequired?: boolean;
+  wellhubPlanConfirmationCampaign?: string | null;
 };
 
 export function signToken(

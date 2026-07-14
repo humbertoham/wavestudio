@@ -9,6 +9,8 @@
     "booking:dedupe:dry": "node scripts/reconcile-active-booking-duplicates.mjs",
     "booking:dedupe:apply": "node scripts/reconcile-active-booking-duplicates.mjs --execute",
     "wellhub:repair": "node scripts/repair-wellhub-renewal-state.mjs",
+    "wellhub:require-plan-confirmation": "node scripts/require-wellhub-plan-confirmation.mjs",
+    "wellhub:verify-confirmation-app": "node scripts/verify-wellhub-confirmation-app.mjs",
     "env:check": "node scripts/check-env.mjs",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",

@@ -48,6 +48,9 @@ export async function POST(req: Request) {
       id: true,
       role: true,
       affiliationConfirmedAt: true,
+      authVersion: true,
+      wellhubPlanConfirmationRequired: true,
+      wellhubPlanConfirmationCampaign: true,
       passwordHash: true,
     },
   });
@@ -60,10 +63,19 @@ export async function POST(req: Request) {
     sub: user.id,
     role: user.role,
     affiliationConfirmed: user.affiliationConfirmedAt != null,
+    sessionVersion: user.authVersion,
+    wellhubPlanConfirmationRequired:
+      user.wellhubPlanConfirmationRequired,
+    wellhubPlanConfirmationCampaign:
+      user.wellhubPlanConfirmationCampaign,
   });
 
   const res = NextResponse.json(
-    { ok: true },
+    {
+      ok: true,
+      wellhubPlanConfirmationRequired:
+        user.wellhubPlanConfirmationRequired,
+    },
     { headers: { "Cache-Control": "no-store" } }
   );
 

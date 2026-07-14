@@ -12,6 +12,11 @@ type Me = {
   wellhubPlan: "GOLD_PLUS" | "PLATINUM" | "DIAMOND" | "DIAMOND_PLUS" | null;
   affiliationConfirmed: boolean;
   affiliationConfirmedAt?: string | null;
+  authVersion: number;
+  wellhubPlanConfirmationRequired: boolean;
+  wellhubPlanConfirmationRequestedAt?: string | null;
+  wellhubPlanConfirmedAt?: string | null;
+  wellhubPlanConfirmationCampaign?: string | null;
 };
 
 const fetcher = (url: string) =>
