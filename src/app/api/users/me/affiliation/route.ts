@@ -56,6 +56,9 @@ export async function POST(req: Request) {
       id: true,
       role: true,
       affiliationConfirmedAt: true,
+      authVersion: true,
+      wellhubPlanConfirmationRequired: true,
+      wellhubPlanConfirmationCampaign: true,
     },
   });
 
@@ -89,6 +92,9 @@ export async function POST(req: Request) {
       affiliation: true,
       wellhubPlan: true,
       affiliationConfirmedAt: true,
+      authVersion: true,
+      wellhubPlanConfirmationRequired: true,
+      wellhubPlanConfirmationCampaign: true,
     },
   });
 
@@ -96,6 +102,11 @@ export async function POST(req: Request) {
     sub: user.id,
     role: user.role,
     affiliationConfirmed: true,
+    sessionVersion: user.authVersion,
+    wellhubPlanConfirmationRequired:
+      user.wellhubPlanConfirmationRequired,
+    wellhubPlanConfirmationCampaign:
+      user.wellhubPlanConfirmationCampaign,
   });
 
   const res = json(200, {

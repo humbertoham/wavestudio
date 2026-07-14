@@ -44,6 +44,12 @@ enum TokenReason {
   ADMIN_ADJUST // ajustes manuales
   CORPORATE_MONTHLY
   ADMIN_WELLHUB_PLAN_CHANGE
+  USER_WELLHUB_PLAN_CONFIRMATION
+}
+
+enum WellhubPlanConfirmationStatus {
+  PENDING
+  COMPLETED
 }
 
 enum PackHighlight {
@@ -83,43 +89,75 @@ enum ChallengePointReason {
  * =========================
  */
 model User {
-  id            String    @id @default(cuid())
-  name          String
-  email         String    @unique
-  passwordHash  String
-  emailVerified DateTime?
-  role          Role      @default(USER)
-  bookingBlocked Boolean   @default(false)
+  id               String    @id @default(cuid())
+  name             String
+  email            String    @unique
+  passwordHash     String
+  emailVerified    DateTime?
+  role             Role      @default(USER)
+  bookingBlocked   Boolean   @default(false)
   bookingBlockedAt DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   // relaciones
-  bookings      Booking[]
-  packs         PackPurchase[]
-  tokenLedger   TokenLedger[]
-  waitlists     Waitlist[]
-  payments      Payment[]
-  checkoutLinks CheckoutLink[]
-  bookingBlockLogs BookingBlockLog[]
-  challengeTotals ChallengeUserTotal[]
-  challengeAwards ChallengeBookingAward[]
-  challengePointLedger ChallengePointLedger[] @relation("ChallengePointUser")
-  challengePointActions ChallengePointLedger[] @relation("ChallengePointActor")
-  challengeActivations Challenge[] @relation("ChallengeActivatedBy")
-  challengeDeactivations Challenge[] @relation("ChallengeDeactivatedBy")
-
+  bookings               Booking[]
+  packs                  PackPurchase[]
+  tokenLedger            TokenLedger[]
+  waitlists              Waitlist[]
+  payments               Payment[]
+  checkoutLinks          CheckoutLink[]
+  bookingBlockLogs       BookingBlockLog[]
+  challengeTotals        ChallengeUserTotal[]
+  challengeAwards        ChallengeBookingAward[]
+  challengePointLedger   ChallengePointLedger[]  @relation("ChallengePointUser")
+  challengePointActions  ChallengePointLedger[]  @relation("ChallengePointActor")
+  challengeActivations   Challenge[]             @relation("ChallengeActivatedBy")
+  challengeDeactivations Challenge[]             @relation("ChallengeDeactivatedBy")
 
   // password reset
   passwordResetTokens PasswordResetToken[]
 
   // perfil
-  dateOfBirth    DateTime?
-  phone          String?     @db.VarChar(20)
-  emergencyPhone String?     @db.VarChar(20)
-  affiliation    Affiliation @default(NONE)
-  wellhubPlan    WellhubPlan?
+  dateOfBirth            DateTime?
+  phone                  String?      @db.VarChar(20)
+  emergencyPhone         String?      @db.VarChar(20)
+  affiliation            Affiliation  @default(NONE)
+  wellhubPlan            WellhubPlan?
   affiliationConfirmedAt DateTime?
+
+  // Stateless JWT revocation and forced WellHub plan reconfirmation.
+  authVersion                        Int                       @default(0)
+  wellhubPlanConfirmationRequired    Boolean                   @default(false)
+  wellhubPlanConfirmationRequestedAt DateTime?
+  wellhubPlanConfirmedAt             DateTime?
+  wellhubPlanConfirmationCampaign    String?
+  wellhubPlanConfirmations           WellhubPlanConfirmation[]
+}
+
+model WellhubPlanConfirmation {
+  id                         String                        @id @default(cuid())
+  campaign                   String
+  user                       User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId                     String
+  status                     WellhubPlanConfirmationStatus @default(PENDING)
+  requestedAt                DateTime
+  confirmedAt                DateTime?
+  previousPlan               WellhubPlan?
+  selectedPlan               WellhubPlan?
+  previousMonthlyEntitlement Int?
+  newMonthlyEntitlement      Int?
+  creditDeltaApplied         Int?
+  resultingBalance           Int?
+  source                     String
+  ledgerEntryId              String?
+  idempotencyKey             String                        @unique
+  createdAt                  DateTime                      @default(now())
+  updatedAt                  DateTime                      @updatedAt
+
+  @@unique([campaign, userId])
+  @@index([campaign, status, requestedAt])
+  @@index([userId, requestedAt])
 }
 
 model Instructor {
@@ -128,9 +166,9 @@ model Instructor {
   bio       String?
   createdAt DateTime @default(now())
 
-  isVisible    Boolean  @default(true)
+  isVisible Boolean @default(true)
 
-  classes   Class[]
+  classes Class[]
 }
 
 /**
@@ -157,36 +195,36 @@ model Class {
   waitlist        Waitlist[]
 
   // Eligibility is snapshotted only when the class is created while active.
-  challenge                    Challenge? @relation(fields: [challengeId], references: [id])
-  challengeId                  String?
-  challengePoints              Int?
-  challengeEligibleAt          DateTime?
-  challengeActivationVersion   Int?
-  challengeAwards              ChallengeBookingAward[]
-  challengePointLedger         ChallengePointLedger[]
+  challenge                  Challenge?              @relation(fields: [challengeId], references: [id])
+  challengeId                String?
+  challengePoints            Int?
+  challengeEligibleAt        DateTime?
+  challengeActivationVersion Int?
+  challengeAwards            ChallengeBookingAward[]
+  challengePointLedger       ChallengePointLedger[]
 
   @@index([date])
   @@index([challengeId])
 }
 
 model Booking {
-  id        String        @id @default(cuid())
+  id String @id @default(cuid())
 
-  user      User?         @relation(fields: [userId], references: [id])
-  userId    String?
+  user   User?   @relation(fields: [userId], references: [id])
+  userId String?
 
-  guestName String?       // invitado
+  guestName String? // invitado
 
-  class     Class         @relation(fields: [classId], references: [id])
-  classId   String
+  class   Class  @relation(fields: [classId], references: [id])
+  classId String
 
   status    BookingStatus @default(ACTIVE)
   createdAt DateTime      @default(now())
 
-  quantity  Int           @default(1)
+  quantity Int @default(1)
 
   // 🔥 ASISTENCIA
-  attended  Boolean       @default(false)
+  attended Boolean @default(false)
 
   packPurchase   PackPurchase? @relation(fields: [packPurchaseId], references: [id])
   packPurchaseId String?
@@ -194,8 +232,8 @@ model Booking {
   canceledAt  DateTime?
   refundToken Boolean?
 
-  ledgerEntries TokenLedger[]
-  challengeAwards ChallengeBookingAward[]
+  ledgerEntries        TokenLedger[]
+  challengeAwards      ChallengeBookingAward[]
   challengePointLedger ChallengePointLedger[]
 
   // IMPORTANT:
@@ -215,19 +253,19 @@ model Booking {
  * =========================
  */
 model Challenge {
-  id                String   @id @default(cuid())
-  key               String   @unique
+  id                String    @id @default(cuid())
+  key               String    @unique
   name              String
-  isActive          Boolean  @default(false)
-  activationVersion Int      @default(0)
+  isActive          Boolean   @default(false)
+  activationVersion Int       @default(0)
   activatedAt       DateTime?
   deactivatedAt     DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  activatedBy   User?   @relation("ChallengeActivatedBy", fields: [activatedById], references: [id], onDelete: SetNull)
-  activatedById String?
-  deactivatedBy   User? @relation("ChallengeDeactivatedBy", fields: [deactivatedById], references: [id], onDelete: SetNull)
+  activatedBy     User?   @relation("ChallengeActivatedBy", fields: [activatedById], references: [id], onDelete: SetNull)
+  activatedById   String?
+  deactivatedBy   User?   @relation("ChallengeDeactivatedBy", fields: [deactivatedById], references: [id], onDelete: SetNull)
   deactivatedById String?
 
   classes     Class[]
@@ -288,7 +326,7 @@ model ChallengePointLedger {
   user           User                 @relation("ChallengePointUser", fields: [userId], references: [id])
   userId         String
   actor          User?                @relation("ChallengePointActor", fields: [actorUserId], references: [id], onDelete: SetNull)
-  actorUserId     String?
+  actorUserId    String?
   delta          Int
   reason         ChallengePointReason
   pointsSnapshot Int
@@ -302,7 +340,6 @@ model ChallengePointLedger {
   @@index([challengeId, classId])
   @@index([bookingId])
 }
-
 
 /**
  * =========================
@@ -319,9 +356,9 @@ model Pack {
   createdAt    DateTime       @default(now())
   purchases    PackPurchase[]
 
-  isVisible    Boolean  @default(true)
+  isVisible Boolean @default(true)
 
-  oncePerUser    Boolean     @default(false) 
+  oncePerUser Boolean @default(false)
 
   // marketing/UI
   classesLabel String? // ej. "5 clases"
@@ -341,8 +378,8 @@ model PackPurchase {
   expiresAt   DateTime
   pausedDays  Int       @default(0)
   pausedUntil DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   // relaciones derivadas
   bookings      Booking[]
@@ -381,11 +418,11 @@ model TokenLedger {
   booking   Booking? @relation(fields: [bookingId], references: [id])
   bookingId String?
 
-  delta     Int
-  reason    TokenReason
-  idempotencyKey String? @unique
-  metadata  Json?
-  createdAt DateTime    @default(now())
+  delta          Int
+  reason         TokenReason
+  idempotencyKey String?     @unique
+  metadata       Json?
+  createdAt      DateTime    @default(now())
 
   @@index([userId, packPurchaseId])
   @@index([userId, reason, createdAt])

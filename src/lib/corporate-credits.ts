@@ -14,6 +14,18 @@ import {
 
 export const ADMIN_WELLHUB_PLAN_CHANGE_SOURCE =
   "ADMIN_WELLHUB_PLAN_CHANGE";
+export const USER_WELLHUB_PLAN_CONFIRMATION_SOURCE =
+  "USER_WELLHUB_PLAN_CONFIRMATION";
+
+export type WellhubSyncTraceability = {
+  source: string;
+  reason: TokenReason;
+  actorUserId?: string | null;
+  campaign?: string;
+  requestedAt?: Date;
+  idempotencyKey?: string;
+  alwaysCreate?: boolean;
+};
 
 export type RenewalCycle = {
   id: string;
@@ -167,7 +179,7 @@ async function decrementWellhubPacks(
   }
 }
 
-function adminWellhubChangeMetadata(params: {
+function wellhubChangeMetadata(params: {
   previousAffiliation: Affiliation;
   newAffiliation: Affiliation;
   previousWellhubPlan: WellhubPlan | null;
@@ -178,11 +190,17 @@ function adminWellhubChangeMetadata(params: {
   previousBalance: number;
   resultingAvailableBalance: number;
   adminActorId: string | null;
+  traceability?: WellhubSyncTraceability;
   cycle: RenewalCycle;
   timestamp: Date;
 }) {
+  const source =
+    params.traceability?.source ?? ADMIN_WELLHUB_PLAN_CHANGE_SOURCE;
+  const actorUserId =
+    params.traceability?.actorUserId ?? params.adminActorId;
+
   return {
-    source: ADMIN_WELLHUB_PLAN_CHANGE_SOURCE,
+    source,
     previousAffiliation: params.previousAffiliation,
     newAffiliation: params.newAffiliation,
     previousWellhubPlan: params.previousWellhubPlan ?? "NONE",
@@ -193,6 +211,16 @@ function adminWellhubChangeMetadata(params: {
     previousBalance: params.previousBalance,
     resultingAvailableBalance: params.resultingAvailableBalance,
     adminActorId: params.adminActorId ?? "UNKNOWN",
+    actorUserId: actorUserId ?? "UNKNOWN",
+    ...(params.traceability?.campaign
+      ? { campaign: params.traceability.campaign }
+      : {}),
+    ...(params.traceability?.requestedAt
+      ? {
+          requestedAt:
+            params.traceability.requestedAt.toISOString(),
+        }
+      : {}),
     cycleId: params.cycle.id,
     effectivePeriodStart: params.cycle.start.toISOString(),
     effectivePeriodEnd: params.cycle.end.toISOString(),
@@ -207,6 +235,7 @@ export async function applyAdminAffiliationAndWellhubSync(
     nextAffiliation: Affiliation;
     nextWellhubPlan: WellhubPlan | null;
     adminActorId?: string | null;
+    traceability?: WellhubSyncTraceability;
     now?: Date;
   }
 ): Promise<AdminAffiliationSyncResult> {
@@ -250,7 +279,7 @@ export async function applyAdminAffiliationAndWellhubSync(
     previousState.affiliation === nextState.affiliation &&
     previousState.wellhubPlan === nextState.wellhubPlan;
 
-  if (unchanged) {
+  if (unchanged && !params.traceability?.alwaysCreate) {
     return {
       user: previousUser,
       previousBalance,
@@ -268,22 +297,26 @@ export async function applyAdminAffiliationAndWellhubSync(
     };
   }
 
-  const updatedUser = await tx.user.update({
-    where: { id: params.userId },
-    data: {
-      affiliation: nextState.affiliation,
-      wellhubPlan: nextState.wellhubPlan,
-      affiliationConfirmedAt: now,
-    },
-    select: {
-      id: true,
-      affiliation: true,
-      wellhubPlan: true,
-      affiliationConfirmedAt: true,
-    },
-  });
+  const updatedUser = unchanged
+    ? previousUser
+    : await tx.user.update({
+        where: { id: params.userId },
+        data: {
+          affiliation: nextState.affiliation,
+          wellhubPlan: nextState.wellhubPlan,
+          affiliationConfirmedAt: now,
+        },
+        select: {
+          id: true,
+          affiliation: true,
+          wellhubPlan: true,
+          affiliationConfirmedAt: true,
+        },
+      });
 
-  const wellhubRelevant = isWellhubRelevantChange(previousState, nextState);
+  const wellhubRelevant =
+    isWellhubRelevantChange(previousState, nextState) ||
+    params.traceability?.alwaysCreate === true;
   let creditDeltaApplied = 0;
   let adjustmentPackPurchaseId: string | null = null;
 
@@ -341,8 +374,11 @@ export async function applyAdminAffiliationAndWellhubSync(
         userId: params.userId,
         packPurchaseId: adjustmentPackPurchaseId,
         delta: creditDeltaApplied,
-        reason: TokenReason.ADMIN_WELLHUB_PLAN_CHANGE,
-        metadata: adminWellhubChangeMetadata({
+        reason:
+          params.traceability?.reason ??
+          TokenReason.ADMIN_WELLHUB_PLAN_CHANGE,
+        idempotencyKey: params.traceability?.idempotencyKey,
+        metadata: wellhubChangeMetadata({
           previousAffiliation: previousState.affiliation,
           newAffiliation: nextState.affiliation,
           previousWellhubPlan: previousState.wellhubPlan,
@@ -353,6 +389,7 @@ export async function applyAdminAffiliationAndWellhubSync(
           previousBalance,
           resultingAvailableBalance: tokenBalance,
           adminActorId: params.adminActorId ?? null,
+          traceability: params.traceability,
           cycle,
           timestamp: now,
         }),

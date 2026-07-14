@@ -67,6 +67,9 @@ describe("POST /api/users/me/affiliation", () => {
       affiliation: "WELLHUB",
       wellhubPlan: "GOLD_PLUS",
       affiliationConfirmedAt: new Date("2026-01-01T00:00:00.000Z"),
+      authVersion: 0,
+      wellhubPlanConfirmationRequired: false,
+      wellhubPlanConfirmationCampaign: null,
     });
 
     const res = await POST(
@@ -98,12 +101,18 @@ describe("POST /api/users/me/affiliation", () => {
         affiliation: true,
         wellhubPlan: true,
         affiliationConfirmedAt: true,
+        authVersion: true,
+        wellhubPlanConfirmationRequired: true,
+        wellhubPlanConfirmationCampaign: true,
       },
     });
     expect(mocks.signToken).toHaveBeenCalledWith({
       sub: "user_1",
       role: "USER",
       affiliationConfirmed: true,
+      sessionVersion: 0,
+      wellhubPlanConfirmationRequired: false,
+      wellhubPlanConfirmationCampaign: null,
     });
   });
 

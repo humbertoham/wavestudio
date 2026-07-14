@@ -2,6 +2,7 @@
 import { cookies as nextCookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import { verifyToken, type JWTPayload } from "./jwt";
+import { prisma } from "./prisma";
 
 /**
  * Este archivo funciona en:
@@ -102,7 +103,7 @@ export async function getAuth(): Promise<JWTPayload | null> {
   // cookie "session"
   const cookieToken = await readCookieUniversal("session");
   const fromCookie = safeVerify(cookieToken);
-  if (fromCookie) return fromCookie;
+  if (fromCookie) return validateSessionPayload(fromCookie);
   // sin Request no podemos leer Bearer; devolver null si no hay cookie válida
   return null;
 }
@@ -116,12 +117,12 @@ export async function getAuthFromRequest(req: AnyReq): Promise<JWTPayload | null
   // Cookie
   const cookieToken = await readCookieUniversal("session", req);
   const fromCookie = safeVerify(cookieToken);
-  if (fromCookie) return fromCookie;
+  if (fromCookie) return validateSessionPayload(fromCookie);
 
   // Bearer
   const bearer = readBearer(req);
   const fromBearer = safeVerify(bearer);
-  if (fromBearer) return fromBearer;
+  if (fromBearer) return validateSessionPayload(fromBearer);
 
   return null;
 }
@@ -170,6 +171,44 @@ export async function requireAdmin(req?: AnyReq): Promise<JWTPayload> {
   const auth = await requireAuth(req);
   if (auth.role !== "ADMIN") throw new Error("FORBIDDEN");
   return auth;
+}
+
+/** Validate a stateless JWT against persisted per-user access state. */
+export async function validateSessionPayload(
+  payload: JWTPayload | null
+): Promise<JWTPayload | null> {
+  if (!payload?.sub) return null;
+
+  const user = await prisma.user.findUnique({
+    where: { id: payload.sub },
+    select: {
+      role: true,
+      affiliationConfirmedAt: true,
+      authVersion: true,
+      wellhubPlanConfirmationRequired: true,
+      wellhubPlanConfirmationCampaign: true,
+    },
+  });
+
+  if (!user) return null;
+
+  // Tokens issued before authVersion existed are version zero. This keeps the
+  // additive migration from logging out every unaffected account.
+  const signedVersion = Number.isInteger(payload.sessionVersion)
+    ? Number(payload.sessionVersion)
+    : 0;
+  if (signedVersion !== user.authVersion) return null;
+
+  return {
+    ...payload,
+    role: user.role,
+    affiliationConfirmed: user.affiliationConfirmedAt != null,
+    sessionVersion: user.authVersion,
+    wellhubPlanConfirmationRequired:
+      user.wellhubPlanConfirmationRequired,
+    wellhubPlanConfirmationCampaign:
+      user.wellhubPlanConfirmationCampaign,
+  };
 }
 
 export async function requireAdminOrCoach(req?: AnyReq): Promise<JWTPayload> {

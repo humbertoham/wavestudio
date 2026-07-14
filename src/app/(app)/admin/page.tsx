@@ -1,6 +1,7 @@
 "use client";
 
 import useSWR from "swr";
+import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FiMessageCircle } from "react-icons/fi";
@@ -102,6 +103,7 @@ function formatCreditReason(reason: string) {
     ADMIN_ADJUST: "Ajuste admin",
     CORPORATE_MONTHLY: "Renovacion corporativa",
     ADMIN_WELLHUB_PLAN_CHANGE: "Cambio WellHub",
+    USER_WELLHUB_PLAN_CONFIRMATION: "Confirmacion WellHub",
   };
 
   return labels[reason] ?? reason;
@@ -442,7 +444,12 @@ function AdminPageContent() {
 
   return (
     <main className="container-app py-8 space-y-6">
-      <h1 className="text-2xl font-bold">Panel de administrador</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-2xl font-bold">Panel de administrador</h1>
+        <Link href="/admin/wellhub-confirmaciones" className="btn-outline">
+          Confirmaciones WellHub
+        </Link>
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-2 flex-wrap" role="tablist" aria-label="Secciones del panel">

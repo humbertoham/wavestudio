@@ -19,6 +19,11 @@ export async function GET() {
         affiliation: true,
         wellhubPlan: true,
         affiliationConfirmedAt: true,
+        authVersion: true,
+        wellhubPlanConfirmationRequired: true,
+        wellhubPlanConfirmationRequestedAt: true,
+        wellhubPlanConfirmedAt: true,
+        wellhubPlanConfirmationCampaign: true,
       },
     });
 
@@ -32,7 +37,12 @@ export async function GET() {
 
     if (
       auth.affiliationConfirmed !== affiliationConfirmed ||
-      auth.role !== user.role
+      auth.role !== user.role ||
+      auth.sessionVersion !== user.authVersion ||
+      auth.wellhubPlanConfirmationRequired !==
+        user.wellhubPlanConfirmationRequired ||
+      auth.wellhubPlanConfirmationCampaign !==
+        user.wellhubPlanConfirmationCampaign
     ) {
       res.cookies.set(
         "session",
@@ -40,6 +50,11 @@ export async function GET() {
           sub: user.id,
           role: user.role,
           affiliationConfirmed,
+          sessionVersion: user.authVersion,
+          wellhubPlanConfirmationRequired:
+            user.wellhubPlanConfirmationRequired,
+          wellhubPlanConfirmationCampaign:
+            user.wellhubPlanConfirmationCampaign,
         }),
         {
           httpOnly: true,
