@@ -6,6 +6,7 @@ import { CorporateCreditError } from "@/lib/corporate-credits";
 import { signToken } from "@/lib/jwt";
 import { prisma } from "@/lib/prisma";
 import { isWellhubPlan } from "@/lib/wellhub";
+import { WELLHUB_CONFIRMATION_DESTINATION } from "@/lib/wellhub-confirmation-ui";
 import {
   WELLHUB_CONFIRMATION_MAX_RETRIES,
   WellhubPlanConfirmationError,
@@ -85,6 +86,7 @@ export async function POST(req: Request) {
     const res = json(200, {
       ok: true,
       confirmation: result,
+      redirectTo: WELLHUB_CONFIRMATION_DESTINATION,
     });
     res.cookies.set(
       "session",

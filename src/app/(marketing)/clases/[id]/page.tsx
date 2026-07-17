@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion, cubicBezier } from "framer-motion";
 import {
@@ -409,6 +409,7 @@ function EditClassModal({
 
 export default function ClassAdminPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
 
   const [cls, setCls] = useState<ClassApi | null>(null);
   const [instructors, setInstructors] = useState<InstructorLite[]>([]);
@@ -783,6 +784,42 @@ export default function ClassAdminPage() {
     }
   }
 
+  async function deleteClass() {
+    if (!cls || busy !== null) return;
+    if (
+      !confirm(
+        "¿Eliminar esta clase del calendario? Esta acción es distinta de Cancelar clase y solo elimina esta fecha, no una serie recurrente."
+      )
+    ) return;
+
+    setBusy("DELETE_CLASS");
+    try {
+      const res = await fetch(`/api/classes/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        throw new Error(
+          await readErrorMessage(res, "No se pudo eliminar la clase.")
+        );
+      }
+
+      window.dispatchEvent(new Event("classes-updated"));
+      try {
+        window.localStorage.setItem("wave:classes-updated", String(Date.now()));
+      } catch {
+        // The destination performs a no-store calendar refetch regardless.
+      }
+      router.replace("/clases");
+      router.refresh();
+    } catch (error) {
+      alert(
+        error instanceof Error ? error.message : "No se pudo eliminar la clase."
+      );
+      setBusy(null);
+    }
+  }
+
   if (loading) {
     return <div className="section container-app">Cargando...</div>;
   }
@@ -863,6 +900,7 @@ export default function ClassAdminPage() {
               <button
                 className="btn-outline h-10 px-4 text-red-600"
                 onClick={cancelClass}
+                disabled={busy !== null || cls.isCanceled}
                 title={
                   attendees.length > 0
                     ? "Elimina primero a los usuarios inscritos"
@@ -872,6 +910,14 @@ export default function ClassAdminPage() {
                 }
               >
                 <FiSlash /> Cancelar clase
+              </button>
+              <button
+                className="btn-danger h-10 px-4"
+                onClick={deleteClass}
+                disabled={busy !== null}
+              >
+                <FiTrash2 />
+                {busy === "DELETE_CLASS" ? "Eliminando..." : "Eliminar"}
               </button>
             </div>
           </div>

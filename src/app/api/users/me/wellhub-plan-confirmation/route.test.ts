@@ -93,6 +93,7 @@ describe("POST /api/users/me/wellhub-plan-confirmation", () => {
     const response = await POST(req({ wellhubPlan: "PLATINUM" }));
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
+      redirectTo: "/clases",
       confirmation: {
         campaign: "campaign-1",
         creditDeltaApplied: 6,

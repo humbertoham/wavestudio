@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   prisma: {
     user: { findUnique: vi.fn() },
     booking: { count: vi.fn() },
-    class: { update: vi.fn() },
+    class: { findUnique: vi.fn(), update: vi.fn() },
     $executeRaw: vi.fn(),
     $transaction: vi.fn(),
   },
@@ -42,6 +42,10 @@ describe("PATCH /api/admin/classes/[id]/cancel regression", () => {
       name: "Coach",
     });
     mocks.prisma.booking.count.mockResolvedValue(0);
+    mocks.prisma.class.findUnique.mockResolvedValue({
+      id: "class_1",
+      deletedAt: null,
+    });
     mocks.prisma.class.update.mockResolvedValue({
       id: "class_1",
       isCanceled: true,

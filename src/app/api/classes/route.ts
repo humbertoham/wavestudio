@@ -38,11 +38,13 @@ export async function GET(req: Request) {
       lt?: Date;
     };
     focus?: string;
+    deletedAt: null;
   } = {
     date: {
       gte,
       ...(lt ? { lt } : {}),
     },
+    deletedAt: null,
   };
 
   if (focus) where.focus = focus;

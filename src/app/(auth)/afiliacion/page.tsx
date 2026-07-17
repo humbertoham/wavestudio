@@ -1,9 +1,13 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 import { useSession } from "@/lib/useSession";
+import {
+  completeWellhubConfirmationNavigation,
+  WELLHUB_CONFIRMATION_DESTINATION,
+} from "@/lib/wellhub-confirmation-ui";
 import {
   WELLHUB_PLAN_CREDITS,
   WELLHUB_PLAN_LABELS,
@@ -29,8 +33,6 @@ function readApiMessage(payload: unknown, fallback: string) {
 
 function AffiliationOnboardingInner() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/clases";
   const { user, isLoading, refresh } = useSession();
 
   const [affiliation, setAffiliation] = useState<Affiliation>("");
@@ -47,9 +49,9 @@ function AffiliationOnboardingInner() {
     }
 
     if (user.role === "ADMIN" || user.affiliationConfirmed) {
-      router.replace(next);
+      router.replace(WELLHUB_CONFIRMATION_DESTINATION);
     }
-  }, [isLoading, next, router, user]);
+  }, [isLoading, router, user]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -66,6 +68,7 @@ function AffiliationOnboardingInner() {
     }
 
     setSaving(true);
+    let redirecting = false;
 
     try {
       const res = await fetch("/api/users/me/affiliation", {
@@ -85,9 +88,14 @@ function AffiliationOnboardingInner() {
         );
       }
 
-      await refresh();
-      router.replace(next);
-      router.refresh();
+      await completeWellhubConfirmationNavigation({
+        refreshSession: refresh,
+        replace: router.replace,
+        refreshRouter: router.refresh,
+        sessionErrorMessage:
+          "Tu afiliación se guardó, pero no se pudo actualizar la sesión. Intenta continuar nuevamente.",
+      });
+      redirecting = true;
     } catch (error) {
       setErrorMsg(
         error instanceof Error
@@ -95,7 +103,7 @@ function AffiliationOnboardingInner() {
           : "No se pudo guardar tu afiliacion."
       );
     } finally {
-      setSaving(false);
+      if (!redirecting) setSaving(false);
     }
   }
 

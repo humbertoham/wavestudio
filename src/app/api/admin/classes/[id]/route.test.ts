@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     getAuthFromRequest: vi.fn(),
+    revalidatePath: vi.fn(),
     tx,
     prisma: {
       user: {
@@ -48,6 +49,10 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/lib/prisma", () => ({
   prisma: mocks.prisma,
+}));
+
+vi.mock("next/cache", () => ({
+  revalidatePath: mocks.revalidatePath,
 }));
 
 import { DELETE } from "./route";
@@ -78,13 +83,13 @@ describe("DELETE /api/admin/classes/[id]", () => {
       email: "admin@example.test",
       name: "Admin",
     });
-    mocks.tx.class.findUnique.mockResolvedValue({ id: "class_1" });
+    mocks.tx.class.findUnique.mockResolvedValue({ id: "class_1", deletedAt: null });
     mocks.tx.booking.count.mockResolvedValue(0);
     mocks.tx.waitlist.count.mockResolvedValue(0);
     mocks.tx.class.delete.mockResolvedValue({ id: "class_1" });
     mocks.tx.class.update.mockResolvedValue({
       id: "class_1",
-      isCanceled: true,
+      deletedAt: new Date(),
     });
     mocks.prisma.$transaction.mockImplementation(
       async (callback: (tx: typeof mocks.tx) => unknown) => callback(mocks.tx)
@@ -109,6 +114,9 @@ describe("DELETE /api/admin/classes/[id]", () => {
       where: { id: "class_1" },
     });
     expect(mocks.tx.class.update).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/clases");
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/clases/class_1");
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/admin");
   });
 
   it("archives a class with only cancelled bookings and preserves its history", async () => {
@@ -133,7 +141,7 @@ describe("DELETE /api/admin/classes/[id]", () => {
     });
     expect(mocks.tx.class.update).toHaveBeenCalledWith({
       where: { id: "class_1" },
-      data: { isCanceled: true },
+      data: { deletedAt: expect.any(Date) },
     });
     expect(mocks.tx.class.delete).not.toHaveBeenCalled();
     expect(mocks.tx.booking.deleteMany).not.toHaveBeenCalled();
@@ -202,7 +210,7 @@ describe("DELETE /api/admin/classes/[id]", () => {
     expect(res.status).toBe(200);
     expect(mocks.tx.class.update).toHaveBeenCalledWith({
       where: { id: "class_1" },
-      data: { isCanceled: true },
+      data: { deletedAt: expect.any(Date) },
     });
     expect(mocks.tx.booking.deleteMany).not.toHaveBeenCalled();
     expect(mocks.tx.tokenLedger.deleteMany).not.toHaveBeenCalled();

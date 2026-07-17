@@ -4,6 +4,7 @@ import { normalizeAffiliationAndPlan } from "@/lib/affiliation";
 import { requireAuth } from "@/lib/auth";
 import { signToken } from "@/lib/jwt";
 import { prisma } from "@/lib/prisma";
+import { WELLHUB_CONFIRMATION_DESTINATION } from "@/lib/wellhub-confirmation-ui";
 
 export const runtime = "nodejs";
 
@@ -111,6 +112,7 @@ export async function POST(req: Request) {
 
   const res = json(200, {
     ok: true,
+    redirectTo: WELLHUB_CONFIRMATION_DESTINATION,
     user: {
       ...user,
       affiliationConfirmed: true,

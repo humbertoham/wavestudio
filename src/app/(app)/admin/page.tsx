@@ -570,6 +570,7 @@ function ChallengeSection() {
   );
 
   async function changeChallenge(method: "POST" | "DELETE") {
+    if (busy) return;
     if (
       !confirmChallengeLifecycleAction(
         method === "POST" ? "activate" : "deactivate",
@@ -595,8 +596,8 @@ function ChallengeSection() {
       setPage(1);
       setNotice(
         method === "POST"
-          ? "Challenge activado correctamente."
-          : "Challenge desactivado. Los puntos y el historial se conservaron."
+          ? "Challenge activado. Todos los puntos actuales se reiniciaron a cero."
+          : "Challenge desactivado. Todos los puntos actuales se reiniciaron a cero; el historial se conservó."
       );
       await status.mutate();
       await leaderboard.mutate();
@@ -748,6 +749,7 @@ function ClassesSection() {
   );
 
   const [search, setSearch] = useState("");
+  const [deletingClassId, setDeletingClassId] = useState<string | null>(null);
   const [creating, setCreating] = useState<Partial<ClassItem> & { repeatNextMonth?: boolean }>({
     durationMin: 60,
     capacity: 12,
@@ -778,14 +780,39 @@ function ClassesSection() {
   }
 
   async function deleteClass(id: string) {
-    if (!confirm("¿Eliminar clase?")) return;
-    const prev = data;
-    mutate({ items: data?.items.filter(i => i.id !== id) ?? [] }, { revalidate: false });
-    const res = await fetch(`/api/admin/classes/${id}`, { method:"DELETE" });
-    if (!res.ok) {
-      mutate(prev);
-      alert(await readApiMessage(res, "No se pudo eliminar la clase."));
-    } else mutate();
+    if (
+      !confirm(
+        "¿Eliminar esta clase del calendario? Esta acción es distinta de Cancelar clase y no elimina una serie recurrente."
+      )
+    ) return;
+
+    setDeletingClassId(id);
+    try {
+      const res = await fetch(`/api/admin/classes/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        alert(await readApiMessage(res, "No se pudo eliminar la clase."));
+        return;
+      }
+
+      await mutate().catch(() => undefined);
+      window.dispatchEvent(new Event("classes-updated"));
+      try {
+        window.localStorage.setItem("wave:classes-updated", String(Date.now()));
+      } catch {
+        // Same-tab event and no-store refetching still keep the calendar fresh.
+      }
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "No se pudo eliminar la clase."
+      );
+    } finally {
+      setDeletingClassId(null);
+    }
   }
 
   return (
@@ -863,6 +890,7 @@ function ClassesSection() {
                 item={c}
                 instructors={instructors?.items ?? []}
                 challengeActive={challengeData?.challenge.active === true}
+                deleting={deletingClassId === c.id}
                 onDeleted={()=>deleteClass(c.id)}
                 onSaved={()=>mutate()}
               />
@@ -879,10 +907,11 @@ function ClassesSection() {
 
 
 function EditableClassRow({
-  item, instructors, challengeActive, onDeleted, onSaved
+  item, instructors, challengeActive, deleting, onDeleted, onSaved
 }: {
   item: ClassItem; instructors: Instructor[];
   challengeActive: boolean;
+  deleting: boolean;
   onDeleted: () => void; onSaved: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -1016,7 +1045,9 @@ function EditableClassRow({
           {!editing ? (
             <>
               <button className="btn-outline" onClick={()=>setEditing(true)}>Editar</button>
-              <button className="btn-danger" onClick={onDeleted}>Eliminar</button>
+              <button className="btn-danger" onClick={onDeleted} disabled={deleting}>
+                {deleting ? "Eliminando…" : "Eliminar"}
+              </button>
             </>
           ) : (
             <>

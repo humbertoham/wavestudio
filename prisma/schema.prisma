@@ -191,6 +191,9 @@ model Class {
   // extras opcionales útiles
   location        String?
   isCanceled      Boolean    @default(false)
+  // Calendar deletion is distinct from a business cancellation. Rows with
+  // history are archived with this timestamp so their audit relations survive.
+  deletedAt       DateTime?
   cancelBeforeMin Int? // minutos antes del inicio para permitir reembolso de token
   waitlist        Waitlist[]
 
@@ -204,6 +207,7 @@ model Class {
   challengePointLedger       ChallengePointLedger[]
 
   @@index([date])
+  @@index([deletedAt, date])
   @@index([challengeId])
 }
 

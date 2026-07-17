@@ -20,7 +20,7 @@ type Me = {
 };
 
 const fetcher = (url: string) =>
-  fetch(url, { credentials: "include" }).then(async (r) => {
+  fetch(url, { credentials: "include", cache: "no-store" }).then(async (r) => {
     if (!r.ok) throw new Error(String(r.status));
     const txt = await r.text();
     if (!txt) return null;
@@ -49,6 +49,6 @@ export function useSession() {
     isAuthenticated,
     isLoading,
     error,
-    refresh: () => mutate(),
+    refresh: () => mutate(undefined, { revalidate: true }),
   };
 }

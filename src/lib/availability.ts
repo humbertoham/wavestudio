@@ -4,9 +4,9 @@ import { prisma } from "@/lib/prisma";
 export async function getRemainingSpots(classId: string) {
   const klass = await prisma.class.findUnique({
     where: { id: classId },
-    select: { id: true, capacity: true },
+    select: { id: true, capacity: true, deletedAt: true },
   });
-  if (!klass) throw new Error("CLASS_NOT_FOUND");
+  if (!klass || klass.deletedAt) throw new Error("CLASS_NOT_FOUND");
 
   const agg = await prisma.booking.aggregate({
     where: { classId, status: "ACTIVE" },

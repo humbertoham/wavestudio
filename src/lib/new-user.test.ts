@@ -37,7 +37,7 @@ describe("getNewUserBookingIds", () => {
     expect(db.booking.findMany).toHaveBeenCalledWith({
       where: {
         status: BookingStatus.ACTIVE,
-        class: { is: { isCanceled: false } },
+        class: { is: { isCanceled: false, deletedAt: null } },
         OR: [
           {
             userId: "user_1",

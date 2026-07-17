@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
         gte: now, // 🔥 Solo clases que no han pasado
       },
       isCanceled: false, // opcional pero recomendable
+      deletedAt: null,
     },
     include: {
       instructor: true,
