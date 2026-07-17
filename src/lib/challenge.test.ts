@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ChallengeError,
+  activateChallenge,
   challengeErrorResponse,
+  deactivateChallenge,
   getClassChallengeSnapshot,
   parseChallengePoints,
 } from "./challenge";
@@ -68,5 +70,88 @@ describe("Challenge domain validation", () => {
         message: "Los puntos están bloqueados.",
       },
     });
+  });
+
+  it.each([
+    ["activate", false],
+    ["deactivate", true],
+  ] as const)(
+    "%s resets totals and current awards inside the lifecycle transaction",
+    async (operation, initiallyActive) => {
+      const challenge = {
+        id: "challenge_1",
+        key: "WAVE_CHALLENGE",
+        name: "WAVE Challenge",
+        isActive: operation === "activate",
+        activationVersion: 2,
+        activatedAt: new Date(),
+        deactivatedAt: null,
+      };
+      const tx = {
+        $executeRaw: vi.fn(),
+        challenge: {
+          findUnique: vi.fn().mockResolvedValue({
+            ...challenge,
+            isActive: initiallyActive,
+          }),
+          update: vi.fn().mockResolvedValue(challenge),
+          create: vi.fn(),
+        },
+        challengeUserTotal: { updateMany: vi.fn().mockResolvedValue({ count: 2 }) },
+        challengeBookingAward: { updateMany: vi.fn().mockResolvedValue({ count: 3 }) },
+      };
+      const client = {
+        $transaction: vi.fn(async (callback: (value: typeof tx) => unknown) =>
+          callback(tx)
+        ),
+      };
+
+      if (operation === "activate") {
+        await activateChallenge("admin_1", client as any);
+      } else {
+        await deactivateChallenge("admin_1", client as any);
+      }
+
+      expect(client.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.challengeUserTotal.updateMany).toHaveBeenCalledWith({
+        where: { challengeId: "challenge_1" },
+        data: { points: 0 },
+      });
+      expect(tx.challengeBookingAward.updateMany).toHaveBeenCalledWith({
+        where: { challengeId: "challenge_1", isAwarded: true },
+        data: { isAwarded: false, reversedAt: expect.any(Date) },
+      });
+    }
+  );
+
+  it("fails the lifecycle request when the reset cannot complete", async () => {
+    const tx = {
+      $executeRaw: vi.fn(),
+      challenge: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "challenge_1",
+          isActive: false,
+        }),
+        update: vi.fn().mockResolvedValue({
+          id: "challenge_1",
+          isActive: true,
+        }),
+      },
+      challengeUserTotal: {
+        updateMany: vi.fn().mockRejectedValue(new Error("reset failed")),
+      },
+      challengeBookingAward: { updateMany: vi.fn() },
+    };
+    const client = {
+      $transaction: vi.fn(async (callback: (value: typeof tx) => unknown) =>
+        callback(tx)
+      ),
+    };
+
+    await expect(activateChallenge("admin_1", client as any)).rejects.toThrow(
+      "reset failed"
+    );
+    expect(client.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.challengeBookingAward.updateMany).not.toHaveBeenCalled();
   });
 });

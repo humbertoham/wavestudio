@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  completeWellhubConfirmationNavigation,
   WELLHUB_CONFIRMATION_COPY,
+  WELLHUB_CONFIRMATION_DESTINATION,
   validateWellhubConfirmationSelection,
 } from "./wellhub-confirmation-ui";
 import {
@@ -38,5 +40,41 @@ describe("WellHub confirmation UI contract", () => {
   it("shows a useful validation error before an empty submission", () => {
     expect(validateWellhubConfirmationSelection("")).toContain("Selecciona");
     expect(validateWellhubConfirmationSelection("PLATINUM")).toBeNull();
+  });
+
+  it("refreshes the confirmed session before replacing history with /clases", async () => {
+    const calls: string[] = [];
+
+    await expect(
+      completeWellhubConfirmationNavigation({
+        refreshSession: async () => {
+          calls.push("session");
+          return { wellhubPlanConfirmationRequired: false };
+        },
+        replace: (destination) => calls.push(`replace:${destination}`),
+        refreshRouter: () => calls.push("router-refresh"),
+      })
+    ).resolves.toBe(WELLHUB_CONFIRMATION_DESTINATION);
+
+    expect(calls).toEqual([
+      "session",
+      "replace:/clases",
+      "router-refresh",
+    ]);
+  });
+
+  it("does not navigate when refreshed auth state is still pending", async () => {
+    const replace = vi.fn();
+
+    await expect(
+      completeWellhubConfirmationNavigation({
+        refreshSession: async () => ({
+          wellhubPlanConfirmationRequired: true,
+        }),
+        replace,
+        refreshRouter: vi.fn(),
+      })
+    ).rejects.toThrow("sesión");
+    expect(replace).not.toHaveBeenCalled();
   });
 });

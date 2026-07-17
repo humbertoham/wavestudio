@@ -13,17 +13,17 @@
 
 ## Lifecycle and eligibility
 
-`Challenge.key = WAVE_CHALLENGE` is the stable singleton. Activation increments `activationVersion`; deactivation pauses the same Challenge and preserves totals and the immutable ledger.
+`Challenge.key = WAVE_CHALLENGE` is the stable singleton. Activation increments `activationVersion`; activation and deactivation both reset current totals and mutable award state to zero/inactive in the same serializable transaction as the lifecycle change. The immutable point ledger is retained as history.
 
 Class eligibility is snapshotted at class creation:
 
 - active: `challengeId`, `challengeEligibleAt`, `challengeActivationVersion`, and default `challengePoints = 1` are persisted;
 - inactive: all four fields remain `NULL` permanently;
 - existing classes receive no migration default or backfill and remain ineligible;
-- reactivation resumes the same totals. Classes from earlier active periods remain eligible, while classes created during a pause remain ineligible;
+- reactivation starts current totals at zero. Classes from earlier active periods remain eligible, while classes created during a pause remain ineligible;
 - an attendance transition recorded while inactive creates no pending work and is never backfilled.
 
-Lifecycle changes, eligibility snapshots, point edits, attendance, and class cancellation take the same advisory lock inside a serializable transaction. The database also has a partial unique index allowing no more than one active Challenge row.
+Lifecycle changes, eligibility snapshots, point edits, attendance, class cancellation, and class deletion take the same advisory lock inside a serializable transaction. The database also has a partial unique index allowing no more than one active Challenge row.
 
 ## Award and reversal model
 
@@ -87,7 +87,7 @@ Use controlled UAT-only users/classes and remove them after verification.
 8. Unmark attendance and confirm the 3-point reversal status; mark it again and confirm a single re-award.
 9. Sign in as the user and verify unchanged remaining booking credits and `3 puntos` with the accessible star on `/perfil` and `/clases`.
 10. Verify the desktop user menu and mobile menu show `¿Cómo funciona el Challenge?`; open it and review all centralized Spanish rules. Confirm no leaderboard appears there.
-11. Return as admin, deactivate through the Spanish confirmation, and confirm status becomes inactive and the leaderboard disappears.
+11. Return as admin, deactivate through the Spanish confirmation, and confirm status becomes inactive, current totals reset to zero, and the leaderboard disappears.
 12. Return as the user and confirm the point badge and navbar link are hidden and direct `/challenge` access shows the paused state.
-13. Inspect UAT data: the preexisting class remains ineligible, the eligible class stores 3, the total is 3, award state is cycle 2/active, ledger history is `+3, -3, +3`, and token history contains only normal booking activity.
+13. Inspect UAT data: the preexisting class remains ineligible, the eligible class stores 3, the total is 0, award state is cycle 2/inactive, ledger history is `+3, -3, +3`, and token history contains only normal booking activity.
 14. Remove every UAT fixture, confirm the Challenge is inactive, and run `npm.cmd run db:status:uat`.

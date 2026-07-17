@@ -7,9 +7,16 @@ const authState = vi.hoisted(() => ({ userId: "" }));
 
 vi.mock("@/lib/auth", () => ({
   getAuthFromRequest: vi.fn(async () => ({ sub: authState.userId })),
+  getAuth: vi.fn(async () => null),
+  requireAdmin: vi.fn(),
 }));
 
 import { prisma } from "@/lib/prisma";
+import { GET as GET_PUBLIC_CLASSES } from "@/app/api/classes/route";
+import {
+  DELETE as DELETE_FROM_DETAIL,
+  GET as GET_CLASS_DETAIL,
+} from "@/app/api/classes/[id]/route";
 import { DELETE } from "./route";
 
 const describeWithDatabase =
@@ -103,6 +110,11 @@ describeWithDatabase("class deletion database integration", () => {
     await expect(
       prisma.class.findUnique({ where: { id: cls.id } })
     ).resolves.toBeNull();
+
+    const calendar = await GET_PUBLIC_CLASSES(
+      new Request("https://example.test/api/classes")
+    );
+    expect((await calendar.json()).some((item: { id: string }) => item.id === cls.id)).toBe(false);
   });
 
   it("archives cancelled booking history without erasing attendance or audit rows", async () => {
@@ -138,7 +150,7 @@ describeWithDatabase("class deletion database integration", () => {
     });
     await expect(
       prisma.class.findUnique({ where: { id: cls.id } })
-    ).resolves.toMatchObject({ isCanceled: true });
+    ).resolves.toMatchObject({ isCanceled: false, deletedAt: expect.any(Date) });
     await expect(
       prisma.booking.findUnique({ where: { id: booking.id } })
     ).resolves.toMatchObject({
@@ -149,6 +161,38 @@ describeWithDatabase("class deletion database integration", () => {
     await expect(
       prisma.tokenLedger.findUnique({ where: { id: ledger.id } })
     ).resolves.toMatchObject({ bookingId: booking.id });
+
+    const calendar = await GET_PUBLIC_CLASSES(
+      new Request("https://example.test/api/classes")
+    );
+    expect((await calendar.json()).some((item: { id: string }) => item.id === cls.id)).toBe(false);
+
+    const detail = await GET_CLASS_DETAIL(req(cls.id), ctx(cls.id));
+    expect(detail.status).toBe(404);
+  });
+
+  it("uses the same deletion service from the coach class-detail flow", async () => {
+    const cls = await createClass();
+    await prisma.user.update({
+      where: { id: userId },
+      data: { role: Role.COACH },
+    });
+
+    const response = await DELETE_FROM_DETAIL(
+      new Request(`https://example.test/api/classes/${cls.id}`, {
+        method: "DELETE",
+      }) as any,
+      ctx(cls.id)
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      hardDeleted: true,
+    });
+    await expect(
+      prisma.class.findUnique({ where: { id: cls.id } })
+    ).resolves.toBeNull();
   });
 
   it("blocks an active booking but ignores removed waitlist history", async () => {

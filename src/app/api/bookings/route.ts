@@ -148,10 +148,11 @@ export async function POST(req: NextRequest) {
         creditCost: true,
         date: true,
         isCanceled: true,
+        deletedAt: true,
       },
     });
 
-    if (!klass) {
+    if (!klass || klass.deletedAt) {
       return j(404, { error: "La clase no existe o fue eliminada." });
     }
 
@@ -241,10 +242,11 @@ export async function POST(req: NextRequest) {
                 creditCost: true,
                 date: true,
                 isCanceled: true,
+                deletedAt: true,
               },
             });
 
-            if (!locked || locked.isCanceled) {
+            if (!locked || locked.deletedAt || locked.isCanceled) {
               throw Object.assign(new Error("CLASS_NOT_BOOKABLE"), {
                 code: "CLASS_NOT_BOOKABLE",
               });

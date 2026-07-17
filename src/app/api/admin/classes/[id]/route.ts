@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdmin, requireClassManager } from "../../_utils";
 import { Prisma } from "@prisma/client";
-import {
-  countActiveClassDependencies,
-  inactiveBookingWhere,
-} from "@/lib/class-deletion";
-import { lockChallengeTransaction } from "@/lib/challenge";
+import { executeClassDeletion } from "@/lib/class-deletion-response";
 
 export const runtime = "nodejs";
 
@@ -43,6 +39,14 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     data.date = zonedTimeToUtc(localLike, USER_TZ);
   }
 
+  const existing = await prisma.class.findUnique({
+    where: { id },
+    select: { deletedAt: true },
+  });
+  if (!existing || existing.deletedAt) {
+    return j(404, { error: "CLASS_NOT_FOUND" });
+  }
+
   const item = await prisma.class.update({
     where: { id },
     data,
@@ -56,123 +60,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (auth) return auth;
 
   const { id } = await ctx.params;
-
-  const maxAttempts = 3;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const result = await prisma.$transaction(
-        async (tx) => {
-          await lockChallengeTransaction(tx);
-          const cls = await tx.class.findUnique({
-            where: { id },
-            select: { id: true },
-          });
-
-          if (!cls) return { outcome: "not_found" as const };
-
-          const dependencies = await countActiveClassDependencies(tx, id);
-
-          if (
-            dependencies.activeBookingCount > 0 ||
-            dependencies.activeWaitlistCount > 0
-          ) {
-            return {
-              outcome: "blocked" as const,
-              ...dependencies,
-            };
-          }
-
-          const inactiveBookingCount = await tx.booking.count({
-            where: inactiveBookingWhere(id),
-          });
-
-          if (inactiveBookingCount > 0) {
-            // Preserve cancelled bookings, attendance, refunds, and ledger/audit
-            // relations. isCanceled is the existing flag excluded by the admin
-            // list and checked by every booking and waitlist creation flow.
-            await tx.class.update({
-              where: { id },
-              data: { isCanceled: true },
-            });
-
-            return {
-              outcome: "archived" as const,
-              inactiveBookingCount,
-            };
-          }
-
-          await tx.class.delete({ where: { id } });
-          return { outcome: "deleted" as const };
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-      );
-
-      if (result.outcome === "not_found") {
-        return j(404, {
-          ok: false,
-          code: "CLASS_NOT_FOUND",
-          message: "La clase no existe o ya fue eliminada.",
-        });
-      }
-
-      if (result.outcome === "blocked") {
-        return j(409, {
-          ok: false,
-          code: "CLASS_HAS_ACTIVE_DEPENDENCIES",
-          message:
-            "No se puede eliminar la clase porque todavía tiene reservas activas o personas en lista de espera.",
-          details: {
-            activeBookingCount: result.activeBookingCount,
-            activeWaitlistCount: result.activeWaitlistCount,
-          },
-        });
-      }
-
-      if (result.outcome === "archived") {
-        return NextResponse.json({
-          ok: true,
-          hardDeleted: false,
-          archived: true,
-          preservedInactiveBookingCount: result.inactiveBookingCount,
-        });
-      }
-
-      return NextResponse.json({
-        ok: true,
-        hardDeleted: true,
-        archived: false,
-      });
-    } catch (error: unknown) {
-      const concurrentWrite =
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        (error.code === "P2034" || error.code === "P2003");
-
-      if (concurrentWrite && attempt < maxAttempts) continue;
-
-      if (concurrentWrite) {
-        return j(409, {
-          ok: false,
-          code: "CLASS_DELETE_CONFLICT",
-          message:
-            "La clase cambió mientras se intentaba eliminar. Intenta nuevamente.",
-        });
-      }
-
-      console.error("DELETE /classes/:id error", error);
-      return j(500, {
-        ok: false,
-        code: "UNEXPECTED_ERROR",
-        message: "No se pudo eliminar la clase.",
-      });
-    }
-  }
-
-  return j(409, {
-    ok: false,
-    code: "CLASS_DELETE_CONFLICT",
-    message: "La clase cambió mientras se intentaba eliminar. Intenta nuevamente.",
-  });
+  return executeClassDeletion(id);
 }
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
@@ -201,7 +89,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     },
   });
 
-  if (!cls) {
+  if (!cls || cls.deletedAt) {
     return j(404, { error: "CLASS_NOT_FOUND" });
   }
 

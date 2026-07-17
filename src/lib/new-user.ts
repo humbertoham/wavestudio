@@ -31,7 +31,7 @@ export async function getNewUserBookingIds(
   const previousBookings = await client.booking.findMany({
     where: {
       status: BookingStatus.ACTIVE,
-      class: { is: { isCanceled: false } },
+      class: { is: { isCanceled: false, deletedAt: null } },
       OR: candidates.map((booking) => ({
         userId: booking.userId,
         OR: [

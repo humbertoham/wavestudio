@@ -10,12 +10,12 @@ export const CHALLENGE_INFO_POINTS = [
   "Faltar o cancelar una clase no otorga puntos.",
   "Los puntos del Challenge son independientes de tus créditos para reservar clases.",
   "Solo las clases registradas como elegibles durante un periodo activo otorgan puntos.",
-  "WAVE Studio puede activar o pausar el Challenge; al pausarlo, tu historial se conserva.",
+  "WAVE Studio puede activar o pausar el Challenge; cada cambio reinicia los puntos actuales, mientras el historial de asignaciones se conserva.",
   "Los puntos no tienen valor monetario ni pueden canjearse por efectivo.",
 ] as const;
 
 export const CHALLENGE_ACTIVATION_CONFIRMATION =
-  "¿Estás seguro de que quieres activar el Challenge? Al activarlo se habilitarán los puntos por asistencia, la configuración de puntos por clase y la visualización de puntos en los perfiles.";
+  "¿Estás seguro de que quieres activar el Challenge? Al activarlo se reiniciarán a cero todos los puntos actuales y se habilitarán los puntos por asistencia.";
 
 export const CHALLENGE_DEACTIVATION_CONFIRMATION =
-  "¿Estás seguro de que quieres desactivar el Challenge? Se detendrán los nuevos puntos y se ocultará la información para usuarios, pero el historial y los totales se conservarán.";
+  "¿Estás seguro de que quieres desactivar el Challenge? Se reiniciarán a cero todos los puntos actuales y se detendrán nuevas asignaciones; el historial de movimientos se conservará.";

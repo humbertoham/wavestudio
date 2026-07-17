@@ -6,6 +6,13 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
+function noStore(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
+
 export async function GET() {
   try {
     const auth = await requireAuth();
@@ -27,10 +34,10 @@ export async function GET() {
       },
     });
 
-    if (!user) return NextResponse.json(null);
+    if (!user) return noStore(null);
 
     const affiliationConfirmed = user.affiliationConfirmedAt != null;
-    const res = NextResponse.json({
+    const res = noStore({
       ...user,
       affiliationConfirmed,
     });
@@ -69,6 +76,6 @@ export async function GET() {
     return res;
   } catch (e: any) {
     const code = e?.message === "UNAUTHORIZED" ? 401 : 500;
-    return NextResponse.json({ error: e?.message ?? "ERROR" }, { status: code });
+    return noStore({ error: e?.message ?? "ERROR" }, code);
   }
 }

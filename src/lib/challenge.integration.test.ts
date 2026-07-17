@@ -42,6 +42,17 @@ if (process.env.RUN_CHALLENGE_INTEGRATION === "1") {
 
 describeWithDatabase("Challenge database integration", () => {
   let originalChallenge: Challenge | null;
+  let originalTotals: Array<{
+    challengeId: string;
+    userId: string;
+    points: number;
+    updatedAt: Date;
+  }> = [];
+  let originalAwards: Array<{
+    id: string;
+    isAwarded: boolean;
+    reversedAt: Date | null;
+  }> = [];
   let adminId = "";
   let coachId = "";
   let userId = "";
@@ -55,6 +66,23 @@ describeWithDatabase("Challenge database integration", () => {
     originalChallenge = await prisma.challenge.findUnique({
       where: { key: CHALLENGE_KEY },
     });
+    if (originalChallenge) {
+      [originalTotals, originalAwards] = await Promise.all([
+        prisma.challengeUserTotal.findMany({
+          where: { challengeId: originalChallenge.id },
+          select: {
+            challengeId: true,
+            userId: true,
+            points: true,
+            updatedAt: true,
+          },
+        }),
+        prisma.challengeBookingAward.findMany({
+          where: { challengeId: originalChallenge.id },
+          select: { id: true, isAwarded: true, reversedAt: true },
+        }),
+      ]);
+    }
   });
 
   beforeEach(async () => {
@@ -163,6 +191,24 @@ describeWithDatabase("Challenge database integration", () => {
 
   afterAll(async () => {
     if (originalChallenge) {
+      for (const total of originalTotals) {
+        await prisma.challengeUserTotal.updateMany({
+          where: {
+            challengeId: total.challengeId,
+            userId: total.userId,
+          },
+          data: { points: total.points, updatedAt: total.updatedAt },
+        });
+      }
+      for (const award of originalAwards) {
+        await prisma.challengeBookingAward.updateMany({
+          where: { id: award.id },
+          data: {
+            isAwarded: award.isAwarded,
+            reversedAt: award.reversedAt,
+          },
+        });
+      }
       await prisma.challenge.update({
         where: { key: CHALLENGE_KEY },
         data: {
@@ -278,6 +324,40 @@ describeWithDatabase("Challenge database integration", () => {
     ).toBe(1);
   });
 
+  it("rolls the lifecycle state back when its point reset fails", async () => {
+    const client = {
+      $transaction: (
+        callback: (tx: unknown) => Promise<unknown>,
+        options: unknown
+      ) =>
+        prisma.$transaction(
+          async (tx) =>
+            callback(
+              new Proxy(tx, {
+                get(target, property, receiver) {
+                  if (property === "challengeUserTotal") {
+                    return {
+                      updateMany: async () => {
+                        throw new Error("forced lifecycle reset failure");
+                      },
+                    };
+                  }
+                  return Reflect.get(target, property, receiver);
+                },
+              })
+            ),
+          options as any
+        ),
+    };
+
+    await expect(activateChallenge(adminId, client as any)).rejects.toThrow(
+      "forced lifecycle reset failure"
+    );
+    await expect(
+      prisma.challenge.findUniqueOrThrow({ where: { key: CHALLENGE_KEY } })
+    ).resolves.toMatchObject({ isActive: false });
+  });
+
   it("validates points, locks them after the first award, and never touches token records", async () => {
     await activateChallenge(adminId);
     const cls = await createClass(true);
@@ -368,7 +448,7 @@ describeWithDatabase("Challenge database integration", () => {
     expect(inactiveResult.challenge.delta).toBe(0);
 
     total = await prisma.challengeUserTotal.findFirstOrThrow({ where: { userId } });
-    expect(total.points).toBe(14);
+    expect(total.points).toBe(0);
     const history = await prisma.challengePointLedger.findMany({
       where: { bookingId: threeBooking.id },
       orderBy: { createdAt: "asc" },
@@ -378,6 +458,100 @@ describeWithDatabase("Challenge database integration", () => {
       ["ATTENDANCE_REVERSAL", -3, 1],
       ["ATTENDANCE_AWARD", 3, 2],
     ]);
+  });
+
+  it("resets current progress on both transitions while preserving history and credits", async () => {
+    const challenge = await activateChallenge(adminId);
+    const cls = await createClass(true, "Lifecycle reset class");
+    await setClassChallengePoints(cls.id, 3);
+    const booking = await createBooking(cls.id);
+    await updateAttendanceWithChallenge({
+      bookingId: booking.id,
+      attended: true,
+      actorUserId: coachId,
+    });
+
+    const [ledgerBefore, tokenLedgerBefore, userBefore] = await Promise.all([
+      prisma.challengePointLedger.count({ where: { userId } }),
+      prisma.tokenLedger.count({ where: { userId } }),
+      prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { role: true, bookingBlocked: true },
+      }),
+    ]);
+
+    await deactivateChallenge(adminId);
+    await expect(
+      prisma.challengeUserTotal.findUniqueOrThrow({
+        where: { challengeId_userId: { challengeId: challenge.id, userId } },
+      })
+    ).resolves.toMatchObject({ points: 0 });
+    await expect(
+      prisma.challengeBookingAward.findUniqueOrThrow({
+        where: {
+          challengeId_bookingId: {
+            challengeId: challenge.id,
+            bookingId: booking.id,
+          },
+        },
+      })
+    ).resolves.toMatchObject({ isAwarded: false });
+
+    // Seed non-zero mutable current state while paused to prove activation also
+    // resets it. Immutable history remains untouched.
+    await prisma.challengeUserTotal.update({
+      where: { challengeId_userId: { challengeId: challenge.id, userId } },
+      data: { points: 9 },
+    });
+    await prisma.challengeBookingAward.update({
+      where: {
+        challengeId_bookingId: {
+          challengeId: challenge.id,
+          bookingId: booking.id,
+        },
+      },
+      data: { isAwarded: true, reversedAt: null },
+    });
+
+    await activateChallenge(adminId);
+
+    const [totalAfter, awardAfter, ledgerAfter, tokenLedgerAfter, userAfter] =
+      await Promise.all([
+        prisma.challengeUserTotal.findUniqueOrThrow({
+          where: { challengeId_userId: { challengeId: challenge.id, userId } },
+        }),
+        prisma.challengeBookingAward.findUniqueOrThrow({
+          where: {
+            challengeId_bookingId: {
+              challengeId: challenge.id,
+              bookingId: booking.id,
+            },
+          },
+        }),
+        prisma.challengePointLedger.count({ where: { userId } }),
+        prisma.tokenLedger.count({ where: { userId } }),
+        prisma.user.findUniqueOrThrow({
+          where: { id: userId },
+          select: { role: true, bookingBlocked: true },
+        }),
+      ]);
+
+    expect(totalAfter.points).toBe(0);
+    expect(awardAfter.isAwarded).toBe(false);
+    expect(ledgerAfter).toBe(ledgerBefore);
+    expect(tokenLedgerAfter).toBe(tokenLedgerBefore);
+    expect(userAfter).toEqual(userBefore);
+
+    const response = await GET_LEADERBOARD(
+      new Request(
+        "https://example.test/api/admin/challenge/leaderboard?page=1&pageSize=100"
+      ) as any
+    );
+    expect(response.status).toBe(200);
+    const leaderboard = await response.json();
+    expect(
+      leaderboard.items.find((item: { id: string }) => item.id === userId)
+    ).toMatchObject({ points: 0 });
   });
 
   it("rolls attendance and award writes back when the aggregate update fails", async () => {

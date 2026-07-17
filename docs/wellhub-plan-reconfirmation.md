@@ -96,6 +96,13 @@ Same-plan confirmation writes a zero-delta audit without granting credits. Upgra
 
 The persisted selected plan is automatically used by the existing monthly renewal.
 
+After the confirmation transaction commits, the endpoint refreshes the signed
+session cookie and returns `/clases` as the canonical destination. The client
+then performs an uncached `/api/auth/me` refresh, verifies that
+`wellhubPlanConfirmationRequired` is false, and uses history-replacing
+navigation to `/clases`. The initial affiliation flow uses the same refresh and
+destination contract. Failed database/API updates never invoke navigation.
+
 ## Admin visibility
 
 Administrators can open `/admin/wellhub-confirmaciones` (linked from the admin panel) and select a campaign. The server-paginated report shows included, pending, completed, and detectable inconsistent totals, plus requested/confirmed dates, current and confirmed plan, credit delta, and resulting balance. Regular users and coaches cannot access the report. A flagged administrator must first complete their own confirmation and receives no bypass.

@@ -105,7 +105,27 @@ export async function getClassChallengeSnapshot(
   };
 }
 
-export async function activateChallenge(actorUserId: string) {
+async function resetCurrentChallengeProgress(
+  tx: Prisma.TransactionClient,
+  challengeId: string,
+  resetAt: Date
+) {
+  // ChallengePointLedger is the immutable historical record. Only mutable
+  // current-cycle aggregates/state are reset during a lifecycle transition.
+  await tx.challengeUserTotal.updateMany({
+    where: { challengeId },
+    data: { points: 0 },
+  });
+  await tx.challengeBookingAward.updateMany({
+    where: { challengeId, isAwarded: true },
+    data: { isAwarded: false, reversedAt: resetAt },
+  });
+}
+
+export async function activateChallenge(
+  actorUserId: string,
+  client: PrismaClient = prisma
+) {
   return runChallengeTransaction(async (tx) => {
     const current = await tx.challenge.findUnique({
       where: { key: CHALLENGE_KEY },
@@ -143,11 +163,15 @@ export async function activateChallenge(actorUserId: string) {
           },
         });
 
+    await resetCurrentChallengeProgress(tx, challenge.id, now);
     return challenge;
-  });
+  }, client);
 }
 
-export async function deactivateChallenge(actorUserId: string) {
+export async function deactivateChallenge(
+  actorUserId: string,
+  client: PrismaClient = prisma
+) {
   return runChallengeTransaction(async (tx) => {
     const current = await tx.challenge.findUnique({
       where: { key: CHALLENGE_KEY },
@@ -161,15 +185,19 @@ export async function deactivateChallenge(actorUserId: string) {
       );
     }
 
-    return tx.challenge.update({
+    const now = new Date();
+    const challenge = await tx.challenge.update({
       where: { id: current.id },
       data: {
         isActive: false,
-        deactivatedAt: new Date(),
+        deactivatedAt: now,
         deactivatedById: actorUserId,
       },
     });
-  });
+
+    await resetCurrentChallengeProgress(tx, challenge.id, now);
+    return challenge;
+  }, client);
 }
 
 export async function getChallengeStatus(userId?: string | null) {
@@ -264,13 +292,14 @@ export async function setClassChallengePoints(
       where: { id: classId },
       select: {
         id: true,
+        deletedAt: true,
         challengeId: true,
         challengePoints: true,
         challengeEligibleAt: true,
       },
     });
 
-    if (!cls) {
+    if (!cls || cls.deletedAt) {
       throw new ChallengeError("CLASS_NOT_FOUND", "La clase no existe.", 404);
     }
 

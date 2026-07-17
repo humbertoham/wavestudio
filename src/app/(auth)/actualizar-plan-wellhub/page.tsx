@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
+  completeWellhubConfirmationNavigation,
   WELLHUB_CONFIRMATION_COPY,
+  WELLHUB_CONFIRMATION_DESTINATION,
   validateWellhubConfirmationSelection,
 } from "@/lib/wellhub-confirmation-ui";
 import { useSession } from "@/lib/useSession";
@@ -46,7 +48,7 @@ export default function UpdateWellhubPlanPage() {
       return;
     }
     if (!user.wellhubPlanConfirmationRequired) {
-      router.replace("/clases");
+      router.replace(WELLHUB_CONFIRMATION_DESTINATION);
       return;
     }
 
@@ -97,6 +99,7 @@ export default function UpdateWellhubPlanPage() {
 
     setSaving(true);
     setError(null);
+    let redirecting = false;
     try {
       const res = await fetch(
         "/api/users/me/wellhub-plan-confirmation",
@@ -117,9 +120,12 @@ export default function UpdateWellhubPlanPage() {
         );
       }
 
-      await refresh();
-      router.replace("/clases");
-      router.refresh();
+      await completeWellhubConfirmationNavigation({
+        refreshSession: refresh,
+        replace: router.replace,
+        refreshRouter: router.refresh,
+      });
+      redirecting = true;
     } catch (submitError) {
       setError(
         submitError instanceof Error
@@ -127,7 +133,7 @@ export default function UpdateWellhubPlanPage() {
           : "No se pudo guardar tu plan. Intenta de nuevo."
       );
     } finally {
-      setSaving(false);
+      if (!redirecting) setSaving(false);
     }
   }
 

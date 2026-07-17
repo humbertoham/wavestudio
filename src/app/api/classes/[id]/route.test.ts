@@ -2,12 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAuthFromRequest: vi.fn(),
+  revalidatePath: vi.fn(),
   prisma: {
     user: {
       findUnique: vi.fn(),
     },
     class: {
       findUnique: vi.fn(),
+      delete: vi.fn(),
+      update: vi.fn(),
     },
     booking: {
       findMany: vi.fn(),
@@ -16,6 +19,8 @@ const mocks = vi.hoisted(() => ({
     waitlist: {
       count: vi.fn(),
     },
+    $executeRaw: vi.fn(),
+    $transaction: vi.fn(),
   },
 }));
 
@@ -27,7 +32,11 @@ vi.mock("@/lib/prisma", () => ({
   prisma: mocks.prisma,
 }));
 
-import { GET } from "./route";
+vi.mock("next/cache", () => ({
+  revalidatePath: mocks.revalidatePath,
+}));
+
+import { DELETE, GET } from "./route";
 
 function req() {
   return new Request("https://example.test/api/classes/class_1") as any;
@@ -46,6 +55,7 @@ function classPayload() {
     durationMin: 60,
     capacity: 12,
     isCanceled: false,
+    deletedAt: null,
     instructor: { id: "instructor_1", name: "Coach" },
     bookings: [
       {
@@ -92,6 +102,12 @@ describe("GET /api/classes/[id]", () => {
     });
     mocks.prisma.class.findUnique.mockResolvedValue(classPayload());
     mocks.prisma.booking.findMany.mockResolvedValue([{ userId: "user_2" }]);
+    mocks.prisma.booking.count.mockResolvedValue(0);
+    mocks.prisma.waitlist.count.mockResolvedValue(0);
+    mocks.prisma.class.delete.mockResolvedValue({ id: "class_1" });
+    mocks.prisma.$transaction.mockImplementation(async (callback: any) =>
+      callback(mocks.prisma)
+    );
   });
 
   afterEach(() => {
@@ -165,7 +181,7 @@ describe("GET /api/classes/[id]", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           status: "ACTIVE",
-          class: { is: { isCanceled: false } },
+          class: { is: { isCanceled: false, deletedAt: null } },
           OR: expect.any(Array),
         }),
         distinct: ["userId"],
@@ -198,5 +214,47 @@ describe("GET /api/classes/[id]", () => {
         }),
       ])
     );
+  });
+
+  it("returns not found for an archived class detail", async () => {
+    mocks.prisma.class.findUnique.mockResolvedValue({
+      ...classPayload(),
+      deletedAt: new Date(),
+    });
+
+    const res = await GET(req(), ctx());
+
+    expect(res.status).toBe(404);
+    expect(mocks.prisma.booking.findMany).not.toHaveBeenCalled();
+  });
+
+  it("lets a coach use the same transactional calendar deletion flow", async () => {
+    const res = await DELETE(req(), ctx());
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      hardDeleted: true,
+      archived: false,
+    });
+    expect(mocks.prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: "Serializable" }
+    );
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/clases");
+  });
+
+  it("does not let a regular user delete through class management", async () => {
+    mocks.prisma.user.findUnique.mockResolvedValue({
+      id: "user_1",
+      role: "USER",
+      email: "user@example.test",
+      name: "User",
+    });
+
+    const res = await DELETE(req(), ctx());
+
+    expect(res.status).toBe(403);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 });

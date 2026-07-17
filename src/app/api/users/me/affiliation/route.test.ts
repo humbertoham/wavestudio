@@ -80,6 +80,7 @@ describe("POST /api/users/me/affiliation", () => {
     expect(res.status).toBe(200);
     expect(body).toMatchObject({
       ok: true,
+      redirectTo: "/clases",
       user: {
         affiliation: "WELLHUB",
         wellhubPlan: "GOLD_PLUS",

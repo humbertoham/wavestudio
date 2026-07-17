@@ -761,6 +761,27 @@ export default function ClassesPage() {
   const [waitlistConfirmSession, setWaitlistConfirmSession] =
     useState<Session | null>(null);
 
+  useEffect(() => {
+    const reload = () => setReloadTick((current) => current + 1);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "wave:classes-updated") reload();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") reload();
+    };
+
+    window.addEventListener("classes-updated", reload);
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", reload);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("classes-updated", reload);
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", reload);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   function openNoCreditsModal(
     variant: NoCreditsModalVariant,
     requiredCredits = 1
