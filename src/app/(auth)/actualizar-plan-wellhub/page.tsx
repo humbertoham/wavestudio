@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
+  acquireWellhubSubmissionLock,
   completeWellhubConfirmationNavigation,
+  releaseWellhubSubmissionLock,
   submitWellhubConfirmationRequest,
   WELLHUB_CONFIRMATION_COPY,
   WELLHUB_CONFIRMATION_DESTINATION,
@@ -39,6 +41,7 @@ export default function UpdateWellhubPlanPage() {
   const [plansLoading, setPlansLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submissionLock = useRef(false);
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -88,8 +91,6 @@ export default function UpdateWellhubPlanPage() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (saving) return;
-
     const validationError = validateWellhubConfirmationSelection(
       selectedPlan
     );
@@ -97,6 +98,7 @@ export default function UpdateWellhubPlanPage() {
       setError(validationError);
       return;
     }
+    if (!acquireWellhubSubmissionLock(submissionLock)) return;
 
     setSaving(true);
     setError(null);
@@ -115,11 +117,12 @@ export default function UpdateWellhubPlanPage() {
         );
       }
 
+      setSaving(false);
       await completeWellhubConfirmationNavigation({
         replace: router.replace,
-        refreshRouter: router.refresh,
       });
       redirecting = true;
+      releaseWellhubSubmissionLock(submissionLock);
     } catch (submitError) {
       setError(
         submitError instanceof TypeError
@@ -129,7 +132,10 @@ export default function UpdateWellhubPlanPage() {
           : "No se pudo guardar tu plan. Intenta de nuevo."
       );
     } finally {
-      if (!redirecting) setSaving(false);
+      if (!redirecting) {
+        releaseWellhubSubmissionLock(submissionLock);
+        setSaving(false);
+      }
     }
   }
 
