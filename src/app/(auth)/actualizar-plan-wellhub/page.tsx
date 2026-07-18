@@ -32,7 +32,7 @@ function readMessage(payload: unknown, fallback: string) {
 
 export default function UpdateWellhubPlanPage() {
   const router = useRouter();
-  const { user, isLoading: sessionLoading, refresh } = useSession();
+  const { user, isLoading: sessionLoading } = useSession();
   const [plans, setPlans] = useState<PlanOption[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<WellhubPlanValue | "">("");
   const [plansLoading, setPlansLoading] = useState(true);
@@ -121,14 +121,15 @@ export default function UpdateWellhubPlanPage() {
       }
 
       await completeWellhubConfirmationNavigation({
-        refreshSession: refresh,
         replace: router.replace,
         refreshRouter: router.refresh,
       });
       redirecting = true;
     } catch (submitError) {
       setError(
-        submitError instanceof Error
+        submitError instanceof TypeError
+          ? "No recibimos la respuesta de confirmación. Presiona Guardar y continuar para recuperar tu sesión sin repetir tus créditos."
+          : submitError instanceof Error
           ? submitError.message
           : "No se pudo guardar tu plan. Intenta de nuevo."
       );

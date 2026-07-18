@@ -22,6 +22,8 @@ const dbDescribe = runDatabaseTests ? describe : describe.skip;
 const fixtureUserIds: string[] = [];
 const fixturePackIds: string[] = [];
 const fixtureChallengeIds: string[] = [];
+const fixtureClassIds: string[] = [];
+const fixtureInstructorIds: string[] = [];
 
 function unique(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -32,7 +34,10 @@ function nextMonth() {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 }
 
-async function createPendingUser(plan: WellhubPlan | null = WellhubPlan.GOLD_PLUS) {
+async function createPendingUser(
+  plan: WellhubPlan | null = WellhubPlan.GOLD_PLUS,
+  role: "USER" | "COACH" | "ADMIN" = "USER"
+) {
   const id = unique("wellhub_confirmation_user");
   const campaign = unique("wellhub-campaign");
   const requestedAt = new Date();
@@ -43,6 +48,7 @@ async function createPendingUser(plan: WellhubPlan | null = WellhubPlan.GOLD_PLU
       name: "WellHub confirmation integration fixture",
       email: `${id}@example.invalid`,
       passwordHash: "not-a-real-login-hash",
+      role,
       affiliation: Affiliation.WELLHUB,
       wellhubPlan: plan,
       affiliationConfirmedAt: requestedAt,
@@ -120,11 +126,22 @@ dbDescribe("WellHub confirmation real database integration", () => {
         where: { id: { in: fixtureChallengeIds } },
       });
     }
+    if (fixtureClassIds.length > 0) {
+      await prisma.class.deleteMany({ where: { id: { in: fixtureClassIds } } });
+    }
+    if (fixtureInstructorIds.length > 0) {
+      await prisma.instructor.deleteMany({
+        where: { id: { in: fixtureInstructorIds } },
+      });
+    }
     await prisma.$disconnect();
   });
 
   it("upgrades atomically, preserves paid credits, and writes campaign traceability", async () => {
-    const { id, campaign } = await createPendingUser();
+    const { id, campaign } = await createPendingUser(
+      WellhubPlan.GOLD_PLUS,
+      "COACH"
+    );
     const paidPackId = unique("paid_pack");
     fixturePackIds.push(paidPackId);
     await prisma.pack.create({
@@ -152,6 +169,37 @@ dbDescribe("WellHub confirmation real database integration", () => {
         },
       ],
     });
+    const instructorId = unique("wellhub_history_instructor");
+    const classId = unique("wellhub_history_class");
+    fixtureInstructorIds.push(instructorId);
+    fixtureClassIds.push(classId);
+    await prisma.instructor.create({
+      data: { id: instructorId, name: "Disposable history instructor" },
+    });
+    await prisma.class.create({
+      data: {
+        id: classId,
+        title: "Disposable history class",
+        focus: "Integration",
+        date: new Date("2026-06-01T12:00:00.000Z"),
+        durationMin: 50,
+        capacity: 10,
+        instructorId,
+      },
+    });
+    const booking = await prisma.booking.create({
+      data: { userId: id, classId, attended: true },
+    });
+    const historicalLedger = await prisma.tokenLedger.create({
+      data: {
+        userId: id,
+        bookingId: booking.id,
+        delta: -1,
+        reason: TokenReason.BOOKING_DEBIT,
+        idempotencyKey: unique("historical_booking_ledger"),
+        metadata: { fixture: "preserve-history" },
+      },
+    });
 
     const result = await serialConfirmation(id, WellhubPlan.PLATINUM);
     expect(result).toMatchObject({
@@ -161,7 +209,8 @@ dbDescribe("WellHub confirmation real database integration", () => {
       accessRestored: true,
     });
 
-    const [user, paid, audit, ledger] = await Promise.all([
+    const [user, paid, audit, ledger, bookingAfter, historicalLedgerAfter] =
+      await Promise.all([
       prisma.user.findUniqueOrThrow({ where: { id } }),
       prisma.packPurchase.findFirstOrThrow({
         where: { userId: id, packId: paidPackId },
@@ -174,20 +223,52 @@ dbDescribe("WellHub confirmation real database integration", () => {
           idempotencyKey: `wellhub-plan-confirmation:${campaign}:${id}`,
         },
       }),
+      prisma.booking.findUniqueOrThrow({ where: { id: booking.id } }),
+      prisma.tokenLedger.findUniqueOrThrow({
+        where: { id: historicalLedger.id },
+      }),
     ]);
     expect(user).toMatchObject({
+      role: "COACH",
       wellhubPlan: WellhubPlan.PLATINUM,
       wellhubPlanConfirmationRequired: false,
+      authVersion: 2,
     });
     expect(paid.classesLeft).toBe(5);
     expect(audit).toMatchObject({
       status: "COMPLETED",
       selectedPlan: WellhubPlan.PLATINUM,
       creditDeltaApplied: 6,
+      authVersionBefore: 1,
+      authVersionAfter: 2,
     });
     expect(ledger).toMatchObject({
       reason: TokenReason.USER_WELLHUB_PLAN_CONFIRMATION,
       delta: 6,
+    });
+    expect(bookingAfter).toMatchObject({
+      id: booking.id,
+      userId: id,
+      classId,
+      attended: true,
+      status: "ACTIVE",
+    });
+    expect(historicalLedgerAfter).toMatchObject({
+      id: historicalLedger.id,
+      bookingId: booking.id,
+      delta: -1,
+      reason: TokenReason.BOOKING_DEBIT,
+    });
+    await expect(
+      validateSessionPayload({ sub: id, role: "COACH", sessionVersion: 1 })
+    ).resolves.toBeNull();
+    await expect(
+      validateSessionPayload({ sub: id, role: "USER", sessionVersion: 2 })
+    ).resolves.toMatchObject({
+      sub: id,
+      role: "COACH",
+      sessionVersion: 2,
+      wellhubPlanConfirmationRequired: false,
     });
   });
 
@@ -225,6 +306,9 @@ dbDescribe("WellHub confirmation real database integration", () => {
         _sum: { classesLeft: true },
       })
     ).toEqual({ _sum: { classesLeft: 8 } });
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id } })).authVersion
+    ).toBe(2);
   });
 
   it("rolls back plan, ledger, audit, and blocking state if any later transaction step fails", async () => {
@@ -265,8 +349,10 @@ dbDescribe("WellHub confirmation real database integration", () => {
     expect(user).toMatchObject({
       wellhubPlan: WellhubPlan.GOLD_PLUS,
       wellhubPlanConfirmationRequired: true,
+      authVersion: 1,
     });
     expect(audit.status).toBe("PENDING");
+    expect(audit.authVersionBefore).toBeNull();
     expect(ledgerCount).toBe(0);
   });
 

@@ -153,6 +153,9 @@ model WellhubPlanConfirmation {
   resultingBalance           Int?
   source                     String
   ledgerEntryId              String?
+  authVersionBefore          Int?
+  authVersionAfter           Int?
+  sessionRecoveryExpiresAt   DateTime?
   idempotencyKey             String                        @unique
   createdAt                  DateTime                      @default(now())
   updatedAt                  DateTime                      @updatedAt
@@ -160,6 +163,7 @@ model WellhubPlanConfirmation {
   @@unique([campaign, userId])
   @@index([campaign, status, requestedAt])
   @@index([userId, requestedAt])
+  @@index([userId, status, sessionRecoveryExpiresAt])
 }
 
 model Instructor {

@@ -18,10 +18,12 @@ function transaction(params?: {
 }) {
   const user = {
     id: "user_1",
+    role: "COACH" as const,
     affiliation: params?.affiliation ?? Affiliation.WELLHUB,
     wellhubPlan:
       params && "plan" in params ? params.plan ?? null : WellhubPlan.PLATINUM,
     affiliationConfirmedAt: new Date("2026-01-01T00:00:00.000Z"),
+    authVersion: 4,
     wellhubPlanConfirmationRequired: params?.required ?? true,
     wellhubPlanConfirmationRequestedAt: new Date("2026-07-01T00:00:00.000Z"),
     wellhubPlanConfirmationCampaign: "campaign-1",
@@ -40,8 +42,11 @@ function transaction(params?: {
         user.affiliationConfirmedAt = data.affiliationConfirmedAt;
         return { ...user };
       }),
-      updateMany: vi.fn(async () => {
+      updateMany: vi.fn(async ({ data }: any) => {
         user.wellhubPlanConfirmationRequired = false;
+        if (data.authVersion?.increment) {
+          user.authVersion += data.authVersion.increment;
+        }
         return { count: 1 };
       }),
     },
@@ -89,6 +94,13 @@ describe("confirmWellhubPlanInTransaction", () => {
       creditDeltaApplied: 0,
       resultingBalance: 8,
       accessRestored: true,
+      authVersionBefore: 4,
+      authVersionAfter: 5,
+      sessionUser: {
+        role: "COACH",
+        authVersion: 5,
+        wellhubPlanConfirmationRequired: false,
+      },
     });
     expect(tx.packPurchase.create).not.toHaveBeenCalled();
     expect(tx.tokenLedger.create).toHaveBeenCalledWith({
@@ -105,6 +117,19 @@ describe("confirmWellhubPlanInTransaction", () => {
       select: { id: true },
     });
     expect(user.wellhubPlanConfirmationRequired).toBe(false);
+    expect(user.authVersion).toBe(5);
+    expect(tx.user.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ authVersion: 4 }),
+      data: expect.objectContaining({ authVersion: { increment: 1 } }),
+    });
+    expect(tx.wellhubPlanConfirmation.updateMany).toHaveBeenCalledWith({
+      where: expect.any(Object),
+      data: expect.objectContaining({
+        authVersionBefore: 4,
+        authVersionAfter: 5,
+        sessionRecoveryExpiresAt: expect.any(Date),
+      }),
+    });
   });
 
   it("upgrades by only the canonical entitlement difference", async () => {

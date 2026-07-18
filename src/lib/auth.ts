@@ -3,6 +3,7 @@ import { cookies as nextCookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import { verifyToken, type JWTPayload } from "./jwt";
 import { prisma } from "./prisma";
+import { SESSION_COOKIE_NAME } from "./session-cookie";
 
 /**
  * Este archivo funciona en:
@@ -101,7 +102,7 @@ function safeVerify(token: string | null | undefined): JWTPayload | null {
  */
 export async function getAuth(): Promise<JWTPayload | null> {
   // cookie "session"
-  const cookieToken = await readCookieUniversal("session");
+  const cookieToken = await readCookieUniversal(SESSION_COOKIE_NAME);
   const fromCookie = safeVerify(cookieToken);
   if (fromCookie) return validateSessionPayload(fromCookie);
   // sin Request no podemos leer Bearer; devolver null si no hay cookie válida
@@ -115,7 +116,7 @@ export async function getAuth(): Promise<JWTPayload | null> {
  */
 export async function getAuthFromRequest(req: AnyReq): Promise<JWTPayload | null> {
   // Cookie
-  const cookieToken = await readCookieUniversal("session", req);
+  const cookieToken = await readCookieUniversal(SESSION_COOKIE_NAME, req);
   const fromCookie = safeVerify(cookieToken);
   if (fromCookie) return validateSessionPayload(fromCookie);
 
@@ -125,6 +126,18 @@ export async function getAuthFromRequest(req: AnyReq): Promise<JWTPayload | null
   if (fromBearer) return validateSessionPayload(fromBearer);
 
   return null;
+}
+
+/**
+ * Verifies only the signature and expiry of the HTTP-only session cookie.
+ * This does not make the payload an authenticated current session: callers
+ * must apply a narrowly scoped persisted-state check before using it.
+ */
+export async function getVerifiedSessionCookiePayload(
+  req: AnyReq
+): Promise<JWTPayload | null> {
+  const cookieToken = await readCookieUniversal(SESSION_COOKIE_NAME, req);
+  return safeVerify(cookieToken);
 }
 
 /**

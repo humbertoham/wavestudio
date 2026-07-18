@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { requireAuth } from "@/lib/auth";
-import { signToken } from "@/lib/jwt";
 import { prisma } from "@/lib/prisma";
+import { issueSessionCookie } from "@/lib/session-cookie";
 
 export const runtime = "nodejs";
 
@@ -13,7 +13,7 @@ function noStore(body: unknown, status = 200) {
   });
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const auth = await requireAuth();
     const user = await prisma.user.findUnique({
@@ -51,26 +51,7 @@ export async function GET() {
       auth.wellhubPlanConfirmationCampaign !==
         user.wellhubPlanConfirmationCampaign
     ) {
-      res.cookies.set(
-        "session",
-        signToken({
-          sub: user.id,
-          role: user.role,
-          affiliationConfirmed,
-          sessionVersion: user.authVersion,
-          wellhubPlanConfirmationRequired:
-            user.wellhubPlanConfirmationRequired,
-          wellhubPlanConfirmationCampaign:
-            user.wellhubPlanConfirmationCampaign,
-        }),
-        {
-          httpOnly: true,
-          sameSite: "lax",
-          secure: process.env.NODE_ENV === "production",
-          path: "/",
-          maxAge: 60 * 60 * 24 * 7,
-        }
-      );
+      issueSessionCookie(res, req, user);
     }
 
     return res;

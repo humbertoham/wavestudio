@@ -87,6 +87,22 @@ describe("WellHub confirmation proxy enforcement", () => {
     });
   });
 
+  it("accepts the new N+1 cookie immediately after confirmation", async () => {
+    mocks.jwtVerify.mockResolvedValueOnce({
+      payload: {
+        sub: "user_1",
+        role: "COACH",
+        sessionVersion: 4,
+        wellhubPlanConfirmationRequired: false,
+        wellhubPlanConfirmationCampaign: "campaign-1",
+      },
+    });
+    mocks.findUnique.mockResolvedValue(user(false, 4, "COACH"));
+    const response = await middleware(request("/clases"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
   it("does not exempt flagged admins or coaches and leaves unaffected users alone", async () => {
     mocks.findUnique.mockResolvedValue(user(true, 3, "ADMIN"));
     expect((await middleware(request("/admin"))).headers.get("location")).toBe(
