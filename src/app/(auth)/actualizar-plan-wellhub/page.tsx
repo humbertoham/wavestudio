@@ -6,10 +6,11 @@ import { useRouter } from "next/navigation";
 import {
   acquireWellhubSubmissionLock,
   completeWellhubConfirmationNavigation,
-  releaseWellhubSubmissionLock,
+  finishWellhubSubmission,
   submitWellhubConfirmationRequest,
   WELLHUB_CONFIRMATION_COPY,
   WELLHUB_CONFIRMATION_DESTINATION,
+  WELLHUB_CONFIRMATION_MESSAGES,
   validateWellhubConfirmationSelection,
 } from "@/lib/wellhub-confirmation-ui";
 import { useSession } from "@/lib/useSession";
@@ -107,35 +108,38 @@ export default function UpdateWellhubPlanPage() {
       const res = await submitWellhubConfirmationRequest({
         selectedPlan,
       });
-      const payload = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(
-          readMessage(
-            payload,
-            "No se pudo guardar tu plan ni sincronizar tus créditos. Intenta de nuevo."
-          )
-        );
+      if (res.kind !== "success") {
+        console.error("[wellhub-plan-confirmation] submission failed", {
+          selectedPlan,
+          result: res.kind,
+          httpStatus: res.status,
+          responseType: res.responseType,
+          apiErrorCode: res.code,
+          requestAborted: res.requestAborted,
+          recoveryAttempted: res.recoveryAttempted,
+          recoverySucceeded: false,
+          elapsedMs: res.elapsedMs,
+        });
+        setError(res.message);
+        return;
       }
 
-      setSaving(false);
       await completeWellhubConfirmationNavigation({
         replace: router.replace,
       });
       redirecting = true;
-      releaseWellhubSubmissionLock(submissionLock);
     } catch (submitError) {
-      setError(
-        submitError instanceof TypeError
-          ? "No recibimos la respuesta de confirmación después del reintento seguro. Presiona Guardar y continuar para intentarlo nuevamente."
-          : submitError instanceof Error
-          ? submitError.message
-          : "No se pudo guardar tu plan. Intenta de nuevo."
-      );
+      console.error("[wellhub-plan-confirmation] client failure", {
+        errorName:
+          submitError instanceof Error ? submitError.name : "UnknownError",
+      });
+      setError(WELLHUB_CONFIRMATION_MESSAGES.unexpected);
     } finally {
-      if (!redirecting) {
-        releaseWellhubSubmissionLock(submissionLock);
-        setSaving(false);
-      }
+      finishWellhubSubmission({
+        lock: submissionLock,
+        redirecting,
+        setSaving,
+      });
     }
   }
 
