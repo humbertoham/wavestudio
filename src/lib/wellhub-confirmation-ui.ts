@@ -9,19 +9,21 @@ export const WELLHUB_CONFIRMATION_COPY = {
 export const WELLHUB_CONFIRMATION_DESTINATION = "/clases";
 
 export async function completeWellhubConfirmationNavigation(params: {
-  refreshSession: () => Promise<
+  refreshSession?: () => Promise<
     { wellhubPlanConfirmationRequired: boolean } | null | undefined
   >;
   replace: (destination: string) => void;
   refreshRouter: () => void;
   sessionErrorMessage?: string;
 }) {
-  const session = await params.refreshSession();
-  if (!session || session.wellhubPlanConfirmationRequired) {
-    throw new Error(
-      params.sessionErrorMessage ??
-        "Tu plan se guardó, pero no se pudo actualizar la sesión. Intenta continuar nuevamente."
-    );
+  if (params.refreshSession) {
+    const session = await params.refreshSession();
+    if (!session || session.wellhubPlanConfirmationRequired) {
+      throw new Error(
+        params.sessionErrorMessage ??
+          "No se pudo actualizar la sesión. Intenta continuar nuevamente."
+      );
+    }
   }
 
   params.replace(WELLHUB_CONFIRMATION_DESTINATION);

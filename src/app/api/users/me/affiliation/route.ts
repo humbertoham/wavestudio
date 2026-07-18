@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 import { normalizeAffiliationAndPlan } from "@/lib/affiliation";
 import { requireAuth } from "@/lib/auth";
-import { signToken } from "@/lib/jwt";
 import { prisma } from "@/lib/prisma";
+import { issueSessionCookie } from "@/lib/session-cookie";
 import { WELLHUB_CONFIRMATION_DESTINATION } from "@/lib/wellhub-confirmation-ui";
 
 export const runtime = "nodejs";
@@ -99,17 +99,6 @@ export async function POST(req: Request) {
     },
   });
 
-  const token = signToken({
-    sub: user.id,
-    role: user.role,
-    affiliationConfirmed: true,
-    sessionVersion: user.authVersion,
-    wellhubPlanConfirmationRequired:
-      user.wellhubPlanConfirmationRequired,
-    wellhubPlanConfirmationCampaign:
-      user.wellhubPlanConfirmationCampaign,
-  });
-
   const res = json(200, {
     ok: true,
     redirectTo: WELLHUB_CONFIRMATION_DESTINATION,
@@ -119,13 +108,7 @@ export async function POST(req: Request) {
     },
   });
 
-  res.cookies.set("session", token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7,
-  });
+  issueSessionCookie(res, req, user);
 
   return res;
 }

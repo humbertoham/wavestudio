@@ -42,25 +42,17 @@ describe("WellHub confirmation UI contract", () => {
     expect(validateWellhubConfirmationSelection("PLATINUM")).toBeNull();
   });
 
-  it("refreshes the confirmed session before replacing history with /clases", async () => {
+  it("replaces history without an unnecessary second session request", async () => {
     const calls: string[] = [];
 
     await expect(
       completeWellhubConfirmationNavigation({
-        refreshSession: async () => {
-          calls.push("session");
-          return { wellhubPlanConfirmationRequired: false };
-        },
         replace: (destination) => calls.push(`replace:${destination}`),
         refreshRouter: () => calls.push("router-refresh"),
       })
     ).resolves.toBe(WELLHUB_CONFIRMATION_DESTINATION);
 
-    expect(calls).toEqual([
-      "session",
-      "replace:/clases",
-      "router-refresh",
-    ]);
+    expect(calls).toEqual(["replace:/clases", "router-refresh"]);
   });
 
   it("does not navigate when refreshed auth state is still pending", async () => {

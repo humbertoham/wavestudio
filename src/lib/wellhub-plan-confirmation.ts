@@ -12,6 +12,7 @@ import {
 } from "@/lib/corporate-credits";
 
 export const WELLHUB_CONFIRMATION_MAX_RETRIES = 3;
+export const WELLHUB_SESSION_RECOVERY_WINDOW_MS = 15 * 60 * 1000;
 
 export class WellhubPlanConfirmationError extends Error {
   constructor(
@@ -21,6 +22,7 @@ export class WellhubPlanConfirmationError extends Error {
       | "CONFIRMATION_NOT_REQUIRED"
       | "CAMPAIGN_STATE_INVALID"
       | "ALREADY_CONFIRMED"
+      | "SESSION_STATE_CHANGED"
   ) {
     super(code);
   }
@@ -38,6 +40,7 @@ export async function confirmWellhubPlanInTransaction(
   params: {
     userId: string;
     selectedPlan: WellhubPlan;
+    expectedAuthVersion?: number;
     now?: Date;
   }
 ) {
@@ -48,6 +51,9 @@ export async function confirmWellhubPlanInTransaction(
       id: true,
       affiliation: true,
       wellhubPlan: true,
+      role: true,
+      affiliationConfirmedAt: true,
+      authVersion: true,
       wellhubPlanConfirmationRequired: true,
       wellhubPlanConfirmationRequestedAt: true,
       wellhubPlanConfirmationCampaign: true,
@@ -60,6 +66,13 @@ export async function confirmWellhubPlanInTransaction(
 
   if (user.affiliation !== Affiliation.WELLHUB) {
     throw new WellhubPlanConfirmationError("NOT_WELLHUB");
+  }
+
+  if (
+    params.expectedAuthVersion != null &&
+    user.authVersion !== params.expectedAuthVersion
+  ) {
+    throw new WellhubPlanConfirmationError("SESSION_STATE_CHANGED");
   }
 
   if (!user.wellhubPlanConfirmationRequired) {
@@ -103,6 +116,10 @@ export async function confirmWellhubPlanInTransaction(
       alwaysCreate: true,
     },
   });
+  const authVersionAfter = user.authVersion + 1;
+  const sessionRecoveryExpiresAt = new Date(
+    now.getTime() + WELLHUB_SESSION_RECOVERY_WINDOW_MS
+  );
 
   const completed = await tx.wellhubPlanConfirmation.updateMany({
     where: {
@@ -119,6 +136,9 @@ export async function confirmWellhubPlanInTransaction(
       creditDeltaApplied: sync.creditDeltaApplied,
       resultingBalance: sync.tokenBalance,
       ledgerEntryId: sync.ledgerEntryId,
+      authVersionBefore: user.authVersion,
+      authVersionAfter,
+      sessionRecoveryExpiresAt,
     },
   });
 
@@ -132,14 +152,35 @@ export async function confirmWellhubPlanInTransaction(
       affiliation: Affiliation.WELLHUB,
       wellhubPlanConfirmationRequired: true,
       wellhubPlanConfirmationCampaign: campaign,
+      authVersion: user.authVersion,
     },
     data: {
       wellhubPlanConfirmationRequired: false,
       wellhubPlanConfirmedAt: now,
+      authVersion: { increment: 1 },
     },
   });
 
   if (unblocked.count !== 1) {
+    throw new WellhubPlanConfirmationError("CAMPAIGN_STATE_INVALID");
+  }
+
+  const committedUser = await tx.user.findUnique({
+    where: { id: user.id },
+    select: {
+      id: true,
+      role: true,
+      affiliationConfirmedAt: true,
+      authVersion: true,
+      wellhubPlanConfirmationRequired: true,
+      wellhubPlanConfirmationCampaign: true,
+    },
+  });
+  if (
+    !committedUser ||
+    committedUser.authVersion !== authVersionAfter ||
+    committedUser.wellhubPlanConfirmationRequired
+  ) {
     throw new WellhubPlanConfirmationError("CAMPAIGN_STATE_INVALID");
   }
 
@@ -154,5 +195,8 @@ export async function confirmWellhubPlanInTransaction(
     ledgerEntryId: sync.ledgerEntryId,
     confirmedAt: now,
     accessRestored: true,
+    authVersionBefore: user.authVersion,
+    authVersionAfter,
+    sessionUser: committedUser,
   };
 }

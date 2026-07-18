@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 
 import { compareHash } from "@/lib/hash";
-import { signToken } from "@/lib/jwt";
 import { prisma } from "@/lib/prisma";
 import { consumeRateLimit, getClientIp } from "@/lib/rate-limit";
+import { issueSessionCookie } from "@/lib/session-cookie";
 import { loginSchema } from "@/lib/zod";
 
 export const runtime = "nodejs";
@@ -59,17 +59,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "INVALID_CREDENTIALS" }, { status: 401 });
   }
 
-  const token = signToken({
-    sub: user.id,
-    role: user.role,
-    affiliationConfirmed: user.affiliationConfirmedAt != null,
-    sessionVersion: user.authVersion,
-    wellhubPlanConfirmationRequired:
-      user.wellhubPlanConfirmationRequired,
-    wellhubPlanConfirmationCampaign:
-      user.wellhubPlanConfirmationCampaign,
-  });
-
   const res = NextResponse.json(
     {
       ok: true,
@@ -79,13 +68,7 @@ export async function POST(req: Request) {
     { headers: { "Cache-Control": "no-store" } }
   );
 
-  res.cookies.set("session", token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7,
-  });
+  issueSessionCookie(res, req, user);
 
   return res;
 }
