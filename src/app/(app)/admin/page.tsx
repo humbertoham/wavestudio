@@ -11,6 +11,11 @@ import {
   shouldShowChallengePointControl,
 } from "@/lib/challenge-ui";
 import {
+  CHALLENGE_USER_MAX_POINTS,
+  challengePointEditorKeyAction,
+  parseChallengePointInput,
+} from "@/lib/challenge-point-editor";
+import {
   WELLHUB_PLAN_CREDITS,
   WELLHUB_PLAN_LABELS,
   WELLHUB_PLANS,
@@ -246,14 +251,16 @@ type ChallengeAdminState = {
   activatedAt: string | null;
   deactivatedAt: string | null;
 };
+type ChallengeLeaderboardItem = {
+  rank: number;
+  id: string;
+  name: string;
+  email: string;
+  points: number;
+  updatedAt: string | null;
+};
 type ChallengeLeaderboard = {
-  items: Array<{
-    rank: number;
-    id: string;
-    name: string;
-    email: string;
-    points: number;
-  }>;
+  items: ChallengeLeaderboardItem[];
   page: number;
   pageSize: number;
   total: number;
@@ -552,6 +559,179 @@ function AdminPageContent() {
 /* ---------------------------------------------------
    CLASES — listar / crear / editar por fila / eliminar
 ---------------------------------------------------- */
+function ChallengePointsEditor({
+  item,
+  onSaved,
+  onConflict,
+}: {
+  item: ChallengeLeaderboardItem;
+  onSaved: (
+    updated: Pick<ChallengeLeaderboardItem, "id" | "points" | "updatedAt">
+  ) => Promise<void>;
+  onConflict: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [input, setInput] = useState(String(item.points));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const parsed = parseChallengePointInput(input);
+  const canSave =
+    editing &&
+    !saving &&
+    parsed.valid &&
+    parsed.value !== item.points;
+
+  useEffect(() => {
+    if (!saving) setInput(String(item.points));
+  }, [item.points, item.updatedAt, saving]);
+
+  function beginEditing() {
+    setInput(String(item.points));
+    setError(null);
+    setSuccess(null);
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    if (saving) return;
+    setInput(String(item.points));
+    setError(null);
+    setEditing(false);
+  }
+
+  async function save() {
+    if (!canSave || !parsed.valid) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch(
+        `/api/admin/challenge/users/${encodeURIComponent(item.id)}/points`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            points: parsed.value,
+            expectedPoints: item.points,
+            expectedUpdatedAt: item.updatedAt,
+          }),
+        }
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        if (
+          response.status === 409 &&
+          payload?.code === "CHALLENGE_POINTS_CONFLICT"
+        ) {
+          await onConflict();
+        }
+        throw new Error(
+          typeof payload?.message === "string"
+            ? payload.message
+            : "No se pudieron guardar los puntos."
+        );
+      }
+
+      await onSaved(payload.item);
+      setEditing(false);
+      setSuccess("Puntos guardados.");
+    } catch (saveError) {
+      setInput(String(item.points));
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "No se pudieron guardar los puntos."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex min-w-[8rem] flex-col items-end gap-1">
+        <button
+          type="button"
+          className="rounded px-2 py-1 font-bold underline decoration-dotted underline-offset-4 hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-[--color-primary]"
+          onClick={beginEditing}
+          aria-label={`Editar puntos de ${item.name}`}
+        >
+          {item.points}
+        </button>
+        {success && (
+          <span role="status" className="text-xs font-normal text-green-700">
+            {success}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-w-[13rem] flex-col items-end gap-2">
+      <div className="flex max-w-full flex-wrap justify-end gap-2">
+        <input
+          autoFocus
+          className="input w-24 text-right"
+          type="number"
+          min={0}
+          max={CHALLENGE_USER_MAX_POINTS}
+          step={1}
+          inputMode="numeric"
+          value={input}
+          disabled={saving}
+          aria-label={`Puntos de ${item.name}`}
+          aria-invalid={!parsed.valid}
+          onChange={(event) => {
+            setInput(event.target.value);
+            setError(null);
+          }}
+          onKeyDown={(event) => {
+            const action = challengePointEditorKeyAction(event.key);
+            if (action === "cancel") {
+              event.preventDefault();
+              cancelEditing();
+            } else if (action === "save") {
+              event.preventDefault();
+              void save();
+            }
+          }}
+        />
+        <button
+          className="btn-primary"
+          type="button"
+          disabled={!canSave}
+          onClick={() => void save()}
+        >
+          {saving ? "Guardando..." : "Guardar"}
+        </button>
+        <button
+          className="btn-outline"
+          type="button"
+          disabled={saving}
+          onClick={cancelEditing}
+        >
+          Cancelar
+        </button>
+      </div>
+      {!parsed.valid && (
+        <span className="text-xs font-normal text-red-600">
+          Usa un entero entre 0 y{" "}
+          {CHALLENGE_USER_MAX_POINTS.toLocaleString("es-MX")}.
+        </span>
+      )}
+      {error && (
+        <span role="alert" className="text-xs font-normal text-red-600">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ChallengeSection() {
   const [page, setPage] = useState(1);
   const [busy, setBusy] = useState(false);
@@ -568,6 +748,25 @@ function ChallengeSection() {
       : null,
     fetcher
   );
+
+  async function pointSaved(
+    updated: Pick<ChallengeLeaderboardItem, "id" | "points" | "updatedAt">
+  ) {
+    await leaderboard.mutate(
+      (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item) =>
+                item.id === updated.id ? { ...item, ...updated } : item
+              ),
+            }
+          : current,
+      { revalidate: false }
+    );
+    void leaderboard.mutate();
+    window.dispatchEvent(new Event("challenge-updated"));
+  }
 
   async function changeChallenge(method: "POST" | "DELETE") {
     if (busy) return;
@@ -600,7 +799,11 @@ function ChallengeSection() {
           : "Challenge desactivado. Todos los puntos actuales se reiniciaron a cero; el historial se conservó."
       );
       await status.mutate();
-      await leaderboard.mutate();
+      if (method === "POST") {
+        await leaderboard.mutate();
+      } else {
+        await leaderboard.mutate(undefined, { revalidate: false });
+      }
       window.dispatchEvent(new Event("challenge-updated"));
     } catch (error) {
       setActionError(
@@ -704,7 +907,15 @@ function ChallengeSection() {
                         <td className="py-2 pr-4">#{item.rank}</td>
                         <td className="py-2 pr-4 font-medium">{item.name}</td>
                         <td className="py-2 pr-4 text-muted-foreground">{item.email}</td>
-                        <td className="py-2 text-right font-bold">{item.points}</td>
+                        <td className="py-2 text-right align-top">
+                          <ChallengePointsEditor
+                            item={item}
+                            onSaved={pointSaved}
+                            onConflict={async () => {
+                              await leaderboard.mutate();
+                            }}
+                          />
+                        </td>
                       </tr>
                     ))}
                   </tbody>

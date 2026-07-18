@@ -21,6 +21,7 @@ const runDatabaseTests =
 const dbDescribe = runDatabaseTests ? describe : describe.skip;
 const fixtureUserIds: string[] = [];
 const fixturePackIds: string[] = [];
+const fixtureChallengeIds: string[] = [];
 
 function unique(prefix: string) {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -92,6 +93,9 @@ dbDescribe("WellHub confirmation real database integration", () => {
 
   afterAll(async () => {
     if (fixtureUserIds.length > 0) {
+      await prisma.challengeUserTotal.deleteMany({
+        where: { userId: { in: fixtureUserIds } },
+      });
       await prisma.tokenLedger.deleteMany({
         where: { userId: { in: fixtureUserIds } },
       });
@@ -110,6 +114,11 @@ dbDescribe("WellHub confirmation real database integration", () => {
     }
     if (fixturePackIds.length > 0) {
       await prisma.pack.deleteMany({ where: { id: { in: fixturePackIds } } });
+    }
+    if (fixtureChallengeIds.length > 0) {
+      await prisma.challenge.deleteMany({
+        where: { id: { in: fixtureChallengeIds } },
+      });
     }
     await prisma.$disconnect();
   });
@@ -270,11 +279,61 @@ dbDescribe("WellHub confirmation real database integration", () => {
         name: "WellHub command integration fixture",
         email: `${id}@example.invalid`,
         passwordHash: "not-a-real-login-hash",
+        role: "COACH",
+        bookingBlocked: true,
         affiliation: Affiliation.WELLHUB,
         wellhubPlan: WellhubPlan.PLATINUM,
         affiliationConfirmedAt: new Date(),
       },
     });
+    const paidPackId = unique("wellhub_command_paid_pack");
+    fixturePackIds.push(paidPackId);
+    await prisma.pack.create({
+      data: {
+        id: paidPackId,
+        name: "WellHub command safety fixture",
+        classes: 7,
+        price: 700,
+        validityDays: 30,
+      },
+    });
+    const purchase = await prisma.packPurchase.create({
+      data: {
+        userId: id,
+        packId: paidPackId,
+        classesLeft: 7,
+        expiresAt: nextMonth(),
+      },
+    });
+    const challenge = await prisma.challenge.create({
+      data: {
+        key: unique("wellhub_command_challenge"),
+        name: "WellHub command safety challenge",
+        isActive: false,
+      },
+    });
+    fixtureChallengeIds.push(challenge.id);
+    await prisma.challengeUserTotal.create({
+      data: { challengeId: challenge.id, userId: id, points: 17 },
+    });
+    const unchangedBefore = await Promise.all([
+      prisma.user.findUniqueOrThrow({
+        where: { id },
+        select: {
+          role: true,
+          bookingBlocked: true,
+          affiliation: true,
+          wellhubPlan: true,
+        },
+      }),
+      prisma.packPurchase.findUniqueOrThrow({ where: { id: purchase.id } }),
+      prisma.challengeUserTotal.findUniqueOrThrow({
+        where: {
+          challengeId_userId: { challengeId: challenge.id, userId: id },
+        },
+      }),
+      prisma.tokenLedger.count({ where: { userId: id } }),
+    ]);
     const campaign = unique("wellhub-command-campaign");
     const dryRun = await runCampaignCommand(prisma, {
       target: "dev",
@@ -294,6 +353,8 @@ dbDescribe("WellHub confirmation real database integration", () => {
     expect(applied).toMatchObject({
       newlyFlagged: 1,
       sessionsInvalidated: 1,
+      afterRequiringConfirmation: 1,
+      remainingToModify: 0,
     });
     await expect(
       validateSessionPayload({ sub: id, role: "USER", sessionVersion: 0 })
@@ -306,6 +367,26 @@ dbDescribe("WellHub confirmation real database integration", () => {
       userId: id,
     });
     expect(rerun.newlyFlagged).toBe(0);
-    expect((await prisma.user.findUniqueOrThrow({ where: { id } })).authVersion).toBe(1);
+    const currentUser = await prisma.user.findUniqueOrThrow({ where: { id } });
+    expect(currentUser.authVersion).toBe(1);
+    const unchangedAfter = await Promise.all([
+      prisma.user.findUniqueOrThrow({
+        where: { id },
+        select: {
+          role: true,
+          bookingBlocked: true,
+          affiliation: true,
+          wellhubPlan: true,
+        },
+      }),
+      prisma.packPurchase.findUniqueOrThrow({ where: { id: purchase.id } }),
+      prisma.challengeUserTotal.findUniqueOrThrow({
+        where: {
+          challengeId_userId: { challengeId: challenge.id, userId: id },
+        },
+      }),
+      prisma.tokenLedger.count({ where: { userId: id } }),
+    ]);
+    expect(unchangedAfter).toEqual(unchangedBefore);
   });
 });

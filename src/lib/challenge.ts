@@ -5,6 +5,9 @@ import {
 } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { CHALLENGE_USER_MAX_POINTS } from "@/lib/challenge-point-editor";
+
+export { CHALLENGE_USER_MAX_POINTS } from "@/lib/challenge-point-editor";
 
 export const CHALLENGE_KEY = "WAVE_CHALLENGE";
 export const CHALLENGE_NAME = "WAVE Challenge";
@@ -18,11 +21,14 @@ export type ChallengeErrorCode =
   | "CHALLENGE_NOT_ACTIVE"
   | "CHALLENGE_ALREADY_ACTIVE"
   | "CHALLENGE_ALREADY_INACTIVE"
+  | "USER_NOT_FOUND"
   | "CLASS_NOT_FOUND"
   | "BOOKING_NOT_FOUND"
   | "BOOKING_NOT_ACTIVE"
   | "CLASS_NOT_CHALLENGE_ELIGIBLE"
   | "INVALID_CHALLENGE_POINTS"
+  | "INVALID_USER_CHALLENGE_POINTS"
+  | "CHALLENGE_POINTS_CONFLICT"
   | "CLASS_CHALLENGE_POINTS_LOCKED"
   | "CHALLENGE_AWARD_CONFLICT";
 
@@ -30,7 +36,8 @@ export class ChallengeError extends Error {
   constructor(
     public readonly code: ChallengeErrorCode,
     message: string,
-    public readonly status: number
+    public readonly status: number,
+    public readonly details?: Record<string, unknown>
   ) {
     super(message);
     this.name = "ChallengeError";
@@ -266,6 +273,154 @@ export function parseChallengePoints(value: unknown) {
   }
 
   return value;
+}
+
+export function parseUserChallengePoints(value: unknown) {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > CHALLENGE_USER_MAX_POINTS
+  ) {
+    throw new ChallengeError(
+      "INVALID_USER_CHALLENGE_POINTS",
+      `Los puntos deben ser un numero entero entre 0 y ${CHALLENGE_USER_MAX_POINTS.toLocaleString("es-MX")}.`,
+      400
+    );
+  }
+
+  return value;
+}
+
+function pointsConflict(current: { points: number; updatedAt: Date | null }) {
+  return new ChallengeError(
+    "CHALLENGE_POINTS_CONFLICT",
+    "Los puntos cambiaron en otra sesion. Se actualizo el valor mostrado; revisalo e intenta nuevamente.",
+    409,
+    {
+      current: {
+        points: current.points,
+        updatedAt: current.updatedAt?.toISOString() ?? null,
+      },
+    }
+  );
+}
+
+export async function setUserChallengePoints(
+  params: {
+    userId: string;
+    actorUserId: string;
+    points: unknown;
+    expectedPoints: number;
+    expectedUpdatedAt: Date | null;
+  },
+  client: PrismaClient = prisma
+) {
+  const points = parseUserChallengePoints(params.points);
+
+  return runChallengeTransaction(async (tx) => {
+    const challenge = await tx.challenge.findUnique({
+      where: { key: CHALLENGE_KEY },
+      select: { id: true, isActive: true, activationVersion: true },
+    });
+    if (!challenge?.isActive) {
+      throw new ChallengeError(
+        "CHALLENGE_NOT_ACTIVE",
+        "El Challenge no esta activo.",
+        409
+      );
+    }
+
+    const target = await tx.user.findUnique({
+      where: { id: params.userId },
+      select: { id: true },
+    });
+    if (!target) {
+      throw new ChallengeError("USER_NOT_FOUND", "El usuario no existe.", 404);
+    }
+
+    const existing = await tx.challengeUserTotal.findUnique({
+      where: {
+        challengeId_userId: {
+          challengeId: challenge.id,
+          userId: target.id,
+        },
+      },
+      select: { points: true, updatedAt: true },
+    });
+    const current = {
+      points: existing?.points ?? 0,
+      updatedAt: existing?.updatedAt ?? null,
+    };
+    const expectedTimestamp = params.expectedUpdatedAt?.getTime() ?? null;
+    const currentTimestamp = current.updatedAt?.getTime() ?? null;
+    if (
+      current.points !== params.expectedPoints ||
+      currentTimestamp !== expectedTimestamp
+    ) {
+      throw pointsConflict(current);
+    }
+
+    if (points === current.points) {
+      return {
+        userId: target.id,
+        points,
+        updatedAt: current.updatedAt,
+        activationVersion: challenge.activationVersion,
+        changed: false,
+      };
+    }
+
+    if (existing) {
+      const updated = await tx.challengeUserTotal.updateMany({
+        where: {
+          challengeId: challenge.id,
+          userId: target.id,
+          points: existing.points,
+          updatedAt: existing.updatedAt,
+        },
+        data: { points },
+      });
+      if (updated.count !== 1) throw pointsConflict(current);
+    } else {
+      await tx.challengeUserTotal.create({
+        data: {
+          challengeId: challenge.id,
+          userId: target.id,
+          points,
+        },
+      });
+    }
+
+    await tx.challengePointAdjustment.create({
+      data: {
+        challengeId: challenge.id,
+        userId: target.id,
+        actorUserId: params.actorUserId,
+        activationVersion: challenge.activationVersion,
+        previousPoints: current.points,
+        newPoints: points,
+      },
+    });
+
+    const updated = await tx.challengeUserTotal.findUniqueOrThrow({
+      where: {
+        challengeId_userId: {
+          challengeId: challenge.id,
+          userId: target.id,
+        },
+      },
+      select: { points: true, updatedAt: true },
+    });
+
+    return {
+      userId: target.id,
+      points: updated.points,
+      updatedAt: updated.updatedAt,
+      activationVersion: challenge.activationVersion,
+      changed: true,
+    };
+  }, client);
 }
 
 export async function setClassChallengePoints(
@@ -552,13 +707,33 @@ export async function updateAttendanceWithChallenge(params: {
       };
     }
 
+    const currentTotal = await tx.challengeUserTotal.findUnique({
+      where: {
+        challengeId_userId: {
+          challengeId: challenge.id,
+          userId: booking.userId,
+        },
+      },
+      select: { points: true },
+    });
+    if (!currentTotal) {
+      throw new ChallengeError(
+        "CHALLENGE_AWARD_CONFLICT",
+        "El total del Challenge cambio durante la reversion.",
+        409
+      );
+    }
+    const pointsToRemove = Math.min(
+      currentTotal.points,
+      existing.pointsSnapshot
+    );
     const updatedTotal = await tx.challengeUserTotal.updateMany({
       where: {
         challengeId: challenge.id,
         userId: booking.userId,
-        points: { gte: existing.pointsSnapshot },
+        points: currentTotal.points,
       },
-      data: { points: { decrement: existing.pointsSnapshot } },
+      data: { points: { decrement: pointsToRemove } },
     });
 
     if (updatedTotal.count !== 1) {
@@ -588,6 +763,7 @@ export async function updateAttendanceWithChallenge(params: {
         idempotencyKey: `challenge:${challenge.id}:booking:${booking.id}:reversal:${existing.cycle}`,
         metadata: {
           activationVersion: booking.class.challengeActivationVersion,
+          currentTotalDeltaApplied: -pointsToRemove,
         },
       },
     });
@@ -618,7 +794,12 @@ export function challengeErrorResponse(error: unknown) {
   if (error instanceof ChallengeError) {
     return {
       status: error.status,
-      body: { error: error.code, code: error.code, message: error.message },
+      body: {
+        error: error.code,
+        code: error.code,
+        message: error.message,
+        ...error.details,
+      },
     };
   }
 

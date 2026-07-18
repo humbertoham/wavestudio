@@ -22,7 +22,7 @@ All other application pages and APIs are blocked server-side.
 
 The command uses persisted `User.affiliation = WELLHUB`. It does not filter by role or `bookingBlocked`, and it does not change those fields. This repository has no soft-delete, anonymized, inactive, or machine-account fields, so no additional lifecycle exclusion is possible; the summary reports `excludedDeletedOrAnonymized: 0`.
 
-The command changes only the campaign flags and `authVersion`. Existing `wellhubPlan`, packs, purchases, ledger entries, credits, bookings, Challenge points, roles, and booking-block state are unchanged.
+The command changes only the campaign flags and `authVersion`. Existing `wellhubPlan`, packs, purchases, ledger entries, credits, bookings, Challenge points, roles, and booking-block state are unchanged. Users who already require confirmation are reported separately and are not updated or version-incremented again.
 
 `--user-id` is an optional controlled-fixture cohort selector for dev/UAT verification. Omit it for the intended all-applicable-user campaign.
 
@@ -31,7 +31,7 @@ The command changes only the campaign flags and `authVersion`. Existing `wellhub
 The correctly spelled command is:
 
 ```text
-npm run wellhub:require-plan-confirmation -- --target=<dev|uat|prod> --campaign=<stable-id> [--apply]
+npm run wellhub:reset-confirmations -- --target=<dev|uat> --campaign=<stable-id> [--apply]
 ```
 
 It defaults to dry run. A campaign must use 3–100 letters, numbers, dots, underscores, or hyphens. Each user/campaign pair is unique, so rerunning the same campaign does not re-flag the user or increment `authVersion` again. A later campaign creates a new audit row and can require confirmation again.
@@ -52,34 +52,15 @@ npm run wellhub:require-plan-confirmation -- --target=uat --campaign=wellhub-pla
 npm run wellhub:require-plan-confirmation -- --target=uat --campaign=wellhub-plan-reconfirmation-2026-01-uat-smoke --user-id=<fixture-user-id> --apply
 ```
 
-The script loads only the target-specific local file and key:
+`wellhub:require-plan-confirmation` remains an alias for the same command. The script loads only the target-specific local file and key:
 
 - dev: `.env.dev.local` / `DATABASE_URL_DEV_BRANCH`;
 - UAT: `.env.uat.local` / `DATABASE_URL_UAT_BRANCH`;
-- future production: `.env.prod.local` / `DATABASE_URL_PROD`.
+- production is not an accepted target.
 
-It rejects unknown targets, missing/placeholder URLs, an optional `WAVE_DATABASE_TARGET` marker mismatch, a database fingerprint matching another configured environment, and production-looking host/database names under dev or UAT. Output includes only the target, host, database name, cohort kind, and aggregate counts; it never prints the connection string, credentials, email, password, cookie, or JWT.
+It rejects unknown or production targets, missing/placeholder URLs, an optional `WAVE_DATABASE_TARGET` marker mismatch, a database fingerprint matching another configured environment, and production-looking host/database names. Output includes only the target, redacted database identity, cohort kind, and aggregate counts; it never prints the connection string, credentials, email, password, cookie, or JWT.
 
-Each apply batch creates campaign records and updates users in one transaction. A failed batch rolls back fully, is reported in `failed`, and can be safely retried. Successfully committed earlier batches remain idempotent.
-
-## Future production procedure — not executed
-
-Production deliberately has no dry-run mode because the production guard requires every destructive-intent signal together. Before the authorized maintenance window:
-
-1. Deploy the already-reviewed migration and application through the production release process.
-2. Create `.env.prod.local` locally with `DATABASE_URL_PROD` and `WAVE_DATABASE_TARGET=prod`; never commit it.
-3. Independently verify the redacted host/database identity and expected WellHub count with an approved read-only production query/report.
-4. Choose and record a stable campaign ID.
-5. Run exactly:
-
-```text
-npm run wellhub:require-plan-confirmation -- --target=prod --campaign=<approved-stable-id> --apply --confirm-production=REQUIRE_WELLHUB_PLAN_CONFIRMATION
-```
-
-6. Save the aggregate command summary, monitor the admin campaign report, support queue, confirmation errors, and credit-ledger anomalies.
-7. Do not rerun with another campaign ID to repair individual failures; rerun the same campaign so completed/pending rows remain idempotent.
-
-The production command was not run while implementing this feature.
+Each apply batch selects only WellHub users who do not already require confirmation, creates campaign records, increments `authVersion` exactly once, and updates the flags in one transaction. A failed batch rolls back fully, is reported in `failed`, and can be safely retried. The summary includes eligible, already-required, would-modify, modified, sessions-invalidated, and post-apply remaining counts. Successfully committed earlier batches remain idempotent.
 
 ## Confirmation transaction and credits
 

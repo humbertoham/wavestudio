@@ -28,6 +28,7 @@ Lifecycle changes, eligibility snapshots, point edits, attendance, class cancell
 ## Award and reversal model
 
 - `ChallengePointLedger` is immutable and records the user, class, booking, actor, signed delta, reason, point snapshot, cycle, metadata, and a unique idempotency key.
+- `ChallengePointAdjustment` is the immutable audit trail for an administrator overriding a user's current aggregate. It stores the actor, target, previous/new values, timestamp, and activation version without rewriting attendance history.
 - `ChallengeBookingAward` stores the current awarded/reversed state for one Challenge booking and its current cycle. Its unique `(challengeId, bookingId)` key prevents duplicate awards.
 - `ChallengeUserTotal` is a transactionally maintained aggregate with a non-negative database check.
 - The first award locks the class point value permanently, including after a reversal.
@@ -39,6 +40,7 @@ Lifecycle changes, eligibility snapshots, point edits, attendance, class cancell
 
 - `GET|POST|DELETE /api/admin/challenge`: admin status, activation, and deactivation.
 - `GET /api/admin/challenge/leaderboard`: admin-only paginated ranking; points descending, then lowercase name and user ID.
+- `PATCH /api/admin/challenge/users/:userId/points`: admin-only current-total override; integers 0–1,000,000 with expected value/timestamp concurrency protection.
 - `PUT /api/admin/classes/:id/challenge-points`: admin-only integer values 1–10; returns `CLASS_CHALLENGE_POINTS_LOCKED` after an award.
 - `PATCH /api/admin/bookings/:id/attendance`: existing admin/coach mutation, now atomically returns `{ challenge: { delta, points } }`.
 - `GET /api/challenge`: authenticated caller's active state and own total only.
@@ -48,6 +50,7 @@ The public user page never includes the leaderboard. Normal users and coaches re
 ## UI behavior
 
 - The admin `CHALLENGE` tab shows inactive/active state, Spanish confirmation, lifecycle feedback, and the private paginated leaderboard.
+- Each leaderboard point value is editable in place with Save/Cancel, Enter/Escape, validation, loading/error/success feedback, optimistic display refresh, and background revalidation without losing the current page.
 - Eligible class point controls appear only in the class table while active.
 - `/perfil` and the class calendar show the star total next to unchanged credits while active.
 - Desktop user menu and mobile navigation show `¿Cómo funciona el Challenge?` only while active.

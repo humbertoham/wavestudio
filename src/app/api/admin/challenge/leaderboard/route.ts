@@ -18,6 +18,7 @@ type LeaderboardRow = {
   name: string;
   email: string;
   points: number;
+  updatedAt: Date | null;
 };
 
 export async function GET(req: NextRequest) {
@@ -52,7 +53,8 @@ export async function GET(req: NextRequest) {
         u."id",
         u."name",
         u."email",
-        COALESCE(t."points", 0)::int AS "points"
+        COALESCE(t."points", 0)::int AS "points",
+        t."updatedAt" AS "updatedAt"
       FROM "User" u
       LEFT JOIN "ChallengeUserTotal" t
         ON t."userId" = u."id" AND t."challengeId" = ${challenge.id}
@@ -74,6 +76,7 @@ export async function GET(req: NextRequest) {
         name: row.name,
         email: row.email,
         points: Number(row.points),
+        updatedAt: row.updatedAt?.toISOString() ?? null,
       })),
       page,
       pageSize,

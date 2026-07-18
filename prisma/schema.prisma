@@ -101,19 +101,21 @@ model User {
   updatedAt        DateTime  @updatedAt
 
   // relaciones
-  bookings               Booking[]
-  packs                  PackPurchase[]
-  tokenLedger            TokenLedger[]
-  waitlists              Waitlist[]
-  payments               Payment[]
-  checkoutLinks          CheckoutLink[]
-  bookingBlockLogs       BookingBlockLog[]
-  challengeTotals        ChallengeUserTotal[]
-  challengeAwards        ChallengeBookingAward[]
-  challengePointLedger   ChallengePointLedger[]  @relation("ChallengePointUser")
-  challengePointActions  ChallengePointLedger[]  @relation("ChallengePointActor")
-  challengeActivations   Challenge[]             @relation("ChallengeActivatedBy")
-  challengeDeactivations Challenge[]             @relation("ChallengeDeactivatedBy")
+  bookings                      Booking[]
+  packs                         PackPurchase[]
+  tokenLedger                   TokenLedger[]
+  waitlists                     Waitlist[]
+  payments                      Payment[]
+  checkoutLinks                 CheckoutLink[]
+  bookingBlockLogs              BookingBlockLog[]
+  challengeTotals               ChallengeUserTotal[]
+  challengeAwards               ChallengeBookingAward[]
+  challengePointLedger          ChallengePointLedger[]     @relation("ChallengePointUser")
+  challengePointActions         ChallengePointLedger[]     @relation("ChallengePointActor")
+  challengePointAdjustments     ChallengePointAdjustment[] @relation("ChallengePointAdjustmentUser")
+  challengePointAdjustmentsMade ChallengePointAdjustment[] @relation("ChallengePointAdjustmentActor")
+  challengeActivations          Challenge[]                @relation("ChallengeActivatedBy")
+  challengeDeactivations        Challenge[]                @relation("ChallengeDeactivatedBy")
 
   // password reset
   passwordResetTokens PasswordResetToken[]
@@ -272,10 +274,11 @@ model Challenge {
   deactivatedBy   User?   @relation("ChallengeDeactivatedBy", fields: [deactivatedById], references: [id], onDelete: SetNull)
   deactivatedById String?
 
-  classes     Class[]
-  userTotals  ChallengeUserTotal[]
-  awards      ChallengeBookingAward[]
-  pointLedger ChallengePointLedger[]
+  classes          Class[]
+  userTotals       ChallengeUserTotal[]
+  awards           ChallengeBookingAward[]
+  pointLedger      ChallengePointLedger[]
+  pointAdjustments ChallengePointAdjustment[]
 
   @@index([isActive])
 }
@@ -343,6 +346,25 @@ model ChallengePointLedger {
   @@index([challengeId, userId, createdAt])
   @@index([challengeId, classId])
   @@index([bookingId])
+}
+
+// Immutable audit trail for explicit admin overrides of the current aggregate.
+// Attendance history remains in ChallengePointLedger and is never rewritten.
+model ChallengePointAdjustment {
+  id                String    @id @default(cuid())
+  challenge         Challenge @relation(fields: [challengeId], references: [id], onDelete: Restrict)
+  challengeId       String
+  user              User      @relation("ChallengePointAdjustmentUser", fields: [userId], references: [id], onDelete: Restrict)
+  userId            String
+  actor             User?     @relation("ChallengePointAdjustmentActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorUserId       String?
+  activationVersion Int
+  previousPoints    Int
+  newPoints         Int
+  createdAt         DateTime  @default(now())
+
+  @@index([challengeId, userId, createdAt])
+  @@index([actorUserId, createdAt])
 }
 
 /**
