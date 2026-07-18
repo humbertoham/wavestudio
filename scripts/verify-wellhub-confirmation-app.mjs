@@ -228,6 +228,7 @@ try {
   assert(logout.status === 200, "Logout was not accessible while blocked.");
 
   const confirmationLogin = await login(`${affectedId}@example.invalid`);
+  const confirmationStartedAt = performance.now();
   const confirmation = await request(
     "/api/users/me/wellhub-plan-confirmation",
     {
@@ -238,6 +239,9 @@ try {
       },
       body: JSON.stringify({ wellhubPlan: "PLATINUM" }),
     }
+  );
+  const confirmationRequestMs = Math.round(
+    performance.now() - confirmationStartedAt
   );
   const confirmationPayload = await confirmation.json();
   assert(confirmation.status === 200, "Plan confirmation failed.");
@@ -270,6 +274,7 @@ try {
 
   // Simulate a committed database update whose Set-Cookie response was lost:
   // retry with the previous signed cookie and require transition-bound recovery.
+  const recoveryStartedAt = performance.now();
   const recovered = await request(
     "/api/users/me/wellhub-plan-confirmation",
     {
@@ -281,6 +286,7 @@ try {
       body: JSON.stringify({ wellhubPlan: "PLATINUM" }),
     }
   );
+  const recoveryRequestMs = Math.round(performance.now() - recoveryStartedAt);
   const recoveredPayload = await recovered.json();
   assert(
     recovered.status === 200 &&
@@ -362,6 +368,7 @@ try {
     DIAMOND_PLUS: 30,
   };
   const verifiedPlans = [];
+  const planRequestDurationsMs = {};
   for (const [selectedPlan, expectedCredits] of Object.entries(planCredits)) {
     const planUserId = `wellhub_plan_smoke_${selectedPlan.toLowerCase()}_${suffix}`;
     planCaseIds.push(planUserId);
@@ -404,10 +411,14 @@ try {
         },
         body: JSON.stringify({ wellhubPlan: selectedPlan }),
       });
+    const planRequestStartedAt = performance.now();
     const planResponses =
       selectedPlan === "DIAMOND"
         ? await Promise.all([submitPlan(), submitPlan()])
         : [await submitPlan()];
+    planRequestDurationsMs[selectedPlan] = Math.round(
+      performance.now() - planRequestStartedAt
+    );
     const planPayloads = await Promise.all(
       planResponses.map((response) => response.json())
     );
@@ -470,6 +481,8 @@ try {
         unaffectedAccess: "passed",
         oldSessionInvalidation: "passed",
         confirmationSessionRotation: "N-to-N+1",
+        confirmationRequestMs,
+        recoveryRequestMs,
         lostCookieResponseRecovery: "passed",
         alreadyConfirmedRecovery: "passed",
         firstAndRefreshedClassesRequest: "passed",
@@ -483,6 +496,7 @@ try {
         sameCampaignRerun: "idempotent",
         challengeState: "unchanged",
         verifiedPlans,
+        planRequestDurationsMs,
         concurrentDiamondSubmissions: "idempotent",
       },
       null,

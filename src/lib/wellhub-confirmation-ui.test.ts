@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  acquireWellhubSubmissionLock,
   completeWellhubConfirmationNavigation,
+  releaseWellhubSubmissionLock,
   submitWellhubConfirmationRequest,
   WELLHUB_CONFIRMATION_COPY,
   WELLHUB_CONFIRMATION_DESTINATION,
@@ -41,6 +43,38 @@ describe("WellHub confirmation UI contract", () => {
   it("shows a useful validation error before an empty submission", () => {
     expect(validateWellhubConfirmationSelection("")).toContain("Selecciona");
     expect(validateWellhubConfirmationSelection("PLATINUM")).toBeNull();
+  });
+
+  it("allows only one active submission until the synchronous lock is released", () => {
+    const lock = { current: false };
+    expect(acquireWellhubSubmissionLock(lock)).toBe(true);
+    expect(acquireWellhubSubmissionLock(lock)).toBe(false);
+    releaseWellhubSubmissionLock(lock);
+    expect(acquireWellhubSubmissionLock(lock)).toBe(true);
+  });
+
+  it("returns a normal success once without a delayed retry or session refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      const success = new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+      });
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(success);
+      await expect(
+        submitWellhubConfirmationRequest({
+          selectedPlan: "GOLD_PLUS",
+          fetchImpl,
+        })
+      ).resolves.toBe(success);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(fetchImpl).toHaveBeenCalledWith(
+        "/api/users/me/wellhub-plan-confirmation",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("automatically retries one lost response and then returns the recovery response", async () => {
@@ -93,17 +127,42 @@ describe("WellHub confirmation UI contract", () => {
     expect(permanentNetworkFailure).toHaveBeenCalledTimes(2);
   });
 
+  it("aborts a genuinely hanging request at the total timeout and does not retry it", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = vi.fn<typeof fetch>((_input, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          });
+        })
+      );
+      const request = submitWellhubConfirmationRequest({
+        selectedPlan: "PLATINUM",
+        fetchImpl,
+        timeoutMs: 12_000,
+      });
+      const rejection = expect(request).rejects.toThrow(
+        "tardó demasiado y fue cancelada"
+      );
+      await vi.advanceTimersByTimeAsync(12_000);
+      await rejection;
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("replaces history without an unnecessary second session request", async () => {
     const calls: string[] = [];
 
     await expect(
       completeWellhubConfirmationNavigation({
         replace: (destination) => calls.push(`replace:${destination}`),
-        refreshRouter: () => calls.push("router-refresh"),
       })
     ).resolves.toBe(WELLHUB_CONFIRMATION_DESTINATION);
 
-    expect(calls).toEqual(["replace:/clases", "router-refresh"]);
+    expect(calls).toEqual(["replace:/clases"]);
   });
 
   it("does not navigate when refreshed auth state is still pending", async () => {
