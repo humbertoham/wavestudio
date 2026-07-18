@@ -26,9 +26,29 @@ function fakePrisma(initialUsers: FakeUser[]) {
   }> = [];
   const credits = new Map(users.map((user) => [user.id, 7]));
 
-  const matchesUser = (user: FakeUser, where: any) =>
-    (!where?.affiliation || user.affiliation === where.affiliation) &&
-    (!where?.id || user.id === where.id);
+  const matchesUser = (user: FakeUser, where: any) => {
+    if (where?.affiliation && user.affiliation !== where.affiliation) return false;
+    if (typeof where?.id === "string" && user.id !== where.id) return false;
+    if (where?.id?.in && !where.id.in.includes(user.id)) return false;
+    if (
+      typeof where?.wellhubPlanConfirmationRequired === "boolean" &&
+      user.wellhubPlanConfirmationRequired !==
+        where.wellhubPlanConfirmationRequired
+    ) {
+      return false;
+    }
+    const excludedCampaign = where?.wellhubPlanConfirmations?.none?.campaign;
+    if (
+      excludedCampaign &&
+      records.some(
+        (record) =>
+          record.userId === user.id && record.campaign === excludedCampaign
+      )
+    ) {
+      return false;
+    }
+    return true;
+  };
 
   const confirmation = {
     count: vi.fn(async ({ where }: any) =>
@@ -81,7 +101,9 @@ function fakePrisma(initialUsers: FakeUser[]) {
       const start = cursor
         ? sorted.findIndex((item) => item.id === cursor.id) + (skip ?? 0)
         : 0;
-      return sorted.slice(start, start + take).map(({ id }) => ({ id }));
+      return sorted
+        .slice(start, start + (take ?? sorted.length))
+        .map(({ id }) => ({ id }));
     }),
     updateMany: vi.fn(async ({ where, data }: any) => {
       let count = 0;
@@ -89,10 +111,8 @@ function fakePrisma(initialUsers: FakeUser[]) {
         if (
           !where.id.in.includes(item.id) ||
           item.affiliation !== where.affiliation ||
-          (item.wellhubPlanConfirmationCampaign ===
-            where.NOT.wellhubPlanConfirmationCampaign &&
-            item.wellhubPlanConfirmationRequired ===
-              where.NOT.wellhubPlanConfirmationRequired)
+          item.wellhubPlanConfirmationRequired !==
+            where.wellhubPlanConfirmationRequired
         ) {
           continue;
         }
@@ -175,6 +195,7 @@ describe("WellHub reconfirmation campaign command", () => {
     expect(summary).toMatchObject({
       eligibleUsers: 2,
       wouldFlag: 2,
+      alreadyRequiringConfirmation: 0,
       newlyFlagged: 0,
       sessionsInvalidated: 0,
       excludedDeletedOrAnonymized: 0,
@@ -209,7 +230,54 @@ describe("WellHub reconfirmation campaign command", () => {
     expect(users.map(({ id, wellhubPlan }) => ({ id, wellhubPlan }))).toEqual(
       plansBefore
     );
+    expect(users.map(({ id, role }) => ({ id, role }))).toEqual(
+      applicableUsers.map(({ id, role }) => ({ id, role }))
+    );
     expect([...credits]).toEqual(creditsBefore);
+  });
+
+  it("includes every WellHub plan value but skips accounts already requiring confirmation", async () => {
+    const plans: FakeUser[] = [
+      ...applicableUsers,
+      {
+        ...applicableUsers[1],
+        id: "wellhub_gold",
+        wellhubPlan: "GOLD_PLUS",
+      },
+      {
+        ...applicableUsers[1],
+        id: "wellhub_legacy",
+        wellhubPlan: "SILVER_LEGACY",
+      },
+      {
+        ...applicableUsers[1],
+        id: "wellhub_already_pending",
+        wellhubPlan: "DIAMOND_PLUS",
+        authVersion: 9,
+        wellhubPlanConfirmationRequired: true,
+        wellhubPlanConfirmationCampaign: "older-campaign",
+      },
+    ];
+    const { prisma, users } = fakePrisma(plans);
+    const summary = await runCampaignCommand(prisma, {
+      target: "dev",
+      campaign: "campaign-all-plans",
+      apply: true,
+      batchSize: 100,
+    });
+
+    expect(summary).toMatchObject({
+      eligibleUsers: 5,
+      alreadyRequiringConfirmation: 1,
+      wouldFlag: 4,
+      newlyFlagged: 4,
+      sessionsInvalidated: 4,
+      afterRequiringConfirmation: 5,
+      remainingToModify: 0,
+    });
+    expect(
+      users.find((user) => user.id === "wellhub_already_pending")
+    ).toMatchObject({ authVersion: 9, wellhubPlanConfirmationRequired: true });
   });
 
   it("is idempotent for one campaign and permits a later campaign", async () => {
@@ -228,6 +296,11 @@ describe("WellHub reconfirmation campaign command", () => {
     expect(rerun.alreadyFlaggedForCampaign).toBe(2);
     expect(users.map((user) => user.authVersion)).toEqual(versions);
 
+    for (const user of users) {
+      if (user.affiliation === "WELLHUB") {
+        user.wellhubPlanConfirmationRequired = false;
+      }
+    }
     const next = await runCampaignCommand(prisma, {
       ...base,
       campaign: "campaign-2026-02",
@@ -268,26 +341,25 @@ describe("WellHub command target guards", () => {
     ).toThrow("--campaign");
   });
 
-  it("requires apply and the exact production acknowledgement", () => {
+  it("refuses every production invocation", () => {
     expect(() =>
       parseCommandArgs(["--target=prod", "--campaign=valid-campaign"])
-    ).toThrow("Production requires");
+    ).toThrow("Production is not supported");
     expect(() =>
       parseCommandArgs([
         "--target=prod",
         "--campaign=valid-campaign",
         "--apply",
-        "--confirm-production=wrong",
       ])
-    ).toThrow("Production requires");
-    expect(
+    ).toThrow("Production is not supported");
+    expect(() =>
       parseCommandArgs([
         "--target=prod",
         "--campaign=valid-campaign",
         "--apply",
         "--confirm-production=REQUIRE_WELLHUB_PLAN_CONFIRMATION",
-      ]).target
-    ).toBe("prod");
+      ])
+    ).toThrow();
   });
 
   it("rejects configured target swaps and production-looking non-prod databases", () => {

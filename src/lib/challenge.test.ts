@@ -7,6 +7,7 @@ import {
   deactivateChallenge,
   getClassChallengeSnapshot,
   parseChallengePoints,
+  parseUserChallengePoints,
 } from "./challenge";
 
 describe("Challenge domain validation", () => {
@@ -19,6 +20,25 @@ describe("Challenge domain validation", () => {
     (value) => {
       expect(() => parseChallengePoints(value)).toThrowError(
         expect.objectContaining({ code: "INVALID_CHALLENGE_POINTS", status: 400 })
+      );
+    }
+  );
+
+  it.each([0, 25, 1_000_000])(
+    "accepts integer user point value %s",
+    (value) => {
+      expect(parseUserChallengePoints(value)).toBe(value);
+    }
+  );
+
+  it.each([-1, 1_000_001, 1.5, "3", null, undefined, Number.NaN])(
+    "rejects malformed user point value %s",
+    (value) => {
+      expect(() => parseUserChallengePoints(value)).toThrowError(
+        expect.objectContaining({
+          code: "INVALID_USER_CHALLENGE_POINTS",
+          status: 400,
+        })
       );
     }
   );

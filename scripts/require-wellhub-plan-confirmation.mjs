@@ -2,8 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
-const TARGETS = new Set(["dev", "uat", "prod"]);
-const PRODUCTION_ACK = "REQUIRE_WELLHUB_PLAN_CONFIRMATION";
+const TARGETS = new Set(["dev", "uat"]);
 const DEFAULT_BATCH_SIZE = 100;
 const CAMPAIGN_PATTERN = /^[a-z0-9][a-z0-9._-]{2,99}$/i;
 
@@ -29,7 +28,6 @@ export function parseCommandArgs(argv) {
     "target",
     "campaign",
     "apply",
-    "confirm-production",
     "user-id",
     "batch-size",
   ]);
@@ -40,16 +38,13 @@ export function parseCommandArgs(argv) {
   const target = String(args.get("target") ?? "").toLowerCase();
   const campaign = String(args.get("campaign") ?? "").trim();
   const apply = args.get("apply") === true;
-  const confirmProduction = String(
-    args.get("confirm-production") ?? ""
-  );
   const userId = String(args.get("user-id") ?? "").trim() || null;
   const batchSizeValue = Number(
     args.get("batch-size") ?? DEFAULT_BATCH_SIZE
   );
 
   if (!TARGETS.has(target)) {
-    throw new Error("--target must be dev, uat, or prod.");
+    throw new Error("--target must be dev or uat. Production is not supported.");
   }
   if (!CAMPAIGN_PATTERN.test(campaign)) {
     throw new Error(
@@ -63,20 +58,6 @@ export function parseCommandArgs(argv) {
   ) {
     throw new Error("--batch-size must be an integer from 1 to 500.");
   }
-  if (
-    target === "prod" &&
-    (!apply || confirmProduction !== PRODUCTION_ACK)
-  ) {
-    throw new Error(
-      `Production requires --apply and --confirm-production=${PRODUCTION_ACK}.`
-    );
-  }
-  if (target !== "prod" && confirmProduction) {
-    throw new Error(
-      "--confirm-production is only valid with --target=prod."
-    );
-  }
-
   return {
     target,
     campaign,
@@ -104,9 +85,7 @@ export function parseEnvText(contents) {
 }
 
 function databaseKey(target) {
-  return target === "prod"
-    ? "DATABASE_URL_PROD"
-    : `DATABASE_URL_${target.toUpperCase()}_BRANCH`;
+  return `DATABASE_URL_${target.toUpperCase()}_BRANCH`;
 }
 
 function isPlaceholder(raw) {
@@ -183,9 +162,9 @@ export function resolveDatabaseTarget({
     }
   }
 
-  if (target !== "prod" && looksProduction(identity)) {
+  if (looksProduction(identity)) {
     throw new Error(
-      "Selected database appears production-like; use the production target and acknowledgement."
+      "Selected database appears production-like; production execution is not supported."
     );
   }
 
@@ -205,9 +184,26 @@ function eligibilityWhere(userId) {
 
 export async function inspectCampaign(prisma, { campaign, userId = null }) {
   const where = eligibilityWhere(userId);
-  const [eligibleUsers, campaignRecords, pendingRecords, completedRecords] =
+  const [
+    eligibleUsers,
+    alreadyRequiringConfirmation,
+    usersThatWouldBeModified,
+    campaignRecords,
+    pendingRecords,
+    completedRecords,
+  ] =
     await Promise.all([
       prisma.user.count({ where }),
+      prisma.user.count({
+        where: { ...where, wellhubPlanConfirmationRequired: true },
+      }),
+      prisma.user.count({
+        where: {
+          ...where,
+          wellhubPlanConfirmationRequired: false,
+          wellhubPlanConfirmations: { none: { campaign } },
+        },
+      }),
       prisma.wellhubPlanConfirmation.count({
         where: { campaign, user: where },
       }),
@@ -221,7 +217,9 @@ export async function inspectCampaign(prisma, { campaign, userId = null }) {
 
   return {
     eligibleUsers,
-    newCandidates: Math.max(eligibleUsers - campaignRecords, 0),
+    alreadyRequiringConfirmation,
+    usersThatWouldBeModified,
+    campaignRecords,
     alreadyFlaggedForCampaign: pendingRecords,
     alreadyConfirmedForCampaign: completedRecords,
   };
@@ -256,7 +254,18 @@ export async function applyCampaign(
           select: { userId: true },
         });
         const existingIds = new Set(existing.map((row) => row.userId));
-        const candidates = ids.filter((id) => !existingIds.has(id));
+        const eligibleCandidates = await tx.user.findMany({
+          where: {
+            id: { in: ids },
+            affiliation: "WELLHUB",
+            wellhubPlanConfirmationRequired: false,
+          },
+          select: { id: true },
+          orderBy: { id: "asc" },
+        });
+        const candidates = eligibleCandidates
+          .map((user) => user.id)
+          .filter((id) => !existingIds.has(id));
         if (candidates.length === 0) return 0;
 
         await tx.wellhubPlanConfirmation.createMany({
@@ -275,10 +284,7 @@ export async function applyCampaign(
           where: {
             id: { in: candidates },
             affiliation: "WELLHUB",
-            NOT: {
-              wellhubPlanConfirmationCampaign: campaign,
-              wellhubPlanConfirmationRequired: true,
-            },
+            wellhubPlanConfirmationRequired: false,
           },
           data: {
             wellhubPlanConfirmationRequired: true,
@@ -287,6 +293,9 @@ export async function applyCampaign(
             authVersion: { increment: 1 },
           },
         });
+        if (result.count !== candidates.length) {
+          throw new Error("Campaign candidates changed during the transaction.");
+        }
         return result.count;
       });
       newlyFlagged += updated;
@@ -311,6 +320,9 @@ export async function runCampaignCommand(prisma, options) {
         failed: 0,
         batches: 0,
       };
+  const after = options.apply
+    ? await inspectCampaign(prisma, options)
+    : before;
 
   return {
     target: options.target,
@@ -318,7 +330,8 @@ export async function runCampaignCommand(prisma, options) {
     mode: options.apply ? "apply" : "dry-run",
     cohort: options.userId ? "single-user" : "all-applicable-users",
     eligibleUsers: before.eligibleUsers,
-    wouldFlag: options.apply ? 0 : before.newCandidates,
+    alreadyRequiringConfirmation: before.alreadyRequiringConfirmation,
+    wouldFlag: before.usersThatWouldBeModified,
     newlyFlagged: applied.newlyFlagged,
     alreadyFlaggedForCampaign: before.alreadyFlaggedForCampaign,
     alreadyConfirmedForCampaign: before.alreadyConfirmedForCampaign,
@@ -326,6 +339,9 @@ export async function runCampaignCommand(prisma, options) {
     sessionsInvalidated: applied.sessionsInvalidated,
     failed: applied.failed,
     batches: applied.batches,
+    afterEligibleUsers: after.eligibleUsers,
+    afterRequiringConfirmation: after.alreadyRequiringConfirmation,
+    remainingToModify: after.usersThatWouldBeModified,
     durationMs: Date.now() - startedAt,
   };
 }
@@ -337,7 +353,7 @@ export async function main(argv = process.argv.slice(2)) {
   } catch (error) {
     console.error(error instanceof Error ? error.message : "Invalid arguments.");
     console.error(
-      "Usage: npm run wellhub:require-plan-confirmation -- --target=dev|uat|prod --campaign=<stable-id> [--apply] [--user-id=<controlled-fixture-id>]"
+      "Usage: npm run wellhub:require-plan-confirmation -- --target=dev|uat --campaign=<stable-id> [--apply] [--user-id=<controlled-fixture-id>]"
     );
     return 1;
   }

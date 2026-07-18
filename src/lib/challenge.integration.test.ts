@@ -29,6 +29,7 @@ import {
   getClassChallengeSnapshot,
   runChallengeTransaction,
   setClassChallengePoints,
+  setUserChallengePoints,
   updateAttendanceWithChallenge,
 } from "@/lib/challenge";
 import { prisma } from "@/lib/prisma";
@@ -60,6 +61,7 @@ describeWithDatabase("Challenge database integration", () => {
   let instructorId = "";
   const classIds = new Set<string>();
   const bookingIds = new Set<string>();
+  const packIds = new Set<string>();
 
   beforeAll(async () => {
     await prisma.$connect();
@@ -164,6 +166,11 @@ describeWithDatabase("Challenge database integration", () => {
         ],
       },
     });
+    await prisma.challengePointAdjustment.deleteMany({
+      where: {
+        OR: [{ userId: { in: users } }, { actorUserId: { in: users } }],
+      },
+    });
     await prisma.challengeBookingAward.deleteMany({
       where: {
         OR: [
@@ -182,11 +189,13 @@ describeWithDatabase("Challenge database integration", () => {
     });
     await prisma.class.deleteMany({ where: { id: { in: classes } } });
     await prisma.packPurchase.deleteMany({ where: { userId: { in: users } } });
+    await prisma.pack.deleteMany({ where: { id: { in: [...packIds] } } });
     await prisma.user.deleteMany({ where: { id: { in: users } } });
     await prisma.instructor.deleteMany({ where: { id: instructorId } });
 
     classIds.clear();
     bookingIds.clear();
+    packIds.clear();
   });
 
   afterAll(async () => {
@@ -552,6 +561,148 @@ describeWithDatabase("Challenge database integration", () => {
     expect(
       leaderboard.items.find((item: { id: string }) => item.id === userId)
     ).toMatchObject({ points: 0 });
+  });
+
+  it("edits current user points with optimistic concurrency and immutable admin audit", async () => {
+    const challenge = await activateChallenge(adminId);
+    const cls = await createClass(true, "Admin point adjustment class");
+    const booking = await createBooking(cls.id);
+    await updateAttendanceWithChallenge({
+      bookingId: booking.id,
+      attended: true,
+      actorUserId: coachId,
+    });
+    const initialTotal = await prisma.challengeUserTotal.findUniqueOrThrow({
+      where: {
+        challengeId_userId: { challengeId: challenge.id, userId },
+      },
+    });
+    const pack = await prisma.pack.create({
+      data: {
+        id: `challenge-adjustment-pack-${randomUUID()}`,
+        name: "Challenge adjustment fixture",
+        classes: 5,
+        price: 100,
+        validityDays: 30,
+        isActive: false,
+        isVisible: false,
+      },
+    });
+    packIds.add(pack.id);
+    const purchase = await prisma.packPurchase.create({
+      data: {
+        userId,
+        packId: pack.id,
+        classesLeft: 5,
+        expiresAt: new Date(Date.now() + 86_400_000),
+      },
+    });
+
+    const untouchedBefore = await prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { role: true, affiliation: true, bookingBlocked: true },
+    });
+
+    const first = await setUserChallengePoints({
+      userId,
+      actorUserId: adminId,
+      points: 25,
+      expectedPoints: initialTotal.points,
+      expectedUpdatedAt: initialTotal.updatedAt,
+    });
+    expect(first).toMatchObject({
+      userId,
+      points: 25,
+      activationVersion: challenge.activationVersion,
+      changed: true,
+    });
+
+    await expect(
+      setUserChallengePoints({
+        userId,
+        actorUserId: adminId,
+        points: 30,
+        expectedPoints: initialTotal.points,
+        expectedUpdatedAt: initialTotal.updatedAt,
+      })
+    ).rejects.toMatchObject({
+      code: "CHALLENGE_POINTS_CONFLICT",
+      status: 409,
+      details: { current: { points: 25 } },
+    });
+
+    const zero = await setUserChallengePoints({
+      userId,
+      actorUserId: adminId,
+      points: 0,
+      expectedPoints: first.points,
+      expectedUpdatedAt: first.updatedAt,
+    });
+    expect(zero.points).toBe(0);
+    await expect(
+      updateAttendanceWithChallenge({
+        bookingId: booking.id,
+        attended: false,
+        actorUserId: coachId,
+      })
+    ).resolves.toMatchObject({ challenge: { points: 0 } });
+
+    const [adjustments, untouchedAfter, purchaseAfter, bookingAfter] =
+      await Promise.all([
+        prisma.challengePointAdjustment.findMany({
+          where: { challengeId: challenge.id, userId },
+          orderBy: { createdAt: "asc" },
+        }),
+        prisma.user.findUniqueOrThrow({
+          where: { id: userId },
+          select: { role: true, affiliation: true, bookingBlocked: true },
+        }),
+        prisma.packPurchase.findUniqueOrThrow({ where: { id: purchase.id } }),
+        prisma.booking.findUniqueOrThrow({ where: { id: booking.id } }),
+      ]);
+    expect(
+      adjustments.map((entry) => ({
+        actorUserId: entry.actorUserId,
+        activationVersion: entry.activationVersion,
+        previousPoints: entry.previousPoints,
+        newPoints: entry.newPoints,
+      }))
+    ).toEqual([
+      {
+        actorUserId: adminId,
+        activationVersion: challenge.activationVersion,
+        previousPoints: 1,
+        newPoints: 25,
+      },
+      {
+        actorUserId: adminId,
+        activationVersion: challenge.activationVersion,
+        previousPoints: 25,
+        newPoints: 0,
+      },
+    ]);
+    expect(untouchedAfter).toEqual(untouchedBefore);
+    expect(purchaseAfter.classesLeft).toBe(5);
+    expect(bookingAfter).toMatchObject({ attended: false, status: "ACTIVE" });
+    expect(await prisma.tokenLedger.count({ where: { userId } })).toBe(0);
+
+    const response = await GET_LEADERBOARD(
+      new Request(
+        "https://example.test/api/admin/challenge/leaderboard?page=1&pageSize=100"
+      ) as any
+    );
+    const leaderboard = await response.json();
+    expect(
+      leaderboard.items.find((item: { id: string }) => item.id === userId)
+    ).toMatchObject({ points: 0, updatedAt: expect.any(String) });
+
+    await deactivateChallenge(adminId);
+    expect(
+      await prisma.challengePointAdjustment.count({
+        where: { challengeId: challenge.id, userId },
+      })
+    ).toBe(2);
+
   });
 
   it("rolls attendance and award writes back when the aggregate update fails", async () => {
