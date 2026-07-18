@@ -48,7 +48,6 @@ function successWithSession(
     return response;
   } catch (error) {
     console.error("[wellhub-plan-confirmation] session renewal failed", {
-      userId: sessionUser.id,
       sessionCookieWritten: false,
       errorName: error instanceof Error ? error.name : "UnknownError",
     });
@@ -102,7 +101,6 @@ export async function POST(req: Request) {
       });
     } catch (error) {
       console.error("[wellhub-plan-confirmation] recovery lookup failed", {
-        userId: stalePayload.sub,
         errorName: error instanceof Error ? error.name : "UnknownError",
       });
       return json(500, {
@@ -183,7 +181,6 @@ export async function POST(req: Request) {
         completed = await getCompletedWellhubSessionState(auth.sub);
       } catch (lookupError) {
         console.error("[wellhub-plan-confirmation] completed lookup failed", {
-          userId: auth.sub,
           errorName:
             lookupError instanceof Error ? lookupError.name : "UnknownError",
         });
@@ -213,7 +210,6 @@ export async function POST(req: Request) {
     }
 
     console.error("[wellhub-plan-confirmation] failed", {
-      userId: auth.sub,
       errorName: error instanceof Error ? error.name : "UnknownError",
     });
     return json(500, {
