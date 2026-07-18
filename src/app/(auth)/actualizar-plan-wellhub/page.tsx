@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import {
   completeWellhubConfirmationNavigation,
+  submitWellhubConfirmationRequest,
   WELLHUB_CONFIRMATION_COPY,
   WELLHUB_CONFIRMATION_DESTINATION,
   validateWellhubConfirmationSelection,
@@ -101,15 +102,9 @@ export default function UpdateWellhubPlanPage() {
     setError(null);
     let redirecting = false;
     try {
-      const res = await fetch(
-        "/api/users/me/wellhub-plan-confirmation",
-        {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wellhubPlan: selectedPlan }),
-        }
-      );
+      const res = await submitWellhubConfirmationRequest({
+        selectedPlan,
+      });
       const payload = await res.json().catch(() => null);
       if (!res.ok) {
         throw new Error(
@@ -128,7 +123,7 @@ export default function UpdateWellhubPlanPage() {
     } catch (submitError) {
       setError(
         submitError instanceof TypeError
-          ? "No recibimos la respuesta de confirmación. Presiona Guardar y continuar para recuperar tu sesión sin repetir tus créditos."
+          ? "No recibimos la respuesta de confirmación después del reintento seguro. Presiona Guardar y continuar para intentarlo nuevamente."
           : submitError instanceof Error
           ? submitError.message
           : "No se pudo guardar tu plan. Intenta de nuevo."
