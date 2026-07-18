@@ -8,6 +8,29 @@ export const WELLHUB_CONFIRMATION_COPY = {
 
 export const WELLHUB_CONFIRMATION_DESTINATION = "/clases";
 
+export async function submitWellhubConfirmationRequest(params: {
+  selectedPlan: string;
+  fetchImpl?: typeof fetch;
+}) {
+  const fetchImpl = params.fetchImpl ?? fetch;
+  const send = () =>
+    fetchImpl("/api/users/me/wellhub-plan-confirmation", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wellhubPlan: params.selectedPlan }),
+    });
+
+  try {
+    return await send();
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    // A single idempotent retry repairs either a request that never arrived or
+    // a committed confirmation whose response/session cookie was lost.
+    return send();
+  }
+}
+
 export async function completeWellhubConfirmationNavigation(params: {
   refreshSession?: () => Promise<
     { wellhubPlanConfirmationRequired: boolean } | null | undefined

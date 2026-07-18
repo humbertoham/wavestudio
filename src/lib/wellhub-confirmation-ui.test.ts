@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   completeWellhubConfirmationNavigation,
+  submitWellhubConfirmationRequest,
   WELLHUB_CONFIRMATION_COPY,
   WELLHUB_CONFIRMATION_DESTINATION,
   validateWellhubConfirmationSelection,
@@ -40,6 +41,56 @@ describe("WellHub confirmation UI contract", () => {
   it("shows a useful validation error before an empty submission", () => {
     expect(validateWellhubConfirmationSelection("")).toContain("Selecciona");
     expect(validateWellhubConfirmationSelection("PLATINUM")).toBeNull();
+  });
+
+  it("automatically retries one lost response and then returns the recovery response", async () => {
+    const recovered = new Response(
+      JSON.stringify({ ok: true, sessionRecovered: true }),
+      { status: 200 }
+    );
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("lost response"))
+      .mockResolvedValueOnce(recovered);
+
+    await expect(
+      submitWellhubConfirmationRequest({
+        selectedPlan: "PLATINUM",
+        fetchImpl,
+      })
+    ).resolves.toBe(recovered);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenLastCalledWith(
+      "/api/users/me/wellhub-plan-confirmation",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ wellhubPlan: "PLATINUM" }),
+      })
+    );
+  });
+
+  it("never loops and does not retry an HTTP or non-network failure", async () => {
+    const serverFailure = new Response(null, { status: 500 });
+    const httpFetch = vi.fn<typeof fetch>().mockResolvedValue(serverFailure);
+    await expect(
+      submitWellhubConfirmationRequest({
+        selectedPlan: "DIAMOND",
+        fetchImpl: httpFetch,
+      })
+    ).resolves.toBe(serverFailure);
+    expect(httpFetch).toHaveBeenCalledTimes(1);
+
+    const permanentNetworkFailure = vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(new TypeError("offline"));
+    await expect(
+      submitWellhubConfirmationRequest({
+        selectedPlan: "DIAMOND_PLUS",
+        fetchImpl: permanentNetworkFailure,
+      })
+    ).rejects.toThrow("offline");
+    expect(permanentNetworkFailure).toHaveBeenCalledTimes(2);
   });
 
   it("replaces history without an unnecessary second session request", async () => {
