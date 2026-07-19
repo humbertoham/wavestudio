@@ -1,20 +1,18 @@
 # Validation and recovery runbook
 
-## Isolated production-clone rehearsal
+## Validation limitation: no production clone
 
-These steps are mandatory before production migration. Use a temporary Neon branch cloned from the verified production recovery timestamp. Never commit or print its connection string.
+No separate rehearsal database is available for this release. Do not run integration fixtures or migration rehearsal against the sole production `DATABASE_URL`. The operator accepts this limitation and will manage Neon Backup & Restore manually.
 
-1. Export the clone connection string only into the executing process's secure environment.
-2. Confirm `npx prisma migrate status` reports exactly the seven migrations listed in `README.md` as pending and no failed/diverged migrations.
-3. Run `npx prisma migrate deploy`.
-4. Confirm `npx prisma migrate status` reports the schema up to date.
-5. Run the production build and focused integration/smoke tests against the migrated clone.
-6. Run `npx prisma migrate deploy` again; it must be a no-op.
-7. When possible, run the old production commit against the migrated clone and verify login, booking, admin, payment-read, and class-management flows.
-8. Run the release candidate against the clone and verify the same flows plus WellHub confirmation, Challenge reads/edits on disposable data, and class archival.
-9. Retain the clone and recovery point until production is stable.
+Completed safe validation:
 
-Do not run seeds. Delete only disposable records created explicitly for this rehearsal.
+- Production migration history and schema metadata were inspected read-only.
+- A live-to-current-`main` Prisma diff reported no schema difference.
+- Exactly seven additive release migrations are pending and no failed migration exists.
+- `npm ci`, Prisma generate/validate, 265 tests, the production build, and TypeScript passed.
+- Twenty-five environment-dependent database tests remained skipped; they were not pointed at production.
+
+Before authorization, the operator must manually confirm Backup & Restore availability. No recovery point or retention window is programmatically certified by this package.
 
 ## Application rollback
 
@@ -53,14 +51,14 @@ Equivalent dashboard action: select the previous eligible Production deployment 
 3. Choose a forward fix, targeted repair, reviewed reverse migration, or full restore.
 4. Require separate explicit approval for destructive SQL or full database restore.
 
-### Severe incident requiring Neon restore
+### Severe incident requiring operator-managed Neon restore
 
 1. Record the chosen UTC restore timestamp and minimize writes.
-2. Roll Vercel back to the previous compatible deployment.
+2. Coordinate application traffic rollback through the separately managed application process.
 3. Use Neon Time Travel Assist/read-only checks to verify the selected point.
-4. Restore the production root branch through the approved Neon workflow and preserve the pre-restore branch.
+4. Restore only through the operator-approved Neon workflow and preserve the pre-restore state where supported.
 5. Wait for all Neon operations to complete before reconnecting.
-6. Recheck migration history and critical aggregates; reconcile legitimate post-snapshot writes where possible.
+6. Recheck migration history and critical aggregates; reconcile legitimate post-restore-point writes where possible.
 7. Run the complete smoke suite before reopening traffic.
 
 ## Production smoke checklist
