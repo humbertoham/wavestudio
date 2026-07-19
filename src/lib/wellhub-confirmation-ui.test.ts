@@ -57,7 +57,7 @@ describe("WellHub confirmation UI contract", () => {
   it("keeps every canonical option visible without production or environment gates", () => {
     const pageSource = readFileSync(
       new URL(
-        "../app/(auth)/actualizar-plan-wellhub/page.tsx",
+        "../app/(wellhub-confirmation)/actualizar-plan-wellhub/page.tsx",
         import.meta.url
       ),
       "utf8"
