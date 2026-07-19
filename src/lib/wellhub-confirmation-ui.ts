@@ -1,3 +1,9 @@
+import {
+  WELLHUB_PLAN_CREDITS,
+  WELLHUB_PLAN_LABELS,
+  WELLHUB_PLANS,
+} from "@/lib/wellhub-config";
+
 export const WELLHUB_CONFIRMATION_COPY = {
   title: "Actualiza tu plan de WellHub",
   body:
@@ -7,6 +13,14 @@ export const WELLHUB_CONFIRMATION_COPY = {
 } as const;
 
 export const WELLHUB_CONFIRMATION_DESTINATION = "/clases";
+
+export const WELLHUB_CONFIRMATION_PLAN_OPTIONS = WELLHUB_PLANS.map(
+  (value) => ({
+    value,
+    label: WELLHUB_PLAN_LABELS[value],
+    credits: WELLHUB_PLAN_CREDITS[value],
+  })
+);
 
 export function acquireWellhubSubmissionLock(lock: { current: boolean }) {
   if (lock.current) return false;
@@ -56,4 +70,11 @@ export async function completeWellhubConfirmationNavigation(params: {
 
 export function validateWellhubConfirmationSelection(value: string) {
   return value ? null : "Selecciona tu plan actual de WellHub.";
+}
+
+export function isWellhubConfirmationSubmitDisabled(
+  selectedPlan: string,
+  saving: boolean
+) {
+  return saving || validateWellhubConfirmationSelection(selectedPlan) != null;
 }

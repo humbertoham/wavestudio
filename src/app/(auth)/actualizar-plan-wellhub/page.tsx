@@ -1,24 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import {
   acquireWellhubSubmissionLock,
+  isWellhubConfirmationSubmitDisabled,
   releaseWellhubSubmissionLock,
   submitWellhubConfirmationRequest,
   WELLHUB_CONFIRMATION_COPY,
   WELLHUB_CONFIRMATION_DESTINATION,
+  WELLHUB_CONFIRMATION_PLAN_OPTIONS,
   validateWellhubConfirmationSelection,
 } from "@/lib/wellhub-confirmation-ui";
-import { useSession } from "@/lib/useSession";
 import type { WellhubPlanValue } from "@/lib/wellhub-config";
-
-type PlanOption = {
-  value: WellhubPlanValue;
-  label: string;
-  credits: number;
-};
 
 function readMessage(payload: unknown, fallback: string) {
   if (
@@ -34,59 +29,10 @@ function readMessage(payload: unknown, fallback: string) {
 
 export default function UpdateWellhubPlanPage() {
   const router = useRouter();
-  const { user, isLoading: sessionLoading } = useSession();
-  const [plans, setPlans] = useState<PlanOption[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<WellhubPlanValue | "">("");
-  const [plansLoading, setPlansLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submissionLock = useRef(false);
-
-  useEffect(() => {
-    if (sessionLoading) return;
-    if (!user) {
-      router.replace(
-        `/login?next=${encodeURIComponent("/actualizar-plan-wellhub")}`
-      );
-      return;
-    }
-    if (!user.wellhubPlanConfirmationRequired) {
-      router.replace(WELLHUB_CONFIRMATION_DESTINATION);
-      return;
-    }
-
-    let cancelled = false;
-    setPlansLoading(true);
-    fetch("/api/wellhub/plans", { credentials: "include" })
-      .then(async (res) => {
-        const payload = await res.json().catch(() => null);
-        if (!res.ok) {
-          throw new Error(
-            readMessage(payload, "No se pudieron cargar los planes.")
-          );
-        }
-        return payload as { plans?: PlanOption[] };
-      })
-      .then((payload) => {
-        if (!cancelled) setPlans(payload.plans ?? []);
-      })
-      .catch((fetchError) => {
-        if (!cancelled) {
-          setError(
-            fetchError instanceof Error
-              ? fetchError.message
-              : "No se pudieron cargar los planes."
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setPlansLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [router, sessionLoading, user]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -144,8 +90,6 @@ export default function UpdateWellhubPlanPage() {
     router.refresh();
   }
 
-  const loading = sessionLoading || plansLoading;
-
   return (
     <div className="min-h-screen bg-[color:var(--color-background)] px-4 py-8 text-[color:var(--color-foreground)] sm:py-12">
       <main className="mx-auto w-full max-w-2xl">
@@ -174,15 +118,10 @@ export default function UpdateWellhubPlanPage() {
             </div>
           )}
 
-          {loading ? (
-            <div className="rounded-xl border border-[color:var(--color-border)] px-4 py-8 text-center text-sm text-[color:var(--color-muted-foreground)]">
-              Cargando planes de WellHub...
-            </div>
-          ) : (
-            <form onSubmit={submit} className="space-y-5">
+          <form onSubmit={submit} className="space-y-5">
               <fieldset className="grid gap-3 sm:grid-cols-2">
                 <legend className="sr-only">Plan actual de WellHub</legend>
-                {plans.map((plan) => (
+                {WELLHUB_CONFIRMATION_PLAN_OPTIONS.map((plan) => (
                   <label
                     key={plan.value}
                     className={`cursor-pointer rounded-xl border p-4 transition ${
@@ -216,7 +155,10 @@ export default function UpdateWellhubPlanPage() {
 
               <button
                 type="submit"
-                disabled={saving || plans.length === 0}
+                disabled={isWellhubConfirmationSubmitDisabled(
+                  selectedPlan,
+                  saving
+                )}
                 className="w-full rounded-xl bg-[var(--color-primary)] px-4 py-3 font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {saving
@@ -231,8 +173,7 @@ export default function UpdateWellhubPlanPage() {
               >
                 Cerrar sesión
               </button>
-            </form>
-          )}
+          </form>
         </div>
       </main>
     </div>

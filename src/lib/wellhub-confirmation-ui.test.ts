@@ -1,12 +1,15 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   acquireWellhubSubmissionLock,
   completeWellhubConfirmationNavigation,
+  isWellhubConfirmationSubmitDisabled,
   releaseWellhubSubmissionLock,
   submitWellhubConfirmationRequest,
   WELLHUB_CONFIRMATION_COPY,
   WELLHUB_CONFIRMATION_DESTINATION,
+  WELLHUB_CONFIRMATION_PLAN_OPTIONS,
   validateWellhubConfirmationSelection,
 } from "./wellhub-confirmation-ui";
 import {
@@ -42,6 +45,42 @@ describe("WellHub confirmation UI contract", () => {
       expect(WELLHUB_PLAN_LABELS[plan]).toBeTruthy();
       expect(WELLHUB_PLAN_CREDITS[plan]).toBeGreaterThan(0);
     }
+    expect(WELLHUB_CONFIRMATION_PLAN_OPTIONS).toEqual(
+      WELLHUB_PLANS.map((value) => ({
+        value,
+        label: WELLHUB_PLAN_LABELS[value],
+        credits: WELLHUB_PLAN_CREDITS[value],
+      }))
+    );
+  });
+
+  it("keeps every canonical option visible without production or environment gates", () => {
+    const pageSource = readFileSync(
+      new URL(
+        "../app/(auth)/actualizar-plan-wellhub/page.tsx",
+        import.meta.url
+      ),
+      "utf8"
+    );
+
+    expect(WELLHUB_CONFIRMATION_PLAN_OPTIONS).toHaveLength(4);
+    expect(pageSource).not.toContain("process.env");
+    expect(pageSource).not.toContain("/api/auth/me");
+    expect(pageSource).not.toContain("/api/wellhub/plans");
+    expect(pageSource).not.toMatch(/setTimeout|setInterval|poll/i);
+    expect(pageSource).toContain(
+      "window.location.replace(WELLHUB_CONFIRMATION_DESTINATION)"
+    );
+  });
+
+  it("disables submission until a plan is selected", () => {
+    expect(isWellhubConfirmationSubmitDisabled("", false)).toBe(true);
+    expect(isWellhubConfirmationSubmitDisabled("GOLD_PLUS", false)).toBe(
+      false
+    );
+    expect(isWellhubConfirmationSubmitDisabled("DIAMOND_PLUS", true)).toBe(
+      true
+    );
   });
 
   it("shows a useful validation error before an empty submission", () => {
