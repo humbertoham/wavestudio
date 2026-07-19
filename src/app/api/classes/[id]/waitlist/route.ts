@@ -159,7 +159,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
               },
             });
 
-            if (!klass) fail("CLASS_NOT_FOUND");
+            if (!klass || klass.deletedAt) fail("CLASS_NOT_FOUND");
             if (klass.isCanceled) fail("CLASS_CANCELED");
             if (klass.date.getTime() <= Date.now()) fail("CLASS_ALREADY_STARTED");
 

@@ -72,7 +72,7 @@ export async function createBookingWithCreditCheck(
     },
   });
 
-  if (!cls) fail("CLASS_NOT_FOUND");
+  if (!cls || cls.deletedAt) fail("CLASS_NOT_FOUND");
   if (cls.isCanceled) fail("CLASS_CANCELED");
   if (!params.allowPastStart && cls.date.getTime() <= now.getTime()) {
     fail("CLASS_ALREADY_STARTED");

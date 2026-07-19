@@ -8,10 +8,19 @@ type Me = {
   name: string;
   email: string;
   role: "USER" | "COACH" | "ADMIN";
+  affiliation: "NONE" | "WELLHUB" | "TOTALPASS";
+  wellhubPlan: "GOLD_PLUS" | "PLATINUM" | "DIAMOND" | "DIAMOND_PLUS" | null;
+  affiliationConfirmed: boolean;
+  affiliationConfirmedAt?: string | null;
+  authVersion: number;
+  wellhubPlanConfirmationRequired: boolean;
+  wellhubPlanConfirmationRequestedAt?: string | null;
+  wellhubPlanConfirmedAt?: string | null;
+  wellhubPlanConfirmationCampaign?: string | null;
 };
 
 const fetcher = (url: string) =>
-  fetch(url, { credentials: "include" }).then(async (r) => {
+  fetch(url, { credentials: "include", cache: "no-store" }).then(async (r) => {
     if (!r.ok) throw new Error(String(r.status));
     const txt = await r.text();
     if (!txt) return null;
@@ -40,6 +49,6 @@ export function useSession() {
     isAuthenticated,
     isLoading,
     error,
-    refresh: () => mutate(),
+    refresh: () => mutate(undefined, { revalidate: true }),
   };
 }

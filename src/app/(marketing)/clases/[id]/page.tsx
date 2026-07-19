@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion, cubicBezier } from "framer-motion";
 import {
@@ -14,6 +14,7 @@ import {
   FiUserPlus,
   FiX,
 } from "react-icons/fi";
+import { NewUserBadge } from "@/components/booking/NewUserBadge";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
@@ -51,6 +52,8 @@ type ClassApi = {
     status?: "ACTIVE" | "CANCELED";
     attended?: boolean;
     canceledAt?: string | null;
+    isNewUser?: boolean;
+    isFirstBooking?: boolean;
     user: {
       id: string;
       name: string;
@@ -82,6 +85,7 @@ type AttendeeRow = {
   attended: boolean;
   quantity: number;
   affiliation: Affiliation;
+  isNewUser: boolean;
 };
 
 type CanceledRow = {
@@ -402,6 +406,7 @@ function EditClassModal({
 
 export default function ClassAdminPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
 
   const [cls, setCls] = useState<ClassApi | null>(null);
   const [instructors, setInstructors] = useState<InstructorLite[]>([]);
@@ -409,6 +414,7 @@ export default function ClassAdminPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [challengeNotice, setChallengeNotice] = useState<string | null>(null);
 
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
@@ -523,6 +529,9 @@ export default function ClassAdminPage() {
         attended: !!booking.attended,
         quantity: booking.quantity ?? 1,
         affiliation: booking.user?.affiliation ?? "NONE",
+        isNewUser: !booking.user
+          ? false
+          : !!(booking.isNewUser ?? booking.isFirstBooking),
       }));
   }, [cls]);
 
@@ -582,18 +591,32 @@ export default function ClassAdminPage() {
         throw new Error(await readErrorMessage(res, "No se pudo marcar asistencia."));
       }
 
+      const result = (await res.json()) as {
+        attended: boolean;
+        challenge?: { delta?: number; points?: number };
+      };
+
       setCls((prev) =>
         prev
           ? {
               ...prev,
               bookings: prev.bookings.map((booking) =>
                 booking.id === attendee.bookingId
-                  ? { ...booking, attended: !attendee.attended }
+                  ? { ...booking, attended: result.attended }
                   : booking
               ),
             }
           : prev
       );
+      const delta = result.challenge?.delta ?? 0;
+      setChallengeNotice(
+        delta > 0
+          ? `Se asignaron ${delta} punto${delta === 1 ? "" : "s"} del Challenge.`
+          : delta < 0
+            ? `Se revirtieron ${Math.abs(delta)} punto${Math.abs(delta) === 1 ? "" : "s"} del Challenge.`
+            : null
+      );
+      window.dispatchEvent(new Event("challenge-updated"));
     } catch (error) {
       alert(
         error instanceof Error ? error.message : "No se pudo marcar asistencia."
@@ -758,6 +781,42 @@ export default function ClassAdminPage() {
     }
   }
 
+  async function deleteClass() {
+    if (!cls || busy !== null) return;
+    if (
+      !confirm(
+        "¿Eliminar esta clase del calendario? Esta acción es distinta de Cancelar clase y solo elimina esta fecha, no una serie recurrente."
+      )
+    ) return;
+
+    setBusy("DELETE_CLASS");
+    try {
+      const res = await fetch(`/api/classes/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        throw new Error(
+          await readErrorMessage(res, "No se pudo eliminar la clase.")
+        );
+      }
+
+      window.dispatchEvent(new Event("classes-updated"));
+      try {
+        window.localStorage.setItem("wave:classes-updated", String(Date.now()));
+      } catch {
+        // The destination performs a no-store calendar refetch regardless.
+      }
+      router.replace("/clases");
+      router.refresh();
+    } catch (error) {
+      alert(
+        error instanceof Error ? error.message : "No se pudo eliminar la clase."
+      );
+      setBusy(null);
+    }
+  }
+
   if (loading) {
     return <div className="section container-app">Cargando...</div>;
   }
@@ -838,6 +897,7 @@ export default function ClassAdminPage() {
               <button
                 className="btn-outline h-10 px-4 text-red-600"
                 onClick={cancelClass}
+                disabled={busy !== null || cls.isCanceled}
                 title={
                   attendees.length > 0
                     ? "Elimina primero a los usuarios inscritos"
@@ -848,12 +908,25 @@ export default function ClassAdminPage() {
               >
                 <FiSlash /> Cancelar clase
               </button>
+              <button
+                className="btn-danger h-10 px-4"
+                onClick={deleteClass}
+                disabled={busy !== null}
+              >
+                <FiTrash2 />
+                {busy === "DELETE_CLASS" ? "Eliminando..." : "Eliminar"}
+              </button>
             </div>
           </div>
         </motion.div>
 
         <section className="mt-8">
           <h2 className="mb-4 font-display text-xl font-bold">Usuarios en clase</h2>
+          {challengeNotice && (
+            <p className="mb-4 text-sm font-medium text-green-700" role="status">
+              {challengeNotice}
+            </p>
+          )}
 
           <div className="grid gap-3">
             {attendees.map((attendee) => {
@@ -874,6 +947,8 @@ export default function ClassAdminPage() {
                       )}
                       <AffiliationBadge affiliation={attendee.affiliation} />
                     </p>
+
+                    <NewUserBadge isNewUser={attendee.isNewUser} />
 
                     {attendee.email && (
                       <p className="truncate text-xs text-muted-foreground">

@@ -1,10 +1,25 @@
 "use client";
 
 import useSWR from "swr";
+import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FiMessageCircle } from "react-icons/fi";
 import { getWhatsAppHref } from "@/lib/whatsapp";
+import {
+  confirmChallengeLifecycleAction,
+  shouldShowChallengePointControl,
+} from "@/lib/challenge-ui";
+import {
+  CHALLENGE_USER_MAX_POINTS,
+  challengePointEditorKeyAction,
+  parseChallengePointInput,
+} from "@/lib/challenge-point-editor";
+import {
+  WELLHUB_PLAN_CREDITS,
+  WELLHUB_PLAN_LABELS,
+  WELLHUB_PLANS,
+} from "@/lib/wellhub-config";
 
 // --- helpers ---
 const USER_PAGE_SIZE = 25;
@@ -85,7 +100,30 @@ function formatMoneyMXN(value?: number | null) {
     : "—";
 }
 
+function formatCreditReason(reason: string) {
+  const labels: Record<string, string> = {
+    PURCHASE_CREDIT: "Compra",
+    BOOKING_DEBIT: "Reserva",
+    CANCEL_REFUND: "Cancelacion",
+    ADMIN_ADJUST: "Ajuste admin",
+    CORPORATE_MONTHLY: "Renovacion corporativa",
+    ADMIN_WELLHUB_PLAN_CHANGE: "Cambio WellHub",
+    USER_WELLHUB_PLAN_CONFIRMATION: "Confirmacion WellHub",
+  };
+
+  return labels[reason] ?? reason;
+}
+
+function metadataText(value: unknown) {
+  return typeof value === "string" && value !== "NONE" ? value : "Ninguno";
+}
+
+function metadataNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
+type WellhubPlan = "GOLD_PLUS" | "PLATINUM" | "DIAMOND" | "DIAMOND_PLUS";
 type Role = "USER" | "COACH" | "ADMIN";
 type AdminTab =
   | "classes"
@@ -93,7 +131,8 @@ type AdminTab =
   | "packs"
   | "purchases"
   | "revenue"
-  | "users";
+  | "users"
+  | "challenge";
 type PurchasePaymentStatusFilter =
   | "ALL"
   | "PENDING"
@@ -143,7 +182,8 @@ function isAdminTab(value: string | null): value is AdminTab {
     value === "packs" ||
     value === "purchases" ||
     value === "revenue" ||
-    value === "users"
+    value === "users" ||
+    value === "challenge"
   );
 }
 
@@ -197,6 +237,34 @@ type ClassItem = {
   id: string; title: string; focus: string; date: string; durationMin: number; capacity: number;
   instructorId: string; instructor?: { id: string; name: string };
   isCanceled?: boolean; // ← agregar
+  challengeId?: string | null;
+  challengePoints?: number | null;
+  challengeEligibleAt?: string | null;
+  challengeActivationVersion?: number | null;
+  challengePointsLocked?: boolean;
+};
+type ChallengeAdminState = {
+  id: string | null;
+  name: string;
+  active: boolean;
+  activationVersion: number;
+  activatedAt: string | null;
+  deactivatedAt: string | null;
+};
+type ChallengeLeaderboardItem = {
+  rank: number;
+  id: string;
+  name: string;
+  email: string;
+  points: number;
+  updatedAt: string | null;
+};
+type ChallengeLeaderboard = {
+  items: ChallengeLeaderboardItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 };
 type Pack = {
   id: string;
@@ -219,6 +287,9 @@ type User = {
   role: Role;
   phone?: string | null;
   dateOfBirth?: string | null;
+  affiliation: Affiliation;
+  wellhubPlan?: WellhubPlan | null;
+  affiliationConfirmedAt?: string | null;
   bookingBlocked?: boolean;
 };
 type PaginatedUsers = {
@@ -238,6 +309,8 @@ type UserDetails = {
     phone?: string | null;
     emergencyPhone?: string | null;
     affiliation: Affiliation;
+    wellhubPlan?: WellhubPlan | null;
+    affiliationConfirmedAt?: string | null;
     bookingBlocked: boolean;
     bookingBlockedAt?: string | null;
     bookingBlockLogs?: Array<{
@@ -271,6 +344,21 @@ type UserDetails = {
       instructor?: { id: string; name: string } | null;
     };
     packPurchase?: { id: string; pack?: { id: string; name: string } | null } | null;
+  }>;
+  creditHistory: Array<{
+    id: string;
+    delta: number;
+    reason: string;
+    metadata?: Record<string, unknown> | null;
+    createdAt: string;
+    packPurchase?: {
+      id: string;
+      pack?: { id: string; name: string } | null;
+    } | null;
+    booking?: {
+      id: string;
+      class?: { title: string; date: string } | null;
+    } | null;
   }>;
 };
 type PurchasedPackage = {
@@ -345,7 +433,8 @@ function AdminPageContent() {
     ["packs", "Paquetes"],
     ["purchases", "Compras"],
     ["revenue", "Ingresos"],
-     ["users", "Usuarios"],
+    ["users", "Usuarios"],
+    ["challenge", "CHALLENGE"],
   ];
 
   function selectTab(next: AdminTab) {
@@ -362,7 +451,12 @@ function AdminPageContent() {
 
   return (
     <main className="container-app py-8 space-y-6">
-      <h1 className="text-2xl font-bold">Panel de administrador</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-2xl font-bold">Panel de administrador</h1>
+        <Link href="/admin/wellhub-confirmaciones" className="btn-outline">
+          Confirmaciones WellHub
+        </Link>
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-2 flex-wrap" role="tablist" aria-label="Secciones del panel">
@@ -449,6 +543,15 @@ function AdminPageContent() {
 >
   {tab === "users" && <UserInspectorSection />}
 </section>
+      <section
+        id="panel-challenge"
+        role="tabpanel"
+        hidden={tab !== "challenge"}
+        aria-labelledby="challenge"
+        className="space-y-6"
+      >
+        {tab === "challenge" && <ChallengeSection />}
+      </section>
     </main>
   );
 }
@@ -456,11 +559,408 @@ function AdminPageContent() {
 /* ---------------------------------------------------
    CLASES — listar / crear / editar por fila / eliminar
 ---------------------------------------------------- */
+function ChallengePointsEditor({
+  item,
+  onSaved,
+  onConflict,
+}: {
+  item: ChallengeLeaderboardItem;
+  onSaved: (
+    updated: Pick<ChallengeLeaderboardItem, "id" | "points" | "updatedAt">
+  ) => Promise<void>;
+  onConflict: () => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [input, setInput] = useState(String(item.points));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const parsed = parseChallengePointInput(input);
+  const canSave =
+    editing &&
+    !saving &&
+    parsed.valid &&
+    parsed.value !== item.points;
+
+  useEffect(() => {
+    if (!saving) setInput(String(item.points));
+  }, [item.points, item.updatedAt, saving]);
+
+  function beginEditing() {
+    setInput(String(item.points));
+    setError(null);
+    setSuccess(null);
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    if (saving) return;
+    setInput(String(item.points));
+    setError(null);
+    setEditing(false);
+  }
+
+  async function save() {
+    if (!canSave || !parsed.valid) return;
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch(
+        `/api/admin/challenge/users/${encodeURIComponent(item.id)}/points`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            points: parsed.value,
+            expectedPoints: item.points,
+            expectedUpdatedAt: item.updatedAt,
+          }),
+        }
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        if (
+          response.status === 409 &&
+          payload?.code === "CHALLENGE_POINTS_CONFLICT"
+        ) {
+          await onConflict();
+        }
+        throw new Error(
+          typeof payload?.message === "string"
+            ? payload.message
+            : "No se pudieron guardar los puntos."
+        );
+      }
+
+      await onSaved(payload.item);
+      setEditing(false);
+      setSuccess("Puntos guardados.");
+    } catch (saveError) {
+      setInput(String(item.points));
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "No se pudieron guardar los puntos."
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex min-w-[8rem] flex-col items-end gap-1">
+        <button
+          type="button"
+          className="rounded px-2 py-1 font-bold underline decoration-dotted underline-offset-4 hover:bg-black/5 focus:outline-none focus:ring-2 focus:ring-[--color-primary]"
+          onClick={beginEditing}
+          aria-label={`Editar puntos de ${item.name}`}
+        >
+          {item.points}
+        </button>
+        {success && (
+          <span role="status" className="text-xs font-normal text-green-700">
+            {success}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-w-[13rem] flex-col items-end gap-2">
+      <div className="flex max-w-full flex-wrap justify-end gap-2">
+        <input
+          autoFocus
+          className="input w-24 text-right"
+          type="number"
+          min={0}
+          max={CHALLENGE_USER_MAX_POINTS}
+          step={1}
+          inputMode="numeric"
+          value={input}
+          disabled={saving}
+          aria-label={`Puntos de ${item.name}`}
+          aria-invalid={!parsed.valid}
+          onChange={(event) => {
+            setInput(event.target.value);
+            setError(null);
+          }}
+          onKeyDown={(event) => {
+            const action = challengePointEditorKeyAction(event.key);
+            if (action === "cancel") {
+              event.preventDefault();
+              cancelEditing();
+            } else if (action === "save") {
+              event.preventDefault();
+              void save();
+            }
+          }}
+        />
+        <button
+          className="btn-primary"
+          type="button"
+          disabled={!canSave}
+          onClick={() => void save()}
+        >
+          {saving ? "Guardando..." : "Guardar"}
+        </button>
+        <button
+          className="btn-outline"
+          type="button"
+          disabled={saving}
+          onClick={cancelEditing}
+        >
+          Cancelar
+        </button>
+      </div>
+      {!parsed.valid && (
+        <span className="text-xs font-normal text-red-600">
+          Usa un entero entre 0 y{" "}
+          {CHALLENGE_USER_MAX_POINTS.toLocaleString("es-MX")}.
+        </span>
+      )}
+      {error && (
+        <span role="alert" className="text-xs font-normal text-red-600">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ChallengeSection() {
+  const [page, setPage] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const status = useSWR<{ challenge: ChallengeAdminState }>(
+    "/api/admin/challenge",
+    fetcher
+  );
+  const challenge = status.data?.challenge;
+  const leaderboard = useSWR<ChallengeLeaderboard>(
+    challenge?.active
+      ? "/api/admin/challenge/leaderboard?page=" + page + "&pageSize=25"
+      : null,
+    fetcher
+  );
+
+  async function pointSaved(
+    updated: Pick<ChallengeLeaderboardItem, "id" | "points" | "updatedAt">
+  ) {
+    await leaderboard.mutate(
+      (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((item) =>
+                item.id === updated.id ? { ...item, ...updated } : item
+              ),
+            }
+          : current,
+      { revalidate: false }
+    );
+    void leaderboard.mutate();
+    window.dispatchEvent(new Event("challenge-updated"));
+  }
+
+  async function changeChallenge(method: "POST" | "DELETE") {
+    if (busy) return;
+    if (
+      !confirmChallengeLifecycleAction(
+        method === "POST" ? "activate" : "deactivate",
+        (message) => window.confirm(message)
+      )
+    ) return;
+
+    setBusy(true);
+    setNotice(null);
+    setActionError(null);
+
+    try {
+      const response = await fetch("/api/admin/challenge", {
+        method,
+        credentials: "include",
+      });
+      if (!response.ok) {
+        throw new Error(
+          await readApiMessage(response, "No se pudo actualizar el Challenge.")
+        );
+      }
+
+      setPage(1);
+      setNotice(
+        method === "POST"
+          ? "Challenge activado. Todos los puntos actuales se reiniciaron a cero."
+          : "Challenge desactivado. Todos los puntos actuales se reiniciaron a cero; el historial se conservó."
+      );
+      await status.mutate();
+      if (method === "POST") {
+        await leaderboard.mutate();
+      } else {
+        await leaderboard.mutate(undefined, { revalidate: false });
+      }
+      window.dispatchEvent(new Event("challenge-updated"));
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo actualizar el Challenge."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (status.isLoading) {
+    return <Section><p className="text-sm text-muted-foreground">Cargando Challenge...</p></Section>;
+  }
+
+  if (status.error || !challenge) {
+    return <Section><p className="text-sm text-red-600">No se pudo cargar el Challenge.</p></Section>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <Section>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold">CHALLENGE</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Estado actual:{" "}
+              <span className={challenge.active ? "font-bold text-green-600" : "font-bold text-gray-600"}>
+                {challenge.active ? "Activo" : "Inactivo"}
+              </span>
+            </p>
+            {challenge.active && challenge.activatedAt && (
+              <p className="mt-1 text-sm text-muted-foreground">
+                Activado: {formatAdminDate(challenge.activatedAt)} · periodo {challenge.activationVersion}
+              </p>
+            )}
+          </div>
+          {challenge.active ? (
+            <button
+              className="btn-danger"
+              type="button"
+              disabled={busy}
+              onClick={() => changeChallenge("DELETE")}
+            >
+              {busy ? "Desactivando..." : "Desactivar Challenge"}
+            </button>
+          ) : (
+            <button
+              className="btn-primary"
+              type="button"
+              disabled={busy}
+              onClick={() => changeChallenge("POST")}
+            >
+              {busy ? "Activando..." : "Activar Challenge"}
+            </button>
+          )}
+        </div>
+
+        <p className="mt-5 text-sm text-muted-foreground">
+          {challenge.active
+            ? "Solo las clases creadas durante un periodo activo son elegibles. Inician en 1 punto y su valor se bloquea después de la primera asignación."
+            : "Al activarlo se habilitan los puntos por asistencia, la configuración de puntos para clases nuevas elegibles y la visualización de puntos en perfiles."}
+        </p>
+        {notice && <p role="status" className="mt-4 text-sm font-medium text-green-700">{notice}</p>}
+        {actionError && <p role="alert" className="mt-4 text-sm text-red-600">{actionError}</p>}
+      </Section>
+
+      {challenge.active && (
+        <Section>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold">Leaderboard privado</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Usuarios registrados, ordenados de mayor a menor puntaje.
+              </p>
+            </div>
+            <span className="text-sm text-muted-foreground">
+              {leaderboard.data?.total ?? 0} usuarios
+            </span>
+          </div>
+
+          {leaderboard.isLoading && <p className="mt-5 text-sm text-muted-foreground">Cargando leaderboard...</p>}
+          {leaderboard.error && <p className="mt-5 text-sm text-red-600">No se pudo cargar el leaderboard.</p>}
+
+          {leaderboard.data && (
+            <>
+              <div className="mt-5 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="border-b text-left">
+                    <tr>
+                      <th className="py-2 pr-4">Posición</th>
+                      <th className="py-2 pr-4">Usuario</th>
+                      <th className="py-2 pr-4">Correo</th>
+                      <th className="py-2 text-right">Puntos</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leaderboard.data.items.map((item) => (
+                      <tr key={item.id} className="border-b">
+                        <td className="py-2 pr-4">#{item.rank}</td>
+                        <td className="py-2 pr-4 font-medium">{item.name}</td>
+                        <td className="py-2 pr-4 text-muted-foreground">{item.email}</td>
+                        <td className="py-2 text-right align-top">
+                          <ChallengePointsEditor
+                            item={item}
+                            onSaved={pointSaved}
+                            onConflict={async () => {
+                              await leaderboard.mutate();
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <button
+                  className="btn-outline"
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  Anterior
+                </button>
+                <span className="text-sm text-muted-foreground">
+                  Página {leaderboard.data.page} de {leaderboard.data.totalPages}
+                </span>
+                <button
+                  className="btn-outline"
+                  type="button"
+                  disabled={page >= leaderboard.data.totalPages}
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  Siguiente
+                </button>
+              </div>
+            </>
+          )}
+        </Section>
+      )}
+    </div>
+  );
+}
+
 function ClassesSection() {
   const { data, error, isLoading, mutate } = useSWR<{items: ClassItem[]}>("/api/admin/classes", fetcher);
   const { data: instructors } = useSWR<{items: Instructor[]}>("/api/admin/instructors", fetcher);
+  const { data: challengeData } = useSWR<{ challenge: ChallengeAdminState }>(
+    "/api/admin/challenge",
+    fetcher
+  );
 
   const [search, setSearch] = useState("");
+  const [deletingClassId, setDeletingClassId] = useState<string | null>(null);
   const [creating, setCreating] = useState<Partial<ClassItem> & { repeatNextMonth?: boolean }>({
     durationMin: 60,
     capacity: 12,
@@ -491,14 +991,39 @@ function ClassesSection() {
   }
 
   async function deleteClass(id: string) {
-    if (!confirm("¿Eliminar clase?")) return;
-    const prev = data;
-    mutate({ items: data?.items.filter(i => i.id !== id) ?? [] }, { revalidate: false });
-    const res = await fetch(`/api/admin/classes/${id}`, { method:"DELETE" });
-    if (!res.ok) {
-      mutate(prev);
-      alert(await readApiMessage(res, "No se pudo eliminar la clase."));
-    } else mutate();
+    if (
+      !confirm(
+        "¿Eliminar esta clase del calendario? Esta acción es distinta de Cancelar clase y no elimina una serie recurrente."
+      )
+    ) return;
+
+    setDeletingClassId(id);
+    try {
+      const res = await fetch(`/api/admin/classes/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        alert(await readApiMessage(res, "No se pudo eliminar la clase."));
+        return;
+      }
+
+      await mutate().catch(() => undefined);
+      window.dispatchEvent(new Event("classes-updated"));
+      try {
+        window.localStorage.setItem("wave:classes-updated", String(Date.now()));
+      } catch {
+        // Same-tab event and no-store refetching still keep the calendar fresh.
+      }
+    } catch (error) {
+      alert(
+        error instanceof Error
+          ? error.message
+          : "No se pudo eliminar la clase."
+      );
+    } finally {
+      setDeletingClassId(null);
+    }
   }
 
   return (
@@ -567,7 +1092,7 @@ function ClassesSection() {
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead className="text-left border-b">
-            <tr><th>Título</th><th>Enfoque</th><th>Fecha</th><th>Dur.</th><th>Cupo</th><th>Instructor</th><th className="text-right">Acciones</th></tr>
+            <tr><th>Título</th><th>Enfoque</th><th>Fecha</th><th>Dur.</th><th>Cupo</th><th>Instructor</th><th>Challenge</th><th className="text-right">Acciones</th></tr>
           </thead>
           <tbody>
             {filtered.map(c=>(
@@ -575,12 +1100,14 @@ function ClassesSection() {
                 key={c.id}
                 item={c}
                 instructors={instructors?.items ?? []}
+                challengeActive={challengeData?.challenge.active === true}
+                deleting={deletingClassId === c.id}
                 onDeleted={()=>deleteClass(c.id)}
                 onSaved={()=>mutate()}
               />
             ))}
             {!isLoading && filtered.length===0 && (
-              <tr><td colSpan={7} className="py-3 text-center text-gray-500">Sin resultados</td></tr>
+              <tr><td colSpan={8} className="py-3 text-center text-gray-500">Sin resultados</td></tr>
             )}
           </tbody>
         </table>
@@ -591,9 +1118,11 @@ function ClassesSection() {
 
 
 function EditableClassRow({
-  item, instructors, onDeleted, onSaved
+  item, instructors, challengeActive, deleting, onDeleted, onSaved
 }: {
   item: ClassItem; instructors: Instructor[];
+  challengeActive: boolean;
+  deleting: boolean;
   onDeleted: () => void; onSaved: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -606,6 +1135,31 @@ function EditableClassRow({
     instructorId: item.instructorId
   });
   const [saving, setSaving] = useState(false);
+  const [challengePoints, setChallengePoints] = useState(item.challengePoints ?? 1);
+  const [savingChallengePoints, setSavingChallengePoints] = useState(false);
+
+  async function saveChallengePoints() {
+    if (!Number.isInteger(challengePoints) || challengePoints < 1 || challengePoints > 10) {
+      alert("Los puntos del Challenge deben ser un número entero entre 1 y 10.");
+      return;
+    }
+
+    setSavingChallengePoints(true);
+    const response = await fetch(`/api/admin/classes/${item.id}/challenge-points`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ points: challengePoints }),
+    });
+    setSavingChallengePoints(false);
+
+    if (!response.ok) {
+      alert(await readApiMessage(response, "No se pudieron guardar los puntos del Challenge."));
+      return;
+    }
+
+    onSaved();
+  }
 
   async function save() {
     setSaving(true);
@@ -658,12 +1212,53 @@ function EditableClassRow({
             </select>
           ) : (item.instructor?.name ?? "—")}
       </td>
+      <td className="min-w-48 px-2 py-2">
+        {shouldShowChallengePointControl({
+          active: challengeActive,
+          challengeId: item.challengeId,
+          eligibleAt: item.challengeEligibleAt,
+        }) ? (
+          <div>
+            <label className="text-xs font-semibold" htmlFor={`challenge-points-${item.id}`}>
+              Puntos del Challenge
+            </label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                id={`challenge-points-${item.id}`}
+                className="input w-20"
+                type="number"
+                min={1}
+                max={10}
+                step={1}
+                value={challengePoints}
+                disabled={item.challengePointsLocked || savingChallengePoints}
+                onChange={(event) => setChallengePoints(Number(event.target.value))}
+              />
+              <button
+                type="button"
+                className="btn-outline"
+                disabled={item.challengePointsLocked || savingChallengePoints || challengePoints === item.challengePoints}
+                onClick={saveChallengePoints}
+              >
+                {savingChallengePoints ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {item.challengePointsLocked
+                ? "Valor bloqueado después de la primera asignación."
+                : "Esta clase otorgará esta cantidad al confirmar asistencia."}
+            </p>
+          </div>
+        ) : null}
+      </td>
       <td className="py-2">
         <div className="flex justify-end gap-2">
           {!editing ? (
             <>
               <button className="btn-outline" onClick={()=>setEditing(true)}>Editar</button>
-              <button className="btn-danger" onClick={onDeleted}>Eliminar</button>
+              <button className="btn-danger" onClick={onDeleted} disabled={deleting}>
+                {deleting ? "Eliminando…" : "Eliminar"}
+              </button>
             </>
           ) : (
             <>
@@ -1851,6 +2446,8 @@ SECCION DE USUARIOS
 function UserInspectorSection() {
   const [q, setQ] = useState("");
   const [userPage, setUserPage] = useState(1);
+  const [userAffiliation, setUserAffiliation] = useState<Affiliation | "ALL">("ALL");
+  const [userWellhubPlan, setUserWellhubPlan] = useState<WellhubPlan | "ALL">("ALL");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // admin actions
@@ -1865,14 +2462,21 @@ function UserInspectorSection() {
   } | null>(null);
   const [togglingBlock, setTogglingBlock] = useState(false);
   const [savingAffiliation, setSavingAffiliation] = useState(false);
+  const [affiliationDraft, setAffiliationDraft] = useState<Affiliation>("NONE");
+  const [wellhubPlanDraft, setWellhubPlanDraft] = useState<WellhubPlan | "">("");
   const [savingRole, setSavingRole] = useState(false);
   const [pauseDaysById, setPauseDaysById] = useState<Record<string, number>>({});
   const [pausingPackId, setPausingPackId] = useState<string | null>(null);
 
   // 1️⃣ últimos usuarios
-  const usersUrl = `/api/admin/users?page=${userPage}&pageSize=${USER_PAGE_SIZE}${
-    q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ""
-  }`;
+  const userParams = new URLSearchParams({
+    page: String(userPage),
+    pageSize: String(USER_PAGE_SIZE),
+  });
+  if (q.trim()) userParams.set("q", q.trim());
+  if (userAffiliation !== "ALL") userParams.set("affiliation", userAffiliation);
+  if (userWellhubPlan !== "ALL") userParams.set("wellhubPlan", userWellhubPlan);
+  const usersUrl = `/api/admin/users?${userParams.toString()}`;
   const { data: usersData, isLoading: loadingList, mutate: mutateUsers } =
     useSWR<PaginatedUsers>(usersUrl, fetcher);
 
@@ -1897,6 +2501,19 @@ function UserInspectorSection() {
 
   const list = usersData?.items;
   const userTotalPages = usersData?.totalPages ?? 1;
+
+  useEffect(() => {
+    if (!details?.user) return;
+    setAffiliationDraft(details.user.affiliation);
+    setWellhubPlanDraft(details.user.wellhubPlan ?? "");
+  }, [details?.user.id, details?.user.affiliation, details?.user.wellhubPlan]);
+
+  const affiliationSaveDisabled =
+    savingAffiliation ||
+    !details ||
+    (affiliationDraft === details.user.affiliation &&
+      (affiliationDraft === "WELLHUB" ? wellhubPlanDraft : null) ===
+        (details.user.wellhubPlan ?? null));
 
   async function updateBookingBlocked(next: boolean) {
     if (!selectedId) return;
@@ -1935,8 +2552,26 @@ function UserInspectorSection() {
     }
   }
 
-  async function updateAffiliation(next: Affiliation) {
-    if (!selectedId || next === details?.user.affiliation) return;
+  async function saveAffiliationSettings() {
+    if (!selectedId || !details) return;
+
+    const nextPlan = affiliationDraft === "WELLHUB" ? wellhubPlanDraft : null;
+    const currentPlan = details.user.wellhubPlan ?? null;
+
+    if (
+      affiliationDraft === details.user.affiliation &&
+      nextPlan === currentPlan
+    ) {
+      return;
+    }
+
+    if (affiliationDraft === "WELLHUB" && !wellhubPlanDraft) {
+      setFeedback({
+        type: "error",
+        text: "Selecciona un plan de WellHub.",
+      });
+      return;
+    }
 
     setSavingAffiliation(true);
     setFeedback(null);
@@ -1945,7 +2580,10 @@ function UserInspectorSection() {
       const res = await fetch(`/api/admin/users/${selectedId}/details`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ affiliation: next }),
+        body: JSON.stringify({
+          affiliation: affiliationDraft,
+          wellhubPlan: nextPlan,
+        }),
       });
 
       if (!res.ok) {
@@ -1954,13 +2592,38 @@ function UserInspectorSection() {
         );
       }
 
+      const payload = await res.json().catch(() => null);
+      const updatedBalance =
+        payload &&
+        typeof payload === "object" &&
+        "tokenBalance" in payload &&
+        typeof payload.tokenBalance === "number"
+          ? payload.tokenBalance
+          : null;
+      const creditDelta =
+        payload &&
+        typeof payload === "object" &&
+        "wellhubSync" in payload &&
+        payload.wellhubSync &&
+        typeof payload.wellhubSync === "object" &&
+        "creditDeltaApplied" in payload.wellhubSync &&
+        typeof payload.wellhubSync.creditDeltaApplied === "number"
+          ? payload.wellhubSync.creditDeltaApplied
+          : null;
+
       await Promise.all([mutate(), mutateUsers()]);
       setFeedback({
         type: "success",
         text:
-          next === "NONE"
-            ? "Afiliacion actualizada. Las renovaciones corporativas futuras quedan detenidas."
-            : "Afiliacion actualizada.",
+          affiliationDraft === "NONE"
+            ? `Afiliacion actualizada. Saldo: ${
+                updatedBalance ?? details.tokenBalance
+              } creditos. Las renovaciones corporativas futuras quedan detenidas.`
+            : `Afiliacion actualizada. Saldo: ${
+                updatedBalance ?? details.tokenBalance
+              } creditos.${
+                creditDelta != null ? ` Delta WellHub: ${creditDelta}.` : ""
+              }`,
       });
     } catch (error) {
       setFeedback({
@@ -2077,6 +2740,49 @@ function UserInspectorSection() {
             }}
           />
 
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="text-xs">
+              <span className="mb-1 block text-muted-foreground">Afiliacion</span>
+              <select
+                className="input w-full"
+                value={userAffiliation}
+                onChange={(e) => {
+                  const next = e.target.value as Affiliation | "ALL";
+                  setUserAffiliation(next);
+                  if (next !== "WELLHUB") setUserWellhubPlan("ALL");
+                  setUserPage(1);
+                }}
+              >
+                <option value="ALL">Todas</option>
+                {(Object.keys(AFFILIATION_LABELS) as Affiliation[]).map((value) => (
+                  <option key={value} value={value}>
+                    {AFFILIATION_LABELS[value]}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-xs">
+              <span className="mb-1 block text-muted-foreground">Plan WellHub</span>
+              <select
+                className="input w-full"
+                value={userWellhubPlan}
+                disabled={userAffiliation !== "ALL" && userAffiliation !== "WELLHUB"}
+                onChange={(e) => {
+                  setUserWellhubPlan(e.target.value as WellhubPlan | "ALL");
+                  setUserPage(1);
+                }}
+              >
+                <option value="ALL">Todos</option>
+                {WELLHUB_PLANS.map((value) => (
+                  <option key={value} value={value}>
+                    {WELLHUB_PLAN_LABELS[value]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
           {loadingList && (
             <p className="text-sm text-muted-foreground">Cargando…</p>
           )}
@@ -2114,6 +2820,21 @@ function UserInspectorSection() {
                       </div>
                       <div className="mt-1 text-xs font-medium text-muted-foreground">
                         {ROLE_LABELS[u.role]}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+                        <span className="rounded bg-[--color-muted] px-2 py-0.5 text-muted-foreground">
+                          {AFFILIATION_LABELS[u.affiliation]}
+                        </span>
+                        {u.affiliation === "WELLHUB" && u.wellhubPlan && (
+                          <span className="rounded bg-pink-100 px-2 py-0.5 text-pink-700">
+                            {WELLHUB_PLAN_LABELS[u.wellhubPlan]}
+                          </span>
+                        )}
+                        {!u.affiliationConfirmedAt && u.role !== "ADMIN" && (
+                          <span className="rounded bg-amber-100 px-2 py-0.5 text-amber-700">
+                            Pendiente
+                          </span>
+                        )}
                       </div>
                     </button>
 
@@ -2236,11 +2957,13 @@ function UserInspectorSection() {
                     <dd className="col-span-2 space-y-1">
                       <select
                         className="input w-full"
-                        value={details.user.affiliation}
+                        value={affiliationDraft}
                         disabled={savingAffiliation}
-                        onChange={(e) =>
-                          updateAffiliation(e.target.value as Affiliation)
-                        }
+                        onChange={(e) => {
+                          const next = e.target.value as Affiliation;
+                          setAffiliationDraft(next);
+                          if (next !== "WELLHUB") setWellhubPlanDraft("");
+                        }}
                       >
                         {(Object.keys(AFFILIATION_LABELS) as Affiliation[]).map(
                           (value) => (
@@ -2250,6 +2973,40 @@ function UserInspectorSection() {
                           )
                         )}
                       </select>
+                      {affiliationDraft === "WELLHUB" && (
+                        <select
+                          className="input w-full"
+                          value={wellhubPlanDraft}
+                          disabled={savingAffiliation}
+                          onChange={(e) =>
+                            setWellhubPlanDraft(e.target.value as WellhubPlan)
+                          }
+                        >
+                          <option value="">Selecciona plan</option>
+                          {WELLHUB_PLANS.map(
+                            (value) => (
+                              <option key={value} value={value}>
+                                {WELLHUB_PLAN_LABELS[value]} -{" "}
+                                {WELLHUB_PLAN_CREDITS[value]} creditos
+                              </option>
+                            )
+                          )}
+                        </select>
+                      )}
+                      {details.user.affiliation === "WELLHUB" &&
+                        details.user.wellhubPlan && (
+                          <p className="text-xs text-muted-foreground">
+                            Plan actual: {WELLHUB_PLAN_LABELS[details.user.wellhubPlan]}.
+                          </p>
+                        )}
+                      <button
+                        type="button"
+                        className="btn btn-outline w-full"
+                        disabled={affiliationSaveDisabled}
+                        onClick={saveAffiliationSettings}
+                      >
+                        {savingAffiliation ? "Guardando..." : "Guardar afiliacion"}
+                      </button>
                       <p className="text-xs text-muted-foreground">
                         Ninguna detiene renovaciones corporativas futuras.
                       </p>
@@ -2566,6 +3323,103 @@ function UserInspectorSection() {
     </table>
   </div>
 </div>
+
+              {/* HISTORIAL DE CREDITOS */}
+              <div className="p-4 border rounded-[var(--radius)]">
+                <h3 className="font-semibold mb-3">Historial de creditos</h3>
+
+                <div className="overflow-x-auto">
+                  <table className="min-w-[900px] w-full text-sm border-collapse">
+                    <thead className="border-b text-left">
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Motivo</th>
+                        <th>Delta</th>
+                        <th>Detalle</th>
+                        <th>Saldo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {details.creditHistory.map((entry) => {
+                        const metadata = entry.metadata ?? {};
+                        const resultingBalance = metadataNumber(
+                          metadata.resultingAvailableBalance
+                        );
+                        const previousEntitlement = metadataNumber(
+                          metadata.previousMonthlyEntitlement
+                        );
+                        const newEntitlement = metadataNumber(
+                          metadata.newMonthlyEntitlement
+                        );
+                        const actorId = metadataText(metadata.adminActorId);
+                        const isWellhubChange =
+                          entry.reason === "ADMIN_WELLHUB_PLAN_CHANGE";
+                        const deltaText =
+                          entry.delta > 0 ? `+${entry.delta}` : String(entry.delta);
+
+                        return (
+                          <tr key={entry.id} className="border-b align-top">
+                            <td className="py-2 whitespace-nowrap">
+                              {formatAdminDate(entry.createdAt)}
+                            </td>
+                            <td className="py-2">
+                              {formatCreditReason(entry.reason)}
+                            </td>
+                            <td
+                              className={`py-2 font-medium ${
+                                entry.delta < 0
+                                  ? "text-red-600"
+                                  : entry.delta > 0
+                                    ? "text-green-600"
+                                    : ""
+                              }`}
+                            >
+                              {deltaText}
+                            </td>
+                            <td className="py-2">
+                              {isWellhubChange ? (
+                                <div className="space-y-1">
+                                  <div>
+                                    {metadataText(metadata.previousAffiliation)} /{" "}
+                                    {metadataText(metadata.previousWellhubPlan)} {"->"}{" "}
+                                    {metadataText(metadata.newAffiliation)} /{" "}
+                                    {metadataText(metadata.newWellhubPlan)}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Entitlement: {previousEntitlement ?? 0} {"->"}{" "}
+                                    {newEntitlement ?? 0} - Actor: {actorId} - Ciclo:{" "}
+                                    {metadataText(metadata.cycleId)}
+                                  </div>
+                                </div>
+                              ) : entry.packPurchase?.pack?.name ? (
+                                entry.packPurchase.pack.name
+                              ) : entry.booking?.class?.title ? (
+                                entry.booking.class.title
+                              ) : (
+                                "Sin referencia"
+                              )}
+                            </td>
+                            <td className="py-2">
+                              {resultingBalance != null ? resultingBalance : "-"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+
+                      {details.creditHistory.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="py-3 text-center text-muted-foreground"
+                          >
+                            Sin historial
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
 
               
               {/* RESERVAS */}

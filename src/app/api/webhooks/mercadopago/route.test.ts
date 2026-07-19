@@ -759,9 +759,14 @@ describe("POST /api/webhooks/mercadopago timestamp handling", () => {
 });
 
 describe("middleware does not block /api/webhooks/mercadopago", () => {
-  it("only matches /admin/* paths", async () => {
-    const mod = await import("../../../../../middleware");
-    // The exported matcher must NOT include the webhook path.
-    expect(mod.config.matcher).toEqual(["/admin/:path*"]);
+  it("does not require onboarding for webhook requests without a session", async () => {
+    const mod = await import("@/lib/affiliation-gate");
+
+    expect(
+      mod.shouldRequireAffiliationOnboarding(
+        "/api/webhooks/mercadopago",
+        null
+      )
+    ).toBe(false);
   });
 });

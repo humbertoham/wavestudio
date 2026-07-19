@@ -61,7 +61,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
               },
             });
 
-            if (!cls) fail("CLASS_NOT_FOUND");
+            if (!cls || cls.deletedAt) fail("CLASS_NOT_FOUND");
             if (cls.isCanceled) fail("CLASS_CANCELED");
 
             const usedSpots = cls.bookings.reduce(
