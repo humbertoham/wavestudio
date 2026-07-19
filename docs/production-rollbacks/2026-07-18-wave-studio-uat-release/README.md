@@ -1,6 +1,6 @@
 # Wave Studio production release package — 2026-07-18
 
-Status: **release candidate only; production release is not authorized**.
+Status: **production database migrations completed on 2026-07-19; application deployment remains separate**. See `post-migration.md`.
 
 This package was prepared for the normal merge of validated UAT into the production source branch. It deliberately does not contain credentials, connection strings, deployment URLs, branch IDs, or customer identifiers.
 

@@ -135,6 +135,8 @@ model User {
   wellhubPlanConfirmedAt             DateTime?
   wellhubPlanConfirmationCampaign    String?
   wellhubPlanConfirmations           WellhubPlanConfirmation[]
+
+  @@index([affiliation, wellhubPlan])
 }
 
 model WellhubPlanConfirmation {
@@ -163,7 +165,7 @@ model WellhubPlanConfirmation {
   @@unique([campaign, userId])
   @@index([campaign, status, requestedAt])
   @@index([userId, requestedAt])
-  @@index([userId, status, sessionRecoveryExpiresAt])
+  @@index([userId, status, sessionRecoveryExpiresAt], map: "WellhubPlanConfirmation_userId_status_sessionRecoveryExpiresAt_")
 }
 
 model Instructor {
@@ -204,7 +206,7 @@ model Class {
   waitlist        Waitlist[]
 
   // Eligibility is snapshotted only when the class is created while active.
-  challenge                  Challenge?              @relation(fields: [challengeId], references: [id])
+  challenge                  Challenge?              @relation(fields: [challengeId], references: [id], onDelete: Restrict)
   challengeId                String?
   challengePoints            Int?
   challengeEligibleAt        DateTime?
