@@ -340,7 +340,6 @@ describe("POST /api/webhooks/mercadopago refund handling", () => {
     });
   });
 });
-
 type SignedRequestOptions = {
   dataId?: string;
   urlDataId?: string;
@@ -755,18 +754,5 @@ describe("POST /api/webhooks/mercadopago timestamp handling", () => {
       .map(([, ctx]: any[]) => (ctx as any)?.reason)
       .filter(Boolean);
     expect(allReasons).not.toContain("STALE_TIMESTAMP");
-  });
-});
-
-describe("middleware does not block /api/webhooks/mercadopago", () => {
-  it("does not require onboarding for webhook requests without a session", async () => {
-    const mod = await import("@/lib/affiliation-gate");
-
-    expect(
-      mod.shouldRequireAffiliationOnboarding(
-        "/api/webhooks/mercadopago",
-        null
-      )
-    ).toBe(false);
   });
 });

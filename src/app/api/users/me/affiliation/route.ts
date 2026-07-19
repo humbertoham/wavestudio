@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { normalizeAffiliationAndPlan } from "@/lib/affiliation";
 import { requireAuth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
-import { issueSessionCookie } from "@/lib/session-cookie";
-import { WELLHUB_CONFIRMATION_DESTINATION } from "@/lib/wellhub-confirmation-ui";
+import { DEFAULT_AUTHENTICATED_PATH } from "@/lib/login-navigation";
 
 export const runtime = "nodejs";
 
@@ -17,7 +14,6 @@ function json(status: number, body: Record<string, unknown>) {
 
 export async function POST(req: Request) {
   const auth = await requireAuth(req).catch(() => null);
-
   if (!auth) {
     return json(401, {
       error: "UNAUTHORIZED",
@@ -25,90 +21,9 @@ export async function POST(req: Request) {
     });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return json(400, {
-      error: "INVALID_JSON",
-      message: "El body debe ser JSON valido.",
-    });
-  }
-
-  const input = body && typeof body === "object" ? body : {};
-  const normalized = normalizeAffiliationAndPlan(
-    (input as { affiliation?: unknown }).affiliation,
-    (input as { wellhubPlan?: unknown }).wellhubPlan
-  );
-
-  if (!normalized.ok) {
-    return json(400, {
-      error: normalized.code,
-      message: normalized.message,
-      fields: {
-        [normalized.field]: [normalized.message],
-      },
-    });
-  }
-
-  const existing = await prisma.user.findUnique({
-    where: { id: auth.sub },
-    select: {
-      id: true,
-      role: true,
-      affiliationConfirmedAt: true,
-      authVersion: true,
-      wellhubPlanConfirmationRequired: true,
-      wellhubPlanConfirmationCampaign: true,
-    },
+  return json(410, {
+    error: "AFFILIATION_ONBOARDING_DISABLED",
+    message: "La afiliacion ya no se confirma desde esta pagina.",
+    redirectTo: DEFAULT_AUTHENTICATED_PATH,
   });
-
-  if (!existing) {
-    return json(404, {
-      error: "USER_NOT_FOUND",
-      message: "Usuario no encontrado.",
-    });
-  }
-
-  if (existing.affiliationConfirmedAt) {
-    return json(409, {
-      error: "AFFILIATION_ALREADY_CONFIRMED",
-      message: "Tu afiliacion ya fue confirmada.",
-    });
-  }
-
-  const confirmedAt = new Date();
-  const user = await prisma.user.update({
-    where: { id: auth.sub },
-    data: {
-      affiliation: normalized.affiliation,
-      wellhubPlan: normalized.wellhubPlan,
-      affiliationConfirmedAt: confirmedAt,
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      affiliation: true,
-      wellhubPlan: true,
-      affiliationConfirmedAt: true,
-      authVersion: true,
-      wellhubPlanConfirmationRequired: true,
-      wellhubPlanConfirmationCampaign: true,
-    },
-  });
-
-  const res = json(200, {
-    ok: true,
-    redirectTo: WELLHUB_CONFIRMATION_DESTINATION,
-    user: {
-      ...user,
-      affiliationConfirmed: true,
-    },
-  });
-
-  issueSessionCookie(res, req, user);
-
-  return res;
 }

@@ -317,6 +317,46 @@ describe("corporate registration grants", () => {
     expect(tx.tokenLedger.create).not.toHaveBeenCalled();
   });
 
+  it("defaults a signup without affiliation to NONE without a second onboarding step", async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: "user_default_none",
+          email: "default-none@example.test",
+        }),
+      },
+      pack: { upsert: vi.fn() },
+      packPurchase: { create: vi.fn() },
+      tokenLedger: { create: vi.fn() },
+    };
+    mocks.prisma.$transaction.mockImplementation(async (callback: any) =>
+      callback(tx)
+    );
+
+    const response = await POST(
+      registerRequestBody({
+        name: "Default None User",
+        email: "default-none@example.test",
+        password: "password123",
+        dateOfBirth: "1990-01-01",
+        phone: "5555555555",
+        emergencyPhone: "5555555556",
+      })
+    );
+
+    expect(response.status).toBe(201);
+    expect(tx.user.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        affiliation: "NONE",
+        wellhubPlan: null,
+        affiliationConfirmedAt: expect.any(Date),
+      }),
+      select: { id: true, email: true },
+    });
+    expect(tx.packPurchase.create).not.toHaveBeenCalled();
+    expect(tx.tokenLedger.create).not.toHaveBeenCalled();
+  });
+
   it("creates TotalPass signup credits without requiring a WellHub plan", async () => {
     const tx = {
       user: {

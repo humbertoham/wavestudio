@@ -38,7 +38,7 @@ function user({
   required = true,
   pendingCampaigns = ["campaign-1"],
 }: {
-  affiliation?: "WELLHUB" | "TOTALPASS" | "NONE";
+  affiliation?: "WELLHUB" | "TOTALPASS" | "NONE" | null;
   required?: boolean;
   pendingCampaigns?: string[];
 } = {}) {
@@ -90,6 +90,7 @@ describe("POST /api/auth/login WellHub redirect", () => {
     for (const persistedUser of [
       user({ affiliation: "TOTALPASS" }),
       user({ affiliation: "NONE" }),
+      user({ affiliation: null }),
       user({ pendingCampaigns: ["other-campaign"] }),
       user({ required: false, pendingCampaigns: [] }),
     ]) {

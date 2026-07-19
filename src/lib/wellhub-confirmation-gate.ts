@@ -1,3 +1,5 @@
+import { Affiliation } from "@prisma/client";
+
 export const WELLHUB_CONFIRMATION_PATH = "/actualizar-plan-wellhub";
 
 export type WellhubConfirmationState = {
@@ -38,7 +40,9 @@ export function isWellhubConfirmationAllowedPath(pathname: string) {
 export function hasPendingWellhubPlanConfirmation(
   state: WellhubConfirmationState | null | undefined
 ) {
-  if (!state || state.affiliation !== "WELLHUB") return false;
+  if (!state || effectiveAffiliation(state.affiliation) !== Affiliation.WELLHUB) {
+    return false;
+  }
   if (state.wellhubPlanConfirmationRequired !== true) return false;
   if (typeof state.wellhubPlanConfirmationCampaign !== "string") return false;
 
@@ -47,6 +51,12 @@ export function hasPendingWellhubPlanConfirmation(
       state.wellhubPlanConfirmationCampaign
     )
   );
+}
+
+export function effectiveAffiliation(value: unknown): Affiliation {
+  if (value === Affiliation.WELLHUB) return Affiliation.WELLHUB;
+  if (value === Affiliation.TOTALPASS) return Affiliation.TOTALPASS;
+  return Affiliation.NONE;
 }
 
 export function shouldRequireWellhubPlanConfirmation(

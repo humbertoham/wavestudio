@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  effectiveAffiliation,
   hasPendingWellhubPlanConfirmation,
   isWellhubConfirmationAllowedPath,
   shouldRequireWellhubPlanConfirmation,
@@ -77,5 +78,13 @@ describe("forced WellHub plan confirmation gate", () => {
         pendingWellhubPlanConfirmationCampaigns: ["other-campaign"],
       })
     ).toBe(false);
+  });
+
+  it("treats null, missing, and unknown legacy affiliation values as NONE", () => {
+    expect(effectiveAffiliation(null)).toBe("NONE");
+    expect(effectiveAffiliation(undefined)).toBe("NONE");
+    expect(effectiveAffiliation("UNKNOWN")).toBe("NONE");
+    expect(effectiveAffiliation("TOTALPASS")).toBe("TOTALPASS");
+    expect(effectiveAffiliation("WELLHUB")).toBe("WELLHUB");
   });
 });

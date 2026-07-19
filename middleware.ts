@@ -2,7 +2,6 @@ import { errors as joseErrors, jwtVerify } from "jose";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import { shouldRequireAffiliationOnboarding } from "@/lib/affiliation-gate";
 import { prisma } from "@/lib/prisma";
 import {
   WELLHUB_CONFIRMATION_PATH,
@@ -49,7 +48,6 @@ export async function middleware(req: NextRequest) {
           select: {
             role: true,
             affiliation: true,
-            affiliationConfirmedAt: true,
             authVersion: true,
             wellhubPlanConfirmationRequired: true,
             wellhubPlanConfirmationCampaign: true,
@@ -80,8 +78,6 @@ export async function middleware(req: NextRequest) {
             payload = {
               ...verified.payload,
               role: user.role,
-              affiliationConfirmed:
-                user.affiliationConfirmedAt != null,
               sessionVersion: user.authVersion,
               wellhubPlanConfirmationRequired:
                 user.wellhubPlanConfirmationRequired,
@@ -155,20 +151,6 @@ export async function middleware(req: NextRequest) {
     if (payload.role !== "ADMIN") {
       return NextResponse.redirect(new URL("/", req.url));
     }
-  }
-
-  if (shouldRequireAffiliationOnboarding(pathname, payload)) {
-    if (pathname.startsWith("/api")) {
-      return apiError(
-        "AFFILIATION_REQUIRED",
-        "Debes seleccionar tu afiliacion para continuar.",
-        428
-      );
-    }
-    const nextPath = `${pathname}${search}`;
-    return NextResponse.redirect(
-      new URL(`/afiliacion?next=${encodeURIComponent(nextPath)}`, req.url)
-    );
   }
 
   return NextResponse.next();

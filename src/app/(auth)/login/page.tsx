@@ -4,13 +4,15 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "@/lib/useSession";
+import { safePostLoginDestination } from "@/lib/login-navigation";
+import { WELLHUB_CONFIRMATION_PATH } from "@/lib/wellhub-confirmation-gate";
 
 export const dynamic = "force-dynamic";
 
 function LoginInner() {
   const router = useRouter();
   const search = useSearchParams();
-  const next = search.get("next") || "/clases";
+  const next = safePostLoginDestination(search.get("next"));
   const { refresh } = useSession();
 
   const [email, setEmail] = useState("");
@@ -48,7 +50,9 @@ function LoginInner() {
       const payload = (await res.json()) as { redirectTo?: unknown };
       await refresh();
       router.replace(
-        typeof payload.redirectTo === "string" ? payload.redirectTo : next
+        payload.redirectTo === WELLHUB_CONFIRMATION_PATH
+          ? WELLHUB_CONFIRMATION_PATH
+          : next
       );
       router.refresh();
     } catch (err: any) {

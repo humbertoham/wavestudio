@@ -26,7 +26,7 @@ function user(
   required: boolean,
   authVersion = 3,
   role = "USER",
-  affiliation = "WELLHUB",
+  affiliation: string | null = "WELLHUB",
   affiliationConfirmedAt: Date | null = new Date()
 ) {
   return {
@@ -123,7 +123,7 @@ describe("WellHub confirmation proxy enforcement", () => {
     expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("gives a pending WellHub campaign precedence over generic affiliation onboarding", async () => {
+  it("gives a pending WellHub campaign precedence on every page, including the obsolete route", async () => {
     mocks.findUnique.mockResolvedValue(
       user(true, 3, "USER", "WELLHUB", null)
     );
@@ -150,15 +150,31 @@ describe("WellHub confirmation proxy enforcement", () => {
     }
   });
 
-  it("keeps generic onboarding only for a genuinely incomplete user", async () => {
-    mocks.findUnique.mockResolvedValue(user(false, 3, "USER", "NONE", null));
+  it("never routes any role or affiliation to generic onboarding", async () => {
+    for (const role of ["USER", "COACH", "ADMIN"]) {
+      for (const affiliation of ["WELLHUB", "TOTALPASS", "NONE", null]) {
+        mocks.findUnique.mockResolvedValue(
+          user(false, 3, role, affiliation, null)
+        );
+        const path = role === "ADMIN" ? "/admin" : "/clases";
+        const response = await middleware(request(path));
+        expect(response.status, `${role}:${String(affiliation)}`).toBe(200);
+        expect(
+          response.headers.get("location"),
+          `${role}:${String(affiliation)}`
+        ).toBeNull();
+      }
+    }
+  });
 
-    const protectedResponse = await middleware(request("/clases"));
-    expect(protectedResponse.headers.get("location")).toContain("/afiliacion");
+  it("does not use affiliationConfirmedAt null as an authorization condition", async () => {
+    mocks.findUnique.mockResolvedValue(user(false, 3, "USER", null, null));
 
-    const onboardingResponse = await middleware(request("/afiliacion"));
-    expect(onboardingResponse.status).toBe(200);
-    expect(onboardingResponse.headers.get("x-middleware-next")).toBe("1");
+    for (const path of ["/clases", "/perfil", "/api/bookings"]) {
+      const response = await middleware(request(path));
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get("location"), path).toBeNull();
+    }
   });
 
   it("does not trust a flag without canonical WellHub affiliation and a matching pending record", async () => {
