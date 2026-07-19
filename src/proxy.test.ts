@@ -22,13 +22,21 @@ function request(path: string) {
   });
 }
 
-function user(required: boolean, authVersion = 3, role = "USER") {
+function user(
+  required: boolean,
+  authVersion = 3,
+  role = "USER",
+  affiliation = "WELLHUB",
+  affiliationConfirmedAt: Date | null = new Date()
+) {
   return {
     role,
-    affiliationConfirmedAt: new Date(),
+    affiliation,
+    affiliationConfirmedAt,
     authVersion,
     wellhubPlanConfirmationRequired: required,
     wellhubPlanConfirmationCampaign: required ? "campaign-1" : null,
+    wellhubPlanConfirmations: required ? [{ campaign: "campaign-1" }] : [],
   };
 }
 
@@ -113,5 +121,57 @@ describe("WellHub confirmation proxy enforcement", () => {
     const response = await middleware(request("/clases"));
     expect(response.status).toBe(200);
     expect(response.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("gives a pending WellHub campaign precedence over generic affiliation onboarding", async () => {
+    mocks.findUnique.mockResolvedValue(
+      user(true, 3, "USER", "WELLHUB", null)
+    );
+
+    const protectedResponse = await middleware(request("/clases"));
+    expect(protectedResponse.headers.get("location")).toBe(
+      "https://wave.test/actualizar-plan-wellhub"
+    );
+
+    const genericResponse = await middleware(request("/afiliacion"));
+    expect(genericResponse.headers.get("location")).toBe(
+      "https://wave.test/actualizar-plan-wellhub"
+    );
+  });
+
+  it("leaves confirmed WellHub, TotalPass, and NONE users out of the campaign gate", async () => {
+    for (const affiliation of ["WELLHUB", "TOTALPASS", "NONE"]) {
+      mocks.findUnique.mockResolvedValue(
+        user(false, 3, "USER", affiliation, new Date())
+      );
+      const response = await middleware(request("/clases"));
+      expect(response.status, affiliation).toBe(200);
+      expect(response.headers.get("x-middleware-next"), affiliation).toBe("1");
+    }
+  });
+
+  it("keeps generic onboarding only for a genuinely incomplete user", async () => {
+    mocks.findUnique.mockResolvedValue(user(false, 3, "USER", "NONE", null));
+
+    const protectedResponse = await middleware(request("/clases"));
+    expect(protectedResponse.headers.get("location")).toContain("/afiliacion");
+
+    const onboardingResponse = await middleware(request("/afiliacion"));
+    expect(onboardingResponse.status).toBe(200);
+    expect(onboardingResponse.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("does not trust a flag without canonical WellHub affiliation and a matching pending record", async () => {
+    mocks.findUnique.mockResolvedValue({
+      ...user(true, 3, "USER", "TOTALPASS", new Date()),
+      wellhubPlanConfirmations: [{ campaign: "campaign-1" }],
+    });
+    expect((await middleware(request("/clases"))).status).toBe(200);
+
+    mocks.findUnique.mockResolvedValue({
+      ...user(true),
+      wellhubPlanConfirmations: [],
+    });
+    expect((await middleware(request("/clases"))).status).toBe(200);
   });
 });

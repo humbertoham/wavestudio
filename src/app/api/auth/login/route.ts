@@ -4,6 +4,10 @@ import { compareHash } from "@/lib/hash";
 import { prisma } from "@/lib/prisma";
 import { consumeRateLimit, getClientIp } from "@/lib/rate-limit";
 import { issueSessionCookie } from "@/lib/session-cookie";
+import {
+  WELLHUB_CONFIRMATION_PATH,
+  hasPendingWellhubPlanConfirmation,
+} from "@/lib/wellhub-confirmation-gate";
 import { loginSchema } from "@/lib/zod";
 
 export const runtime = "nodejs";
@@ -47,10 +51,15 @@ export async function POST(req: Request) {
     select: {
       id: true,
       role: true,
+      affiliation: true,
       affiliationConfirmedAt: true,
       authVersion: true,
       wellhubPlanConfirmationRequired: true,
       wellhubPlanConfirmationCampaign: true,
+      wellhubPlanConfirmations: {
+        where: { status: "PENDING" },
+        select: { campaign: true },
+      },
       passwordHash: true,
     },
   });
@@ -64,6 +73,17 @@ export async function POST(req: Request) {
       ok: true,
       wellhubPlanConfirmationRequired:
         user.wellhubPlanConfirmationRequired,
+      redirectTo: hasPendingWellhubPlanConfirmation({
+        affiliation: user.affiliation,
+        wellhubPlanConfirmationRequired:
+          user.wellhubPlanConfirmationRequired,
+        wellhubPlanConfirmationCampaign:
+          user.wellhubPlanConfirmationCampaign,
+        pendingWellhubPlanConfirmationCampaigns:
+          user.wellhubPlanConfirmations.map((record) => record.campaign),
+      })
+        ? WELLHUB_CONFIRMATION_PATH
+        : null,
     },
     { headers: { "Cache-Control": "no-store" } }
   );

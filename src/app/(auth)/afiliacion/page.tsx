@@ -4,10 +4,8 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useSession } from "@/lib/useSession";
-import {
-  completeWellhubConfirmationNavigation,
-  WELLHUB_CONFIRMATION_DESTINATION,
-} from "@/lib/wellhub-confirmation-ui";
+import { affiliationOnboardingRedirect } from "@/lib/affiliation-gate";
+import { completeWellhubConfirmationNavigation } from "@/lib/wellhub-confirmation-ui";
 import {
   WELLHUB_PLAN_CREDITS,
   WELLHUB_PLAN_LABELS,
@@ -39,6 +37,7 @@ function AffiliationOnboardingInner() {
   const [wellhubPlan, setWellhubPlan] = useState<WellhubPlan | "">("");
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const redirectTo = affiliationOnboardingRedirect(user);
 
   useEffect(() => {
     if (isLoading) return;
@@ -48,10 +47,12 @@ function AffiliationOnboardingInner() {
       return;
     }
 
-    if (user.role === "ADMIN" || user.affiliationConfirmed) {
-      router.replace(WELLHUB_CONFIRMATION_DESTINATION);
-    }
-  }, [isLoading, router, user]);
+    if (redirectTo) router.replace(redirectTo);
+  }, [isLoading, redirectTo, router, user]);
+
+  if (isLoading || !user || redirectTo) {
+    return <div className="p-6 text-center">Cargando...</div>;
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

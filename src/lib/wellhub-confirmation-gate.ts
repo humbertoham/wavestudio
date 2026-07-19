@@ -1,5 +1,12 @@
 export const WELLHUB_CONFIRMATION_PATH = "/actualizar-plan-wellhub";
 
+export type WellhubConfirmationState = {
+  affiliation?: unknown;
+  wellhubPlanConfirmationRequired?: unknown;
+  wellhubPlanConfirmationCampaign?: unknown;
+  pendingWellhubPlanConfirmationCampaigns?: readonly string[] | null;
+};
+
 const ALLOWED_PAGE_PATHS = [
   WELLHUB_CONFIRMATION_PATH,
   "/login",
@@ -28,11 +35,26 @@ export function isWellhubConfirmationAllowedPath(pathname: string) {
   );
 }
 
+export function hasPendingWellhubPlanConfirmation(
+  state: WellhubConfirmationState | null | undefined
+) {
+  if (!state || state.affiliation !== "WELLHUB") return false;
+  if (state.wellhubPlanConfirmationRequired !== true) return false;
+  if (typeof state.wellhubPlanConfirmationCampaign !== "string") return false;
+
+  return Boolean(
+    state.pendingWellhubPlanConfirmationCampaigns?.includes(
+      state.wellhubPlanConfirmationCampaign
+    )
+  );
+}
+
 export function shouldRequireWellhubPlanConfirmation(
   pathname: string,
-  required: boolean | null | undefined
+  state: WellhubConfirmationState | null | undefined
 ) {
   return (
-    required === true && !isWellhubConfirmationAllowedPath(pathname)
+    hasPendingWellhubPlanConfirmation(state) &&
+    !isWellhubConfirmationAllowedPath(pathname)
   );
 }

@@ -1,9 +1,15 @@
+import { WELLHUB_CONFIRMATION_PATH } from "./wellhub-confirmation-gate";
+
 type GatePayload = {
   role?: unknown;
+  affiliation?: unknown;
   affiliationConfirmed?: unknown;
+  wellhubPlanConfirmationRequired?: unknown;
+  wellhubPlanConfirmationCampaign?: unknown;
 };
 
 const ONBOARDING_PATH = "/afiliacion";
+const DEFAULT_DESTINATION = "/clases";
 
 const AUTH_ALLOWED_PREFIXES = [
   "/login",
@@ -53,4 +59,21 @@ export function shouldRequireAffiliationOnboarding(
   if (isAffiliationGateAllowedPath(pathname)) return false;
 
   return isAffiliationGatedPath(pathname);
+}
+
+export function affiliationOnboardingRedirect(
+  user: GatePayload | null | undefined
+) {
+  if (!user) return null;
+  if (
+    user.affiliation === "WELLHUB" &&
+    user.wellhubPlanConfirmationRequired === true &&
+    typeof user.wellhubPlanConfirmationCampaign === "string"
+  ) {
+    return WELLHUB_CONFIRMATION_PATH;
+  }
+  if (user.role === "ADMIN" || user.affiliationConfirmed === true) {
+    return DEFAULT_DESTINATION;
+  }
+  return null;
 }

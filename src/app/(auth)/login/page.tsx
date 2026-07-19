@@ -45,8 +45,11 @@ function LoginInner() {
         throw new Error("No se pudo iniciar sesión. Inténtalo de nuevo.");
       }
 
+      const payload = (await res.json()) as { redirectTo?: unknown };
       await refresh();
-      router.replace(next);
+      router.replace(
+        typeof payload.redirectTo === "string" ? payload.redirectTo : next
+      );
       router.refresh();
     } catch (err: any) {
       setErrorMsg(err?.message ?? "Ocurrió un error al iniciar sesión.");

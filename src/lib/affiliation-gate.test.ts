@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldRequireAffiliationOnboarding } from "./affiliation-gate";
+import {
+  affiliationOnboardingRedirect,
+  shouldRequireAffiliationOnboarding,
+} from "./affiliation-gate";
 
 describe("shouldRequireAffiliationOnboarding", () => {
   it("gates existing non-admin users without the session confirmation claim", () => {
@@ -34,5 +37,34 @@ describe("shouldRequireAffiliationOnboarding", () => {
         role: "USER",
       })
     ).toBe(false);
+  });
+
+  it("sends a pending WellHub user away from generic onboarding", () => {
+    expect(
+      affiliationOnboardingRedirect({
+        role: "USER",
+        affiliation: "WELLHUB",
+        affiliationConfirmed: false,
+        wellhubPlanConfirmationRequired: true,
+        wellhubPlanConfirmationCampaign: "campaign-1",
+      })
+    ).toBe("/actualizar-plan-wellhub");
+  });
+
+  it("sends already-confirmed users away and preserves genuine onboarding", () => {
+    expect(
+      affiliationOnboardingRedirect({
+        role: "USER",
+        affiliation: "TOTALPASS",
+        affiliationConfirmed: true,
+      })
+    ).toBe("/clases");
+    expect(
+      affiliationOnboardingRedirect({
+        role: "USER",
+        affiliation: "NONE",
+        affiliationConfirmed: false,
+      })
+    ).toBeNull();
   });
 });

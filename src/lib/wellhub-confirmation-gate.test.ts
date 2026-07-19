@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  hasPendingWellhubPlanConfirmation,
   isWellhubConfirmationAllowedPath,
   shouldRequireWellhubPlanConfirmation,
 } from "./wellhub-confirmation-gate";
+
+const pendingWellhubState = {
+  affiliation: "WELLHUB",
+  wellhubPlanConfirmationRequired: true,
+  wellhubPlanConfirmationCampaign: "campaign-1",
+  pendingWellhubPlanConfirmationCampaigns: ["campaign-1"],
+};
 
 describe("forced WellHub plan confirmation gate", () => {
   it("blocks application pages and APIs for every flagged role", () => {
@@ -20,7 +28,9 @@ describe("forced WellHub plan confirmation gate", () => {
       "/api/admin/classes",
       "/api/challenge",
     ]) {
-      expect(shouldRequireWellhubPlanConfirmation(path, true)).toBe(true);
+      expect(
+        shouldRequireWellhubPlanConfirmation(path, pendingWellhubState)
+      ).toBe(true);
     }
   });
 
@@ -34,12 +44,38 @@ describe("forced WellHub plan confirmation gate", () => {
       "/login",
     ]) {
       expect(isWellhubConfirmationAllowedPath(path)).toBe(true);
-      expect(shouldRequireWellhubPlanConfirmation(path, true)).toBe(false);
+      expect(
+        shouldRequireWellhubPlanConfirmation(path, pendingWellhubState)
+      ).toBe(false);
     }
   });
 
   it("does not affect unflagged sessions", () => {
-    expect(shouldRequireWellhubPlanConfirmation("/clases", false)).toBe(false);
-    expect(shouldRequireWellhubPlanConfirmation("/api/bookings", undefined)).toBe(false);
+    expect(shouldRequireWellhubPlanConfirmation("/clases", null)).toBe(false);
+    expect(
+      shouldRequireWellhubPlanConfirmation("/api/bookings", undefined)
+    ).toBe(false);
+  });
+
+  it("requires the canonical WellHub affiliation, active flag, and matching pending campaign", () => {
+    expect(hasPendingWellhubPlanConfirmation(pendingWellhubState)).toBe(true);
+    expect(
+      hasPendingWellhubPlanConfirmation({
+        ...pendingWellhubState,
+        affiliation: "TOTALPASS",
+      })
+    ).toBe(false);
+    expect(
+      hasPendingWellhubPlanConfirmation({
+        ...pendingWellhubState,
+        wellhubPlanConfirmationRequired: false,
+      })
+    ).toBe(false);
+    expect(
+      hasPendingWellhubPlanConfirmation({
+        ...pendingWellhubState,
+        pendingWellhubPlanConfirmationCampaigns: ["other-campaign"],
+      })
+    ).toBe(false);
   });
 });

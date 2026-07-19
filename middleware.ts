@@ -6,8 +6,10 @@ import { shouldRequireAffiliationOnboarding } from "@/lib/affiliation-gate";
 import { prisma } from "@/lib/prisma";
 import {
   WELLHUB_CONFIRMATION_PATH,
+  hasPendingWellhubPlanConfirmation,
   isWellhubConfirmationAllowedPath,
   shouldRequireWellhubPlanConfirmation,
+  type WellhubConfirmationState,
 } from "@/lib/wellhub-confirmation-gate";
 
 const secret = new TextEncoder().encode(process.env.JWT_SECRET!);
@@ -29,6 +31,7 @@ export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
   const token = req.cookies.get("session")?.value;
   let payload: Record<string, unknown> | null = null;
+  let wellhubConfirmationState: WellhubConfirmationState | null = null;
   let invalidatedSession = false;
   let invalidatedUserRequiresConfirmation = false;
 
@@ -45,14 +48,28 @@ export async function middleware(req: NextRequest) {
           where: { id: sub },
           select: {
             role: true,
+            affiliation: true,
             affiliationConfirmedAt: true,
             authVersion: true,
             wellhubPlanConfirmationRequired: true,
             wellhubPlanConfirmationCampaign: true,
+            wellhubPlanConfirmations: {
+              where: { status: "PENDING" },
+              select: { campaign: true },
+            },
           },
         });
 
         if (user) {
+          wellhubConfirmationState = {
+            affiliation: user.affiliation,
+            wellhubPlanConfirmationRequired:
+              user.wellhubPlanConfirmationRequired,
+            wellhubPlanConfirmationCampaign:
+              user.wellhubPlanConfirmationCampaign,
+            pendingWellhubPlanConfirmationCampaigns:
+              user.wellhubPlanConfirmations.map((record) => record.campaign),
+          };
           const signedVersion = Number.isInteger(
             verified.payload.sessionVersion
           )
@@ -74,7 +91,7 @@ export async function middleware(req: NextRequest) {
           } else {
             invalidatedSession = true;
             invalidatedUserRequiresConfirmation =
-              user.wellhubPlanConfirmationRequired;
+              hasPendingWellhubPlanConfirmation(wellhubConfirmationState);
           }
         } else {
           invalidatedSession = true;
@@ -118,7 +135,7 @@ export async function middleware(req: NextRequest) {
   if (
     shouldRequireWellhubPlanConfirmation(
       pathname,
-      payload?.wellhubPlanConfirmationRequired as boolean | undefined
+      wellhubConfirmationState
     )
   ) {
     if (pathname.startsWith("/api")) {
