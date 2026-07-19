@@ -5,12 +5,10 @@ import { useRouter } from "next/navigation";
 
 import {
   acquireWellhubSubmissionLock,
-  completeWellhubConfirmationNavigation,
-  finishWellhubSubmission,
+  releaseWellhubSubmissionLock,
   submitWellhubConfirmationRequest,
   WELLHUB_CONFIRMATION_COPY,
   WELLHUB_CONFIRMATION_DESTINATION,
-  WELLHUB_CONFIRMATION_MESSAGES,
   validateWellhubConfirmationSelection,
 } from "@/lib/wellhub-confirmation-ui";
 import { useSession } from "@/lib/useSession";
@@ -105,41 +103,34 @@ export default function UpdateWellhubPlanPage() {
     setError(null);
     let redirecting = false;
     try {
-      const res = await submitWellhubConfirmationRequest({
-        selectedPlan,
-      });
-      if (res.kind !== "success") {
-        console.error("[wellhub-plan-confirmation] submission failed", {
-          selectedPlan,
-          result: res.kind,
-          httpStatus: res.status,
-          responseType: res.responseType,
-          apiErrorCode: res.code,
-          requestAborted: res.requestAborted,
-          recoveryAttempted: res.recoveryAttempted,
-          recoverySucceeded: false,
-          elapsedMs: res.elapsedMs,
-        });
-        setError(res.message);
+      let res: Response;
+      try {
+        res = await submitWellhubConfirmationRequest({ selectedPlan });
+      } catch {
+        setError("No pudimos conectar con el servidor. Intenta nuevamente.");
         return;
       }
 
-      await completeWellhubConfirmationNavigation({
-        replace: router.replace,
-      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        setError(
+          res.status === 401 || res.status === 403
+            ? "Tu sesión expiró. Inicia sesión nuevamente."
+            : readMessage(
+                payload,
+                "No pudimos guardar tu plan. Intenta nuevamente."
+              )
+        );
+        return;
+      }
+
+      window.location.replace(WELLHUB_CONFIRMATION_DESTINATION);
       redirecting = true;
-    } catch (submitError) {
-      console.error("[wellhub-plan-confirmation] client failure", {
-        errorName:
-          submitError instanceof Error ? submitError.name : "UnknownError",
-      });
-      setError(WELLHUB_CONFIRMATION_MESSAGES.unexpected);
     } finally {
-      finishWellhubSubmission({
-        lock: submissionLock,
-        redirecting,
-        setSaving,
-      });
+      if (!redirecting) {
+        releaseWellhubSubmissionLock(submissionLock);
+        setSaving(false);
+      }
     }
   }
 
