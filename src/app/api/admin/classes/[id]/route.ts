@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdmin, requireClassManager } from "../../_utils";
 import { Prisma } from "@prisma/client";
+import { executeClassDeletion } from "@/lib/class-deletion-response";
 
 export const runtime = "nodejs";
 
@@ -24,12 +25,27 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   const raw = await req.json();
 
   // Si viene "date" en string, conviértelo a Date
-  const { date, ...rest } = raw ?? {};
-  const data: any = { ...rest };
+  const { title, focus, durationMin, capacity, instructorId, date } = raw ?? {};
+  const data: Prisma.ClassUpdateInput = {};
+  if (title !== undefined) data.title = String(title);
+  if (focus !== undefined) data.focus = String(focus);
+  if (durationMin !== undefined) data.durationMin = Number(durationMin);
+  if (capacity !== undefined) data.capacity = Number(capacity);
+  if (instructorId !== undefined) {
+    data.instructor = { connect: { id: String(instructorId) } };
+  }
   if (date) {
-  const localLike = date.replace("T", " ");
-  data.date = zonedTimeToUtc(localLike, USER_TZ);
-}
+    const localLike = String(date).replace("T", " ");
+    data.date = zonedTimeToUtc(localLike, USER_TZ);
+  }
+
+  const existing = await prisma.class.findUnique({
+    where: { id },
+    select: { deletedAt: true },
+  });
+  if (!existing || existing.deletedAt) {
+    return j(404, { error: "CLASS_NOT_FOUND" });
+  }
 
   const item = await prisma.class.update({
     where: { id },
@@ -44,54 +60,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
   if (auth) return auth;
 
   const { id } = await ctx.params;
-
-  // 1) Validación rápida: ¿hay dependencias?
-  const [bookings, waiters] = await Promise.all([
-    prisma.booking.count({ where: { classId: id, status: "ACTIVE" } }),
-    prisma.waitlist.count({ where: { classId: id } }),
-  ]);
-
-  if (bookings > 0 || waiters > 0) {
-    return j(409, {
-      ok: false,
-      code: "CLASS_HAS_DEPENDENCIES",
-      message:
-        "No se puede eliminar la clase porque tiene reservas o lista de espera. Cancélala (isCanceled=true) o elimina primero las dependencias.",
-      details: { bookings, waitlist: waiters },
-    });
-  }
-
-  try {
-    // 2) Intento de hard delete (si no hay dependencias, esto pasa sin problema)
-    await prisma.class.delete({ where: { id } });
-    return NextResponse.json({ ok: true, hardDeleted: true });
-  } catch (e: unknown) {
-    // 3) Si truena por FK, hacemos soft delete en su lugar
-    if (
-      e instanceof Prisma.PrismaClientKnownRequestError &&
-      e.code === "P2003" // Foreign key constraint failed
-    ) {
-      // Soft delete: marcar cancelada para que no aparezca como disponible
-      return j(409, {
-        ok: false,
-        code: "CLASS_HAS_DEPENDENCIES",
-        reason: "FOREIGN_KEY_CONSTRAINT",
-        legacyMessage:
-          "La clase tenía dependencias (reservas/lista de espera). Se marcó como cancelada (isCanceled=true).",
-        message:
-          "No se puede eliminar la clase porque tiene reservas o lista de espera.",
-        dependencies: { bookings, waitlist: waiters },
-      });
-    }
-
-    // Otros errores: regresarlos con detalle para depurar sin 500 silencioso
-    console.error("DELETE /classes/:id error", e);
-    return j(500, {
-      ok: false,
-      code: "UNEXPECTED_ERROR",
-      message: "No se pudo eliminar la clase.",
-    });
-  }
+  return executeClassDeletion(id);
 }
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
@@ -120,7 +89,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     },
   });
 
-  if (!cls) {
+  if (!cls || cls.deletedAt) {
     return j(404, { error: "CLASS_NOT_FOUND" });
   }
 

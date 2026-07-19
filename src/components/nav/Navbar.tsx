@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   FiMenu,
@@ -19,7 +19,9 @@ import {
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import { useSession } from "@/lib/useSession";
+import { useChallenge } from "@/lib/useChallenge";
 import { FaWhatsapp } from "react-icons/fa";
+import { ChallengeNavLink } from "@/components/challenge/ChallengeNavLink";
 
 const NAV_LINKS = [
   { href: "/", label: "Inicio" },
@@ -44,13 +46,13 @@ function getInitials(name?: string) {
 
 export function Navbar() {
   const pathname = usePathname();
-  const router = useRouter();
   
   const [open, setOpen] = useState(false);
   const [isDark, setIsDark] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const { user, isAuthenticated, isLoading, refresh } = useSession();
+  const { challenge } = useChallenge(isAuthenticated);
 
   // Persistencia de tema
   useEffect(() => {
@@ -197,6 +199,20 @@ export function Navbar() {
                         </div>
                       </div>
                       <div className="h-px bg-border" />
+                      <Link
+                        href="/perfil"
+                        className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-muted"
+                        role="menuitem"
+                      >
+                        <FiUser className="icon" />
+                        Mi perfil
+                      </Link>
+                      <ChallengeNavLink
+                        active={challenge?.active === true}
+                        className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-muted"
+                        role="menuitem"
+                      />
+                      <div className="h-px bg-border" />
                   
                       <button
                         onClick={handleLogout}
@@ -307,7 +323,19 @@ export function Navbar() {
                         Mis clases
                       </Link>
                     </li>
-                   
+                    <li>
+                      <Link href="/perfil" className="block rounded-xl px-3 py-2 text-base font-medium hover:bg-muted">
+                        Mi perfil
+                      </Link>
+                    </li>
+                    {challenge?.active && (
+                      <li>
+                        <ChallengeNavLink
+                          active
+                          className="block rounded-xl px-3 py-2 text-base font-medium hover:bg-muted"
+                        />
+                      </li>
+                    )}
                   </>
                 ) : null}
               </ul>

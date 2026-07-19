@@ -4,9 +4,61 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/useSession";
+import {
+  WELLHUB_PLAN_CREDITS,
+  WELLHUB_PLAN_LABELS,
+  WELLHUB_PLANS,
+  type WellhubPlanValue,
+} from "@/lib/wellhub-config";
 
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_LENGTH = 64;
+
+function phoneDigits(value: string) {
+  return value.replace(/\D+/g, "");
+}
+
+function firstServerFieldMessage(fields: unknown) {
+  if (!fields || typeof fields !== "object") return null;
+
+  for (const key of [
+    "name",
+    "email",
+    "password",
+    "dateOfBirth",
+    "phone",
+    "emergencyPhone",
+    "affiliation",
+    "wellhubPlan",
+  ]) {
+    const value = (fields as Record<string, unknown>)[key];
+    if (Array.isArray(value) && typeof value[0] === "string") {
+      return value[0];
+    }
+  }
+
+  return null;
+}
+
+function serverErrorMessage(payload: unknown, fallback: string) {
+  const fieldMessage =
+    payload && typeof payload === "object" && "fields" in payload
+      ? firstServerFieldMessage((payload as { fields?: unknown }).fields)
+      : null;
+
+  if (fieldMessage) return fieldMessage;
+
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "message" in payload &&
+    typeof (payload as { message?: unknown }).message === "string"
+  ) {
+    return (payload as { message: string }).message;
+  }
+
+  return fallback;
+}
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -25,10 +77,33 @@ export default function RegisterPage() {
   const [phone, setPhone] = useState("");
   const [emergencyPhone, setEmergencyPhone] = useState("");
   const [affiliation, setAffiliation] = useState<"none" | "wellhub" | "totalpass">("none");
+  const [wellhubPlan, setWellhubPlan] = useState<"" | WellhubPlanValue>("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErrorMsg(null);
+
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    const normalizedPhone = phoneDigits(phone);
+    const normalizedEmergencyPhone = phoneDigits(emergencyPhone);
+
+    if (!trimmedName) return setErrorMsg("Ingresa tu nombre.");
+    if (!trimmedEmail) return setErrorMsg("Ingresa tu correo electrónico.");
+    if (!dateOfBirth) return setErrorMsg("Selecciona tu fecha de nacimiento.");
+    if (!phone.trim()) return setErrorMsg("Ingresa tu número de celular.");
+    if (normalizedPhone.length < 10 || normalizedPhone.length > 20) {
+      return setErrorMsg("Ingresa un número de celular válido.");
+    }
+    if (!emergencyPhone.trim()) {
+      return setErrorMsg("Ingresa un número de emergencias.");
+    }
+    if (
+      normalizedEmergencyPhone.length < 10 ||
+      normalizedEmergencyPhone.length > 20
+    ) {
+      return setErrorMsg("Ingresa un número de emergencias válido.");
+    }
 
     if (password.length < PASSWORD_MIN_LENGTH)
       return setErrorMsg(
@@ -40,9 +115,9 @@ export default function RegisterPage() {
       );
 
     if (password !== confirmPwd) return setErrorMsg("Las contraseñas no coinciden.");
-    if (!dateOfBirth) return setErrorMsg("Selecciona tu fecha de nacimiento.");
-    if (!phone) return setErrorMsg("Ingresa tu número de celular.");
-    if (!emergencyPhone) return setErrorMsg("Ingresa un número de emergencias.");
+    if (affiliation === "wellhub" && !wellhubPlan) {
+      return setErrorMsg("Selecciona tu plan de WellHub.");
+    }
 
     setLoading(true);
     try {
@@ -51,30 +126,27 @@ export default function RegisterPage() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          name,
-          email,
+          name: trimmedName,
+          email: trimmedEmail,
           password,
           dateOfBirth,
           phone,
           emergencyPhone,
           affiliation,
+          wellhubPlan: affiliation === "wellhub" ? wellhubPlan : null,
         }),
       });
 
       if (!regRes.ok) {
         const err = await regRes.json().catch(() => ({}));
-        if (regRes.status === 409 || err?.error === "EMAIL_IN_USE")
-          throw new Error("Este correo ya está registrado.");
-        if (regRes.status === 400 || err?.error === "INVALID" || err?.error === "INVALID_BODY")
-          throw new Error("Datos inválidos. Revisa el formulario.");
-        throw new Error("No se pudo crear la cuenta.");
+        throw new Error(serverErrorMessage(err, "No se pudo crear la cuenta."));
       }
 
       const logRes = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: trimmedEmail, password }),
       });
       if (!logRes.ok)
         throw new Error("Cuenta creada, pero no se pudo iniciar sesión. Intenta entrar manualmente.");
@@ -213,7 +285,11 @@ export default function RegisterPage() {
               <select
                 id="affiliation"
                 value={affiliation}
-                onChange={(e) => setAffiliation(e.target.value as any)}
+                onChange={(e) => {
+                  const next = e.target.value as "none" | "wellhub" | "totalpass";
+                  setAffiliation(next);
+                  if (next !== "wellhub") setWellhubPlan("");
+                }}
                 className="w-full rounded-xl border border-[color:var(--color-input)] bg-[color:var(--color-card)] px-4 py-2.5 text-[color:var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
               >
                 <option value="none">Ninguna</option>
@@ -221,6 +297,32 @@ export default function RegisterPage() {
                 <option value="totalpass">TotalPass</option>
               </select>
             </div>
+
+            {affiliation === "wellhub" && (
+              <div className="space-y-2">
+                <label htmlFor="wellhubPlan" className="block text-sm font-medium text-[color:var(--color-card-foreground)]">
+                  Plan en WellHub
+                </label>
+                <select
+                  id="wellhubPlan"
+                  value={wellhubPlan}
+                  onChange={(e) => setWellhubPlan(e.target.value as typeof wellhubPlan)}
+                  required
+                  className="w-full rounded-xl border border-[color:var(--color-input)] bg-[color:var(--color-card)] px-4 py-2.5 text-[color:var(--color-foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                >
+                  <option value="">Selecciona tu plan</option>
+                  {WELLHUB_PLANS.map((plan) => (
+                    <option key={plan} value={plan}>
+                      {WELLHUB_PLAN_LABELS[plan]} -{" "}
+                      {WELLHUB_PLAN_CREDITS[plan]} creditos mensuales
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-[color:var(--color-muted-foreground)]">
+                  Este plan determina tus creditos mensuales automaticos.
+                </p>
+              </div>
+            )}
 
             {/* Contraseña */}
             <div className="space-y-2">

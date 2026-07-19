@@ -4,6 +4,10 @@ import { BookingStatus } from "@prisma/client";
 import { getAuth, requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { classCreateSchema } from "@/lib/zod";
+import {
+  getClassChallengeSnapshot,
+  runChallengeTransaction,
+} from "@/lib/challenge";
 
 export const runtime = "nodejs";
 
@@ -34,11 +38,13 @@ export async function GET(req: Request) {
       lt?: Date;
     };
     focus?: string;
+    deletedAt: null;
   } = {
     date: {
       gte,
       ...(lt ? { lt } : {}),
     },
+    deletedAt: null,
   };
 
   if (focus) where.focus = focus;
@@ -139,11 +145,15 @@ export async function POST(req: Request) {
 
     const { date, ...rest } = parsed.data;
 
-    const cls = await prisma.class.create({
-      data: {
-        ...rest,
-        date: new Date(date),
-      },
+    const cls = await runChallengeTransaction(async (tx) => {
+      const challengeSnapshot = await getClassChallengeSnapshot(tx);
+      return tx.class.create({
+        data: {
+          ...rest,
+          date: new Date(date),
+          ...challengeSnapshot,
+        },
+      });
     });
 
     return NextResponse.json(cls, { status: 201 });

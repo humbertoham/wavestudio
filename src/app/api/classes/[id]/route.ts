@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, requireAdmin, requireClassManager } from "../../admin/_utils";
+import { prisma, requireClassManager } from "../../admin/_utils";
+import { getNewUserBookingIds } from "@/lib/new-user";
+import { executeClassDeletion } from "@/lib/class-deletion-response";
 
 type Ctx = {
   params: Promise<{ id: string }>;
@@ -52,71 +54,44 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     },
   });
 
-  if (!cls) {
+  if (!cls || cls.deletedAt) {
     return NextResponse.json(
       { error: "NOT_FOUND" },
       { status: 404 }
     );
   }
 
-  return NextResponse.json(cls);
+  const newUserBookingIds = await getNewUserBookingIds(
+    prisma,
+    cls.bookings,
+    cls.isCanceled
+  );
+
+  return NextResponse.json({
+    ...cls,
+    bookings: cls.bookings.map((booking) => {
+      const isNewUser = newUserBookingIds.has(booking.id);
+
+      return {
+        ...booking,
+        isNewUser,
+        // Backward-compatible alias for existing class-management clients.
+        isFirstBooking: isNewUser,
+      };
+    }),
+  });
 }
 
 /**
  * =========================
  * DELETE /api/classes/:id
- * Eliminar clase (ADMIN)
+ * Eliminar clase (ADMIN/COACH)
  * =========================
  */
 export async function DELETE(req: NextRequest, ctx: Ctx) {
-  const auth = await requireAdmin(req);
+  const auth = await requireClassManager(req);
   if (auth) return auth;
 
   const { id } = await ctx.params;
-
-  const [bookings, waitlist] = await Promise.all([
-    prisma.booking.count({ where: { classId: id, status: "ACTIVE" } }),
-    prisma.waitlist.count({ where: { classId: id } }),
-  ]);
-
-  if (bookings > 0 || waitlist > 0) {
-    return NextResponse.json(
-      {
-        code: "CLASS_HAS_DEPENDENCIES",
-        details: { bookings, waitlist },
-      },
-      { status: 409 }
-    );
-  }
-
-  try {
-    await prisma.class.delete({
-      where: { id },
-    });
-
-    return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    // Prisma: registro no encontrado
-    if (e?.code === "P2025") {
-      return NextResponse.json(
-        { error: "NOT_FOUND" },
-        { status: 404 }
-      );
-    }
-
-    if (e?.code === "P2003") {
-      return NextResponse.json(
-        {
-          code: "CLASS_HAS_DEPENDENCIES",
-          details: { bookings, waitlist },
-        },
-        { status: 409 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: "ERROR" },
-      { status: 500 }
-    );
-  }
+  return executeClassDeletion(id);
 }
