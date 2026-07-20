@@ -186,6 +186,42 @@ describe("GET /api/classes/[id]", () => {
     expect(mocks.prisma.booking.findMany).toHaveBeenCalledTimes(1);
   });
 
+  it("serializes the real cancellation timestamp and preserves its metadata", async () => {
+    const payload = classPayload();
+    const canceledAt = new Date("2026-07-20T16:35:00.000Z");
+    payload.bookings.push({
+      id: "booking_canceled",
+      userId: "user_3",
+      quantity: 1,
+      status: "CANCELED",
+      createdAt: new Date("2026-06-03T10:00:00.000Z"),
+      canceledAt,
+      refundToken: false,
+      user: {
+        id: "user_3",
+        name: "Canceled User",
+        email: "canceled@example.test",
+        phone: null,
+        affiliation: "TOTALPASS",
+      },
+    } as (typeof payload.bookings)[number]);
+    mocks.prisma.class.findUnique.mockResolvedValue(payload);
+
+    const res = await GET(req(), ctx());
+    const body = await res.json();
+
+    expect(body.bookings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "booking_canceled",
+          status: "CANCELED",
+          canceledAt: "2026-07-20T16:35:00.000Z",
+          refundToken: false,
+        }),
+      ])
+    );
+  });
+
   it("uses one batched query that excludes cancelled bookings and cancelled classes", async () => {
     await GET(req(), ctx());
 

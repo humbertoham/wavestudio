@@ -15,11 +15,15 @@ import {
   FiX,
 } from "react-icons/fi";
 import { NewUserBadge } from "@/components/booking/NewUserBadge";
+import { CanceledBookingMetadata } from "@/components/booking/CanceledBookingMetadata";
+import {
+  STUDIO_TIME_ZONE,
+  isLateCanceledBooking,
+} from "@/lib/class-cancellation";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
-const MX_TZ = "America/Mexico_City";
+const MX_TZ = STUDIO_TIME_ZONE;
 const MX_LOCALE: Intl.LocalesArgument = "es-MX";
-const CANCEL_WINDOW_MIN = 240;
 
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
 
@@ -135,27 +139,6 @@ function hhmmFromISOInMX(iso: string) {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(iso));
-}
-
-function fmtTimeMX(iso: string) {
-  return new Intl.DateTimeFormat(MX_LOCALE, {
-    timeZone: MX_TZ,
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).format(new Date(iso));
-}
-
-function isLateCanceledBooking(classDateIso: string, canceledAt?: string | null) {
-  if (!canceledAt) return false;
-
-  const classTime = new Date(classDateIso).getTime();
-  const canceledTime = new Date(canceledAt).getTime();
-
-  if (Number.isNaN(classTime) || Number.isNaN(canceledTime)) return false;
-
-  const minutesBeforeClass = Math.floor((classTime - canceledTime) / 60000);
-  return minutesBeforeClass < CANCEL_WINDOW_MIN;
 }
 
 function getErrorMessage(payload: unknown, fallback: string) {
@@ -1031,9 +1014,6 @@ export default function ClassAdminPage() {
                 (booking.affiliation === "WELLHUB" ||
                   booking.affiliation === "TOTALPASS") &&
                 isLateCanceledBooking(cls.date, booking.canceledAt);
-              const canceledTime = booking.canceledAt
-                ? fmtTimeMX(booking.canceledAt)
-                : null;
 
               return (
                 <div
@@ -1052,17 +1032,11 @@ export default function ClassAdminPage() {
                       </p>
                     )}
 
-                    {canceledTime && (
-                      <p className="text-xs text-muted-foreground">
-                        {"Cancel\u00F3:"} {canceledTime}
-                      </p>
-                    )}
-
-                    {hasPenalty && (
-                      <p className="text-xs font-semibold text-red-600">
-                        {"Debe $100 de penalizaci\u00F3n"}
-                      </p>
-                    )}
+                    <CanceledBookingMetadata
+                      status="CANCELED"
+                      canceledAt={booking.canceledAt}
+                      hasPenalty={hasPenalty}
+                    />
                   </div>
 
                   <div className="flex flex-wrap gap-2">
