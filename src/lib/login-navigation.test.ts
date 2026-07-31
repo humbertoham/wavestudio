@@ -10,6 +10,7 @@ describe("safePostLoginDestination", () => {
     expect(safePostLoginDestination("/perfil?tab=cuenta#datos")).toBe(
       "/perfil?tab=cuenta#datos"
     );
+    expect(safePostLoginDestination("/mis-clases")).toBe("/mis-clases");
   });
 
   it("removes stale affiliation, login, and non-pending WellHub destinations", () => {
