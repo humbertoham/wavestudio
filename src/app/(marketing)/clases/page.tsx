@@ -5,7 +5,11 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { motion, cubicBezier, type Variants } from "framer-motion";
 import { FiClock, FiUser } from "react-icons/fi";
-import { ChallengePointsBadge } from "@/components/challenge/ChallengePointsBadge";
+import {
+  ClassesAccountSummary,
+  shouldLoadClassesPrivateData,
+} from "@/components/booking/ClassesAccountSummary";
+import { useSession } from "@/lib/useSession";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
@@ -739,12 +743,16 @@ function DayColumn({
 }
 
 export default function ClassesPage() {
+  const {
+    user,
+    isAuthenticated,
+    isLoading: isSessionLoading,
+  } = useSession();
   const [days, setDays] = useState<Day[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tokens, setTokens] = useState(0);
+  const [hasLoadedPrivateData, setHasLoadedPrivateData] = useState(false);
   const [challenge, setChallenge] = useState({ active: false, points: 0 });
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isAuthed, setIsAuthed] = useState(false);
   const [bookingBlocked, setBookingBlocked] = useState(false);
   const [showBookingBlocked, setShowBookingBlocked] = useState(false);
   const [showNoCredits, setShowNoCredits] = useState(false);
@@ -760,6 +768,11 @@ export default function ClassesPage() {
   const [reloadTick, setReloadTick] = useState(0);
   const [waitlistConfirmSession, setWaitlistConfirmSession] =
     useState<Session | null>(null);
+  const isAdmin = user?.role === "ADMIN" || user?.role === "COACH";
+  const shouldLoadPrivateData = shouldLoadClassesPrivateData({
+    isAuthenticated,
+    isSessionLoading,
+  });
 
   useEffect(() => {
     const reload = () => setReloadTick((current) => current + 1);
@@ -802,7 +815,7 @@ export default function ClassesPage() {
   }
 
   function openReserve(session: Session) {
-    if (!isAuthed) {
+    if (!isAuthenticated) {
       window.location.href = "/login";
       return;
     }
@@ -823,7 +836,7 @@ export default function ClassesPage() {
   }
 
   function openWaitlistConfirm(session: Session) {
-    if (!isAuthed) {
+    if (!isAuthenticated) {
       window.location.href = "/login";
       return;
     }
@@ -842,7 +855,7 @@ export default function ClassesPage() {
   }
 
   async function joinWaitlist(session: Session) {
-    if (!isAuthed) {
+    if (!isAuthenticated) {
       window.location.href = "/login";
       return false;
     }
@@ -916,7 +929,7 @@ export default function ClassesPage() {
   }
 
   async function leaveWaitlist(session: Session) {
-    if (!isAuthed) {
+    if (!isAuthenticated) {
       window.location.href = "/login";
       return;
     }
@@ -1036,24 +1049,6 @@ export default function ClassesPage() {
   }
 
   useEffect(() => {
-    let mounted = true;
-    fetch("/api/admin/whoami", {
-      credentials: "include",
-      cache: "no-store",
-    })
-      .then((res) => {
-        if (mounted) setIsAdmin(res.ok);
-      })
-      .catch(() => {
-        if (mounted) setIsAdmin(false);
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, [reloadTick]);
-
-  useEffect(() => {
     const from = startOfTodayInMX();
     const to = addDays(from, 14);
     const fromISO = from.toISOString();
@@ -1065,22 +1060,14 @@ export default function ClassesPage() {
       setDays(empty);
 
       try {
-        const [classesRes, tokensRes] = await Promise.all([
-          fetch(
-            `/api/classes?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`,
-            {
-              method: "GET",
-              headers: { "Content-Type": "application/json" },
-              cache: "no-store",
-            }
-          ),
-          fetch("/api/users/me/tokens", {
+        const classesRes = await fetch(
+          `/api/classes?from=${encodeURIComponent(fromISO)}&to=${encodeURIComponent(toISO)}`,
+          {
             method: "GET",
             headers: { "Content-Type": "application/json" },
             cache: "no-store",
-            credentials: "include",
-          }),
-        ]);
+          }
+        );
 
         if (!classesRes.ok) throw new Error(`HTTP ${classesRes.status}`);
         const data: ApiSession[] = await classesRes.json();
@@ -1101,31 +1088,12 @@ export default function ClassesPage() {
           grouped.set(key, list);
         }
 
-        setDays(empty.map((day) => ({ ...day, sessions: grouped.get(day.dateKey) ?? [] })));
-
-        if (tokensRes.ok) {
-          const tk = await tokensRes.json().catch(() => ({}));
-
-          if (typeof tk.affiliation === "string") {
-            setAffiliation(tk.affiliation);
-          }
-
-          setIsAuthed(typeof tk.authenticated === "boolean" ? tk.authenticated : false);
-          setTokens(typeof tk.tokens === "number" ? tk.tokens : 0);
-          setChallenge({
-            active: tk.challenge?.active === true,
-            points:
-              typeof tk.challenge?.points === "number" ? tk.challenge.points : 0,
-          });
-          setBookingBlocked(
-            typeof tk.bookingBlocked === "boolean" ? tk.bookingBlocked : false
-          );
-        } else {
-          setIsAuthed(false);
-          setTokens(0);
-          setChallenge({ active: false, points: 0 });
-          setBookingBlocked(false);
-        }
+        setDays(
+          empty.map((day) => ({
+            ...day,
+            sessions: grouped.get(day.dateKey) ?? [],
+          }))
+        );
       } catch (err) {
         console.error(err);
         setError("No se pudieron cargar las clases.");
@@ -1134,6 +1102,67 @@ export default function ClassesPage() {
 
     load();
   }, [reloadTick]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    if (!shouldLoadPrivateData) {
+      setHasLoadedPrivateData(false);
+      setTokens(0);
+      setAffiliation(null);
+      setChallenge({ active: false, points: 0 });
+      setBookingBlocked(false);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    setHasLoadedPrivateData(false);
+
+    async function loadPrivateData() {
+      try {
+        const response = await fetch("/api/users/me/tokens", {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          credentials: "include",
+        });
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const data = await response.json().catch(() => ({}));
+        if (!mounted || data.authenticated !== true) return;
+
+        setAffiliation(
+          data.affiliation === "WELLHUB" || data.affiliation === "TOTALPASS"
+            ? data.affiliation
+            : "NONE"
+        );
+        setTokens(typeof data.tokens === "number" ? data.tokens : 0);
+        setChallenge({
+          active: data.challenge?.active === true,
+          points:
+            typeof data.challenge?.points === "number" ? data.challenge.points : 0,
+        });
+        setBookingBlocked(data.bookingBlocked === true);
+        setHasLoadedPrivateData(true);
+      } catch (privateDataError) {
+        console.error(privateDataError);
+        if (!mounted) return;
+        setTokens(0);
+        setAffiliation(null);
+        setChallenge({ active: false, points: 0 });
+        setBookingBlocked(false);
+        setHasLoadedPrivateData(false);
+      }
+    }
+
+    loadPrivateData();
+
+    return () => {
+      mounted = false;
+    };
+  }, [reloadTick, shouldLoadPrivateData]);
 
   function handleBooked(result: BookingMutationResult) {
     setTokens((current) => Math.max(0, current - result.debitedCredits));
@@ -1180,15 +1209,13 @@ export default function ClassesPage() {
             Elige tu sesion y reserva tu lugar.
           </p>
 
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm">
-              <span className="opacity-70">Tus clases:</span>
-              <span className="font-bold">{tokens}</span>
-            </span>
-            {isAuthed && challenge.active && (
-              <ChallengePointsBadge points={challenge.points} />
-            )}
-          </div>
+          <ClassesAccountSummary
+            isAuthenticated={isAuthenticated}
+            isSessionLoading={isSessionLoading}
+            hasLoadedPrivateData={hasLoadedPrivateData}
+            tokens={tokens}
+            challenge={challenge}
+          />
         </motion.div>
 
         {error && (

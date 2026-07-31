@@ -60,28 +60,49 @@ describe("partitionMyClassesBookings", () => {
     ]);
   });
 
-  it("preserves upcoming order and existing history classification", () => {
+  it("orders upcoming classes oldest to newest with a deterministic tie-breaker", () => {
     const result = partitionMyClassesBookings(
       [
         booking("future-later", "2026-08-20T16:00:00.000Z"),
-        booking("future-earlier", "2026-08-10T16:00:00.000Z"),
-        booking("canceled-future", "2026-08-05T16:00:00.000Z", {
-          status: "CANCELED",
-        }),
-        booking("attended-past", "2026-07-15T16:00:00.000Z", {
-          attended: true,
-        }),
+        booking("future-same-z", "2026-08-10T16:00:00.000Z"),
+        booking("future-earlier", "2026-08-05T16:00:00.000Z"),
+        booking("future-same-a", "2026-08-10T16:00:00.000Z"),
       ],
       now
     );
 
     expect(result.upcoming.map(({ id }) => id)).toEqual([
-      "future-later",
       "future-earlier",
+      "future-same-a",
+      "future-same-z",
+      "future-later",
+    ]);
+  });
+
+  it("preserves status sections, every record, and the original array", () => {
+    const source = [
+      booking("future-later", "2026-08-20T16:00:00.000Z"),
+      booking("future-earlier", "2026-08-10T16:00:00.000Z"),
+      booking("canceled-future", "2026-08-05T16:00:00.000Z", {
+        status: "CANCELED",
+      }),
+      booking("attended-past", "2026-07-15T16:00:00.000Z", {
+        attended: true,
+      }),
+    ];
+    const originalIds = source.map(({ id }) => id);
+
+    const result = partitionMyClassesBookings(source, now);
+
+    expect(result.upcoming.map(({ id }) => id)).toEqual([
+      "future-earlier",
+      "future-later",
     ]);
     expect(result.history.map(({ id }) => id)).toEqual([
       "attended-past",
       "canceled-future",
     ]);
+    expect(result.upcoming.length + result.history.length).toBe(source.length);
+    expect(source.map(({ id }) => id)).toEqual(originalIds);
   });
 });

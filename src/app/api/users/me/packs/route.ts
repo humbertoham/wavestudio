@@ -15,15 +15,12 @@ export async function GET() {
     );
   }
 
-  // 2️⃣ Últimos 5 paquetes comprados
+  // 2️⃣ Paquetes comprados del más antiguo al más reciente
   const rows = await prisma.packPurchase.findMany({
     where: {
       userId: me.sub,
     },
-    orderBy: {
-      createdAt: "desc",
-    },
-    take: 5,
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: {
       id: true,
       createdAt: true,
