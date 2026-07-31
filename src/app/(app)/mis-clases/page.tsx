@@ -179,7 +179,7 @@ function AuthenticatedMyClassesPage() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data: PackPurchase[] = await res.json();
         if (!mounted) return;
-        setPacks(data.slice(0, 5));
+        setPacks(data);
       } catch (e) {
         console.error(e);
         if (!mounted) return;
@@ -339,7 +339,7 @@ function AuthenticatedMyClassesPage() {
               <section className="mt-10">
                 <h2 className="font-display text-xl font-bold">Historial</h2>
                 <div className="mt-4 grid gap-4">
-                  {history.slice(0, 5).map((b, idx) => (
+                  {history.map((b, idx) => (
                     <BookingCard
                       key={b.id}
                       booking={b}
@@ -354,7 +354,7 @@ function AuthenticatedMyClassesPage() {
               {/* Paquetes */}
               <section className="mt-10">
                 <h2 className="font-display text-xl font-bold">
-                  Últimos paquetes comprados
+                  Paquetes comprados
                 </h2>
 
                 {!packs && !packsError && (

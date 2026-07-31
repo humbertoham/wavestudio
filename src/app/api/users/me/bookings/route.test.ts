@@ -36,7 +36,10 @@ describe("GET /api/users/me/bookings", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual([]);
     expect(mocks.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: "user-1" } })
+      expect.objectContaining({
+        where: { userId: "user-1" },
+        orderBy: [{ class: { date: "asc" } }, { id: "asc" }],
+      })
     );
   });
 });

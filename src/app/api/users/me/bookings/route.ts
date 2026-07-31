@@ -11,7 +11,7 @@ export async function GET() {
 
   const rows = await prisma.booking.findMany({
     where: { userId: me.sub },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ class: { date: "asc" } }, { id: "asc" }],
     select: {
       id: true,
       status: true,

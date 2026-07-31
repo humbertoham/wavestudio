@@ -7,7 +7,7 @@ export type ChronologicalBooking = {
   };
 };
 
-export function compareHistoryBookings(
+export function compareChronologicalBookings(
   a: ChronologicalBooking,
   b: ChronologicalBooking
 ) {
@@ -38,8 +38,7 @@ export function partitionMyClassesBookings<T extends ChronologicalBooking>(
   }
 
   return {
-    // Preserve the endpoint's existing order for upcoming classes.
-    upcoming,
-    history: history.sort(compareHistoryBookings),
+    upcoming: upcoming.sort(compareChronologicalBookings),
+    history: history.sort(compareChronologicalBookings),
   };
 }
