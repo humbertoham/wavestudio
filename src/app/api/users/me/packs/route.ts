@@ -1,11 +1,33 @@
 // src/app/api/users/me/packs/route.ts
-import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
+import {
+  getPaginationWindow,
+  parseMyClassesPage,
+  type PaginatedResponse,
+} from "@/lib/my-classes-pagination";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+type PackPurchaseResponse = {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  classesLeft: number;
+  pausedDays: number;
+  pausedUntil: string | null;
+  pack: {
+    id: string;
+    name: string;
+    classes: number;
+    price: number;
+    classesLabel: string | null;
+  };
+};
+
+export async function GET(req: NextRequest) {
   // 1️⃣ Auth
   const me = await getAuth();
   if (!me) {
@@ -15,49 +37,65 @@ export async function GET() {
     );
   }
 
-  // 2️⃣ Paquetes comprados del más antiguo al más reciente
-  const rows = await prisma.packPurchase.findMany({
-    where: {
-      userId: me.sub,
-    },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    select: {
-      id: true,
-      createdAt: true,
-      expiresAt: true,
-      classesLeft: true,
-      pausedDays: true,
-      pausedUntil: true,
-      pack: {
+  const requestedPage = parseMyClassesPage(
+    new URL(req.url).searchParams.get("page")
+  );
+  const where = { userId: me.sub };
+
+  const result = await prisma.$transaction(
+    async (tx): Promise<PaginatedResponse<PackPurchaseResponse>> => {
+      const totalItems = await tx.packPurchase.count({ where });
+      const pagination = getPaginationWindow(totalItems, requestedPage);
+      const rows = await tx.packPurchase.findMany({
+        where,
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        skip: pagination.skip,
+        take: pagination.take,
         select: {
           id: true,
-          name: true,
-          classes: true,
-          price: true,
-          classesLabel: true,
+          createdAt: true,
+          expiresAt: true,
+          classesLeft: true,
+          pausedDays: true,
+          pausedUntil: true,
+          pack: {
+            select: {
+              id: true,
+              name: true,
+              classes: true,
+              price: true,
+              classesLabel: true,
+            },
+          },
         },
-      },
-    },
-  });
+      });
 
-  // 3️⃣ Normalizar para el frontend (fechas ISO, defaults defensivos)
-  const data = rows.map((p) => ({
-    id: p.id,
-    createdAt: p.createdAt.toISOString(),
-    expiresAt: p.expiresAt.toISOString(),
-    classesLeft: p.classesLeft,
-    pausedDays: p.pausedDays,
-    pausedUntil: p.pausedUntil?.toISOString() ?? null,
-    pack: {
-      id: p.pack.id,
-      name: p.pack.name,
-      classes: p.pack.classes,
-      price: p.pack.price,
-      classesLabel: p.pack.classesLabel ?? null,
+      return {
+        items: rows.map((purchase) => ({
+          id: purchase.id,
+          createdAt: purchase.createdAt.toISOString(),
+          expiresAt: purchase.expiresAt.toISOString(),
+          classesLeft: purchase.classesLeft,
+          pausedDays: purchase.pausedDays,
+          pausedUntil: purchase.pausedUntil?.toISOString() ?? null,
+          pack: {
+            id: purchase.pack.id,
+            name: purchase.pack.name,
+            classes: purchase.pack.classes,
+            price: purchase.pack.price,
+            classesLabel: purchase.pack.classesLabel ?? null,
+          },
+        })),
+        page: pagination.page,
+        pageSize: pagination.pageSize,
+        totalItems: pagination.totalItems,
+        totalPages: pagination.totalPages,
+      };
     },
-  }));
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+  );
 
-  return NextResponse.json(data, {
+  return NextResponse.json(result, {
     headers: {
       "Cache-Control": "no-store",
     },
