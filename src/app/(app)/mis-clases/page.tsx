@@ -12,6 +12,9 @@ import {
   FiArrowLeft,
   FiXCircle,
 } from "react-icons/fi";
+import { MyClassesAccessState } from "@/components/my-classes/MyClassesAccessState";
+import { partitionMyClassesBookings } from "@/lib/my-classes";
+import { useSession } from "@/lib/useSession";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
@@ -68,6 +71,19 @@ type PackPurchase = {
 };
 
 export default function MyClassesPage() {
+  const { isAuthenticated, isLoading } = useSession();
+
+  return (
+    <MyClassesAccessState
+      isAuthenticated={isAuthenticated}
+      isLoading={isLoading}
+    >
+      <AuthenticatedMyClassesPage />
+    </MyClassesAccessState>
+  );
+}
+
+function AuthenticatedMyClassesPage() {
   const [items, setItems] = useState<Booking[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -188,17 +204,13 @@ export default function MyClassesPage() {
 
   const now = useMemo(() => new Date(nowTs), [nowTs]);
 
-  const { upcoming, past } = useMemo(() => {
-    const base = { upcoming: [] as Booking[], past: [] as Booking[] };
-    if (!items) return base;
-    return items.reduce((acc, b) => {
-      const start = new Date(b.class.date);
-      const end = new Date(start.getTime() + b.class.durationMin * 60_000);
-      if (end >= now && b.status !== "CANCELED") acc.upcoming.push(b);
-      else acc.past.push(b);
-      return acc;
-    }, base);
-  }, [items, now]);
+  const { upcoming, history } = useMemo(
+    () =>
+      items
+        ? partitionMyClassesBookings(items, now)
+        : { upcoming: [] as Booking[], history: [] as Booking[] },
+    [items, now]
+  );
 
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleString("es-MX", {
@@ -327,7 +339,7 @@ export default function MyClassesPage() {
               <section className="mt-10">
                 <h2 className="font-display text-xl font-bold">Historial</h2>
                 <div className="mt-4 grid gap-4">
-                  {past.slice(0, 5).map((b, idx) => (
+                  {history.slice(0, 5).map((b, idx) => (
                     <BookingCard
                       key={b.id}
                       booking={b}
