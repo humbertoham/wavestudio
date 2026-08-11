@@ -70,11 +70,14 @@ export async function POST(req: Request) {
           ? error.code
           : "WELLHUB_CONFIG_ERROR";
       console.error("WELLHUB_WEBHOOK_CONFIG_ERROR", { code });
-      return json(503, { error: "WELLHUB_NOT_CONFIGURED" });
+      // An immediate provider retry cannot repair missing or invalid operator
+      // configuration. Acknowledge the delivery and rely on preflight/logging
+      // so a bad deployment does not create a webhook retry storm.
+      return json(200, { ok: true, result: "NOT_CONFIGURED" });
     }
 
     if (!config.enabled) {
-      return json(503, { error: "WELLHUB_CHECKIN_DISABLED" });
+      return json(200, { ok: true, result: "DISABLED" });
     }
 
     const body = await readRawBodyLimited(req);

@@ -110,8 +110,10 @@ this behavior.
   Wellhub call. A previously `ERROR` event may atomically claim one new attempt;
   Wellhub documents the validation endpoint as safe to repeat after a timeout.
 - Malformed signed payloads return HTTP 400; invalid signatures return 401;
-  unsupported signed event types return 200; disabled/unconfigured integration
-  returns 503 without business processing.
+  unsupported signed event types return 200. A disabled or invalidly configured
+  integration returns 200 without business processing because an immediate
+  provider retry cannot repair operator configuration; preflight and structured
+  server logs surface the problem.
 
 Wellhub documents a one-second response window followed by three immediate
 retries when no response is received. It does not explicitly state whether an
@@ -131,7 +133,7 @@ window, monitor `ERROR` rows and structured `WELLHUB_WEBHOOK_*` logs, and verify
 | Rejected ticket | 200 | No retry expected |
 | API timeout, 429, 5xx, or network error | 503 | Must be confirmed; Wellhub only documents retry after no response within 1 second |
 | Invalid API credentials | 200 | No retry expected; operator action required |
-| Disabled or invalid WAVE configuration | 503 | Must be confirmed; operator action required |
+| Disabled or invalid WAVE configuration | 200 | No retry expected; operator action required |
 
 The first sandbox exercise must compare `eventTimestamp` and
 `externalEventId` across an actual Wellhub redelivery and confirm whether the

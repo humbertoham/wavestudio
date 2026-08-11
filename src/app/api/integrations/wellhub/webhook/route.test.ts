@@ -127,9 +127,23 @@ describe("Wellhub webhook route", () => {
 
     const response = await POST(request(validPayload));
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
-      error: "WELLHUB_CHECKIN_DISABLED",
+      ok: true,
+      result: "DISABLED",
+    });
+    expect(mocks.processWellhubCheckin).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges invalid operator configuration without triggering retries", async () => {
+    vi.stubEnv("WELLHUB_API_TOKEN", "");
+
+    const response = await POST(request(validPayload));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      result: "NOT_CONFIGURED",
     });
     expect(mocks.processWellhubCheckin).not.toHaveBeenCalled();
   });
