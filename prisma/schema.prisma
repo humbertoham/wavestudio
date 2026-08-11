@@ -52,6 +52,13 @@ enum WellhubPlanConfirmationStatus {
   COMPLETED
 }
 
+enum WellhubCheckinStatus {
+  RECEIVED
+  AUTHORIZED
+  REJECTED
+  ERROR
+}
+
 enum PackHighlight {
   POPULAR
   BEST
@@ -135,6 +142,7 @@ model User {
   wellhubPlanConfirmedAt             DateTime?
   wellhubPlanConfirmationCampaign    String?
   wellhubPlanConfirmations           WellhubPlanConfirmation[]
+  wellhubCheckins                    WellhubCheckin[]
 
   @@index([affiliation, wellhubPlan])
 }
@@ -166,6 +174,28 @@ model WellhubPlanConfirmation {
   @@index([campaign, status, requestedAt])
   @@index([userId, requestedAt])
   @@index([userId, status, sessionRecoveryExpiresAt], map: "WellhubPlanConfirmation_userId_status_sessionRecoveryExpiresAt_")
+}
+
+model WellhubCheckin {
+  id                String               @id @default(cuid())
+  externalEventId   String               @unique
+  externalUserId    String
+  externalGymId     String
+  externalProductId String
+  eventTimestamp    String
+  matchedUser       User?                @relation(fields: [matchedUserId], references: [id], onDelete: SetNull)
+  matchedUserId     String?
+  status            WellhubCheckinStatus @default(RECEIVED)
+  receivedAt        DateTime             @default(now())
+  validatedAt       DateTime?
+  failureCode       String?
+  failureReason     String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@index([externalUserId, receivedAt])
+  @@index([matchedUserId, receivedAt])
+  @@index([status, receivedAt])
 }
 
 model Instructor {
