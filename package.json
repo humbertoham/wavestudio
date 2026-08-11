@@ -12,6 +12,7 @@
     "wellhub:require-plan-confirmation": "node scripts/require-wellhub-plan-confirmation.mjs",
     "wellhub:reset-confirmations": "node scripts/require-wellhub-plan-confirmation.mjs",
     "wellhub:verify-confirmation-app": "node scripts/verify-wellhub-confirmation-app.mjs",
+    "wellhub:sandbox:check": "node scripts/check-wellhub-sandbox.mjs",
     "challenge:verify-point-editing-app": "node scripts/verify-challenge-point-editing-app.mjs",
     "env:check": "node scripts/check-env.mjs",
     "db:generate": "prisma generate",

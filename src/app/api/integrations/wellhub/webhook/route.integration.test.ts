@@ -75,19 +75,30 @@ import { POST } from "./route";
 
 const secret = "fake-wellhub-integration-secret";
 
-function payload(email = "member@example.com") {
+function payload({
+  email = "member@example.com",
+  timestamp = 1666629613,
+}: {
+  email?: string;
+  timestamp?: number;
+} = {}) {
   return JSON.stringify({
     event_type: "checkin",
     event_data: {
       user: {
         unique_token: "1000000000003",
+        first_name: "Firstname",
+        last_name: "Lastname",
         ...(email ? { email } : {}),
+        phone_number: "447889123456",
       },
+      location: { lat: 51.4937541, lon: 0.0633661 },
       gym: {
         id: 129,
-        product: { id: 2 },
+        title: "WAVE Studio",
+        product: { id: 2, description: "Sandbox product" },
       },
-      timestamp: 1786453200,
+      timestamp,
     },
   });
 }
@@ -171,7 +182,7 @@ describe("Wellhub complete mocked webhook flow", () => {
       )
     );
 
-    const response = await POST(signedRequest(payload("")));
+    const response = await POST(signedRequest(payload({ email: "" })));
     const row = [...mocks.rows.values()][0];
 
     expect(response.status).toBe(200);
@@ -199,6 +210,73 @@ describe("Wellhub complete mocked webhook flow", () => {
     });
     expect(mocks.rows.size).toBe(1);
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("uses one logical validation path for concurrent copies of the same event", async () => {
+    let finishValidation: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finishValidation = resolve;
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const raw = payload();
+
+    const firstPromise = POST(signedRequest(raw));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const concurrentDuplicate = await POST(signedRequest(raw));
+
+    expect(concurrentDuplicate.status).toBe(200);
+    expect(await concurrentDuplicate.json()).toMatchObject({
+      duplicate: true,
+      result: "RECEIVED",
+    });
+
+    finishValidation?.(new Response(null, { status: 200 }));
+    const first = await firstPromise;
+
+    expect(first.status).toBe(200);
+    expect(mocks.rows.size).toBe(1);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect([...mocks.rows.values()][0].status).toBe("AUTHORIZED");
+  });
+
+  it("atomically retries the same event after a temporary ERROR", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporary sandbox outage"))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const raw = payload();
+
+    const first = await POST(signedRequest(raw));
+    expect(first.status).toBe(503);
+    expect([...mocks.rows.values()][0].status).toBe("ERROR");
+
+    const retry = await POST(signedRequest(raw));
+
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({ ok: true, result: "AUTHORIZED" });
+    expect(mocks.rows.size).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect([...mocks.rows.values()][0].status).toBe("AUTHORIZED");
+  });
+
+  it("keeps a genuinely new same-user event distinct by event timestamp", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await POST(signedRequest(payload({ timestamp: 1666629613 })));
+    const laterSameDay = await POST(
+      signedRequest(payload({ timestamp: 1666629673 }))
+    );
+
+    expect(first.status).toBe(200);
+    expect(laterSameDay.status).toBe(200);
+    expect(mocks.rows.size).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new Set(mocks.rows.keys()).size).toBe(2);
   });
 
   it("rejects a spoofed signature with no persistence or external call", async () => {

@@ -18,9 +18,18 @@ create WAVE bookings, packages, credits, users, affiliation changes, or access
 device actions.
 
 The official check-in payload does not contain an event ID or check-in ID. WAVE
-therefore derives `externalEventId` as a SHA-256 hash of the documented stable
-fields: provider, event type, `unique_token`, gym ID, product ID, and event
-timestamp. A unique database constraint is the final concurrency guard.
+therefore derives `externalEventId` as a SHA-256 hash of provider, event type,
+`unique_token`, gym ID, product ID, and event timestamp. Wellhub describes the
+timestamp as the event creation timestamp, rather than a delivery timestamp.
+A unique database constraint is the final concurrency guard.
+
+Wellhub's public documentation does not explicitly guarantee that a redelivery
+preserves the original timestamp or all payload fields. The strategy therefore
+uses the best documented semantic identity available, but timestamp stability
+must be confirmed with Wellhub or observed during the first sandbox redelivery.
+Two otherwise identical events with different creation timestamps produce
+different records, so a later same-user check-in is not suppressed. Wellhub's
+FAQ separately states that only one daily check-in is normally allowed per user.
 
 The raw payload is not stored. The audit row contains only the identifiers and
 outcome needed to troubleshoot validation. An optional WAVE user association is
@@ -63,6 +72,10 @@ database URL.
 
 6. Set `WELLHUB_CHECKIN_ENABLED=true` only after the other configuration is
    ready.
+7. Run `npm run wellhub:sandbox:check` in the configured development runtime.
+   The preflight validates the feature flag, required variable presence,
+   official sandbox target, gym ID format, timeout, non-production context, and
+   webhook route without printing secrets or sending a network request.
 
 The official sandbox validation endpoint is
 `POST https://apitesting.partners.gympass.com/access/v1/validate`. WAVE sends
@@ -90,7 +103,7 @@ this behavior.
 - `REJECTED`: Wellhub returned a documented 400/404 business result such as
   missing, canceled, expired, or already validated check-in.
 - `ERROR`: authentication, rate limit, server, malformed response, network, or
-  timeout failure. Retryable errors return HTTP 503; non-retryable credential or
+  timeout failure. Transient errors return HTTP 503; non-retryable credential or
   request errors are acknowledged with HTTP 200 to avoid an immediate retry
   storm and remain visible in the audit table.
 - Duplicate `AUTHORIZED` or `REJECTED` events return HTTP 200 without another
@@ -101,8 +114,28 @@ this behavior.
   returns 503 without business processing.
 
 Wellhub documents a one-second response window followed by three immediate
-retries when no response is received. Keep the validation timeout below that
-window and monitor `ERROR` rows and structured `WELLHUB_WEBHOOK_*` logs.
+retries when no response is received. It does not explicitly state whether an
+HTTP 503 response triggers those retries. Keep the validation timeout below that
+window, monitor `ERROR` rows and structured `WELLHUB_WEBHOOK_*` logs, and verify
+503 redelivery behavior during sandbox certification.
+
+## Pre-sandbox response matrix
+
+| WAVE result | HTTP status | Documented Wellhub retry expectation |
+| --- | ---: | --- |
+| Invalid signature | 401 | No status-based behavior documented |
+| Malformed signed payload | 400 | No status-based behavior documented |
+| Unsupported signed event | 200 | No retry expected |
+| Duplicate | 200 | No retry expected |
+| Authorized | 200 | No retry expected |
+| Rejected ticket | 200 | No retry expected |
+| API timeout, 429, 5xx, or network error | 503 | Must be confirmed; Wellhub only documents retry after no response within 1 second |
+| Invalid API credentials | 200 | No retry expected; operator action required |
+| Disabled or invalid WAVE configuration | 503 | Must be confirmed; operator action required |
+
+The first sandbox exercise must compare `eventTimestamp` and
+`externalEventId` across an actual Wellhub redelivery and confirm whether the
+provider retries a promptly returned HTTP 503.
 
 ## Troubleshooting
 
