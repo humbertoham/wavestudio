@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getAuthFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -385,6 +386,8 @@ export async function POST(req: NextRequest) {
           "La clase cambio mientras procesabamos tu reserva. Intenta nuevamente.",
       });
     }
+
+    await syncWellhubClassSafely(classId);
 
     return j(201, {
       ok: true,

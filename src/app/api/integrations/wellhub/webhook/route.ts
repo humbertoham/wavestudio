@@ -1,8 +1,13 @@
+import { createHash } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import { processWellhubCheckin } from "@/lib/wellhub/checkin";
+import { processWellhubBookingEvent } from "@/lib/wellhub/booking/service";
 import {
+  getWellhubBookingConfig,
   getWellhubConfig,
+  getWellhubFeatureFlags,
   WellhubConfigError,
 } from "@/lib/wellhub/config";
 import { parseWellhubEvent } from "@/lib/wellhub/parser";
@@ -15,6 +20,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_WEBHOOK_BODY_BYTES = 64 * 1024;
+
+function logReference(value: string) {
+  return createHash("sha256").update(value, "utf8").digest("hex").slice(0, 12);
+}
 
 function json(status: number, body: Record<string, unknown>) {
   return NextResponse.json(body, {
@@ -61,9 +70,9 @@ export async function POST(req: Request) {
   const startedAt = Date.now();
 
   try {
-    let config;
+    let flags;
     try {
-      config = getWellhubConfig();
+      flags = getWellhubFeatureFlags();
     } catch (error) {
       const code =
         error instanceof WellhubConfigError
@@ -76,8 +85,43 @@ export async function POST(req: Request) {
       return json(200, { ok: true, result: "NOT_CONFIGURED" });
     }
 
-    if (!config.enabled) {
+    if (!flags.checkin && !flags.booking) {
       return json(200, { ok: true, result: "DISABLED" });
+    }
+
+    let checkinConfig: ReturnType<typeof getWellhubConfig> | null = null;
+    let bookingConfig: ReturnType<typeof getWellhubBookingConfig> | null = null;
+
+    if (flags.checkin) {
+      try {
+        checkinConfig = getWellhubConfig();
+      } catch (error) {
+        console.error("WELLHUB_CHECKIN_CONFIG_ERROR", {
+          code:
+            error instanceof WellhubConfigError
+              ? error.code
+              : "WELLHUB_CONFIG_ERROR",
+        });
+      }
+    }
+    if (flags.booking) {
+      try {
+        bookingConfig = getWellhubBookingConfig();
+      } catch (error) {
+        console.error("WELLHUB_BOOKING_CONFIG_ERROR", {
+          code:
+            error instanceof WellhubConfigError
+              ? error.code
+              : "WELLHUB_CONFIG_ERROR",
+        });
+      }
+    }
+
+    const signatureConfig =
+      (checkinConfig?.enabled ? checkinConfig : null) ??
+      (bookingConfig?.enabled ? bookingConfig : null);
+    if (!signatureConfig) {
+      return json(200, { ok: true, result: "NOT_CONFIGURED" });
     }
 
     const body = await readRawBodyLimited(req);
@@ -91,7 +135,7 @@ export async function POST(req: Request) {
     const signature = verifyWellhubSignature({
       rawBody: body.bytes,
       signature: req.headers.get(WELLHUB_SIGNATURE_HEADER),
-      secret: config.webhookSecret,
+      secret: signatureConfig.webhookSecret,
     });
     if (!signature.ok) {
       console.warn("WELLHUB_WEBHOOK_INVALID_SIGNATURE", {
@@ -120,7 +164,71 @@ export async function POST(req: Request) {
       return json(200, { ok: true, result: "UNSUPPORTED_EVENT" });
     }
 
-    const result = await processWellhubCheckin(parsed.event, config);
+
+    if (parsed.kind === "booking") {
+      if (!bookingConfig?.enabled) {
+        console.info("WELLHUB_BOOKING_WEBHOOK_DISABLED", {
+          eventType: parsed.event.eventType,
+        });
+        return json(200, { ok: true, result: "BOOKING_DISABLED" });
+      }
+
+      const result = await processWellhubBookingEvent(
+        parsed.event,
+        bookingConfig
+      );
+      const logContext = {
+        eventType: parsed.event.eventType,
+        externalEventHash: logReference(parsed.event.externalEventId),
+        bookingReferenceHash: logReference(parsed.event.bookingNumber),
+        waveClassId: "classId" in result ? result.classId : undefined,
+        result: result.kind,
+        latencyMs: Date.now() - startedAt,
+      };
+
+      if (result.kind === "error") {
+        console.error("WELLHUB_BOOKING_WEBHOOK_ERROR", {
+          ...logContext,
+          code: result.code,
+          retryable: result.retryable,
+        });
+        return result.retryable
+          ? json(503, { ok: false, result: "ERROR", retryable: true })
+          : json(200, { ok: true, result: "ERROR", retryable: false });
+      }
+
+      console.info("WELLHUB_BOOKING_WEBHOOK_PROCESSED", logContext);
+      if (result.kind === "duplicate") {
+        if (result.status === "PROCESSING") {
+          return json(503, {
+            ok: false,
+            result: "PROCESSING",
+            retryable: true,
+          });
+        }
+        return json(200, {
+          ok: true,
+          duplicate: true,
+          result: result.status,
+        });
+      }
+      if (result.kind === "accepted") {
+        return json(200, { ok: true, result: "RESERVED" });
+      }
+      if (result.kind === "rejected") {
+        return json(200, { ok: true, result: "REJECTED", code: result.code });
+      }
+      return json(200, {
+        ok: true,
+        result: result.late ? "LATE_CANCELED" : "CANCELED",
+      });
+    }
+
+    if (!checkinConfig?.enabled) {
+      return json(200, { ok: true, result: "CHECKIN_DISABLED" });
+    }
+
+    const result = await processWellhubCheckin(parsed.event, checkinConfig);
     const logContext = {
       eventType: parsed.event.eventType,
       externalEventId: parsed.event.externalEventId.slice(0, 16),

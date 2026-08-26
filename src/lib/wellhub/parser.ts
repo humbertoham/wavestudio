@@ -39,6 +39,59 @@ const checkinSchema = z
   })
   .passthrough();
 
+const bookingIdentifier = z
+  .union([
+    z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    z.string().regex(/^\d{1,30}$/),
+  ])
+  .transform((value) => String(value));
+
+const bookingNumber = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(/^[A-Za-z0-9_-]+$/);
+const eventId = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .regex(/^[A-Za-z0-9_-]+$/);
+const bookingEventType = z.enum([
+  "booking-requested",
+  "booking-canceled",
+  "booking-late-canceled",
+]);
+
+const bookingSchema = z
+  .object({
+    event_type: bookingEventType,
+    event_data: z.object({
+      user: z
+        .object({
+          unique_token: z.string().regex(/^\d{1,20}$/),
+          name: z.string().trim().min(1).max(200).optional(),
+          email: z.string().trim().email().max(320).optional(),
+        })
+        .passthrough(),
+      slot: z.object({
+        id: bookingIdentifier,
+        gym_id: bookingIdentifier,
+        class_id: bookingIdentifier,
+        booking_number: bookingNumber,
+      }),
+      timestamp: z
+        .union([
+          z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+          z.string().regex(/^\d{1,20}$/),
+        ])
+        .transform((value) => String(value)),
+      event_id: eventId,
+    }),
+  })
+  .passthrough();
+
 export type WellhubCheckinEvent = {
   eventType: "checkin";
   externalEventId: string;
@@ -49,12 +102,34 @@ export type WellhubCheckinEvent = {
   email?: string;
 };
 
+export type WellhubBookingEvent = {
+  eventType:
+    | "booking-requested"
+    | "booking-canceled"
+    | "booking-late-canceled";
+  eventKind: "REQUESTED" | "CANCELED" | "LATE_CANCELED";
+  externalEventId: string;
+  externalUserId: string;
+  externalGymId: string;
+  externalClassId: string;
+  externalSlotId: string;
+  bookingNumber: string;
+  eventTimestamp: string;
+  displayName?: string;
+  email?: string;
+};
+
 export type WellhubEventParseResult =
   | { ok: true; kind: "checkin"; event: WellhubCheckinEvent }
+  | { ok: true; kind: "booking"; event: WellhubBookingEvent }
   | { ok: true; kind: "unsupported"; eventType: string }
   | {
       ok: false;
-      code: "INVALID_JSON" | "INVALID_EVENT_ENVELOPE" | "INVALID_CHECKIN_EVENT";
+      code:
+        | "INVALID_JSON"
+        | "INVALID_EVENT_ENVELOPE"
+        | "INVALID_CHECKIN_EVENT"
+        | "INVALID_BOOKING_EVENT";
     };
 
 function eventIdFor(fields: readonly string[]) {
@@ -76,8 +151,51 @@ export function parseWellhubEvent(rawBody: string): WellhubEventParseResult {
   }
 
   const eventType = (parsed as { event_type?: unknown }).event_type;
-  if (typeof eventType !== "string" || !eventType.trim() || eventType.length > 100) {
+  if (
+    typeof eventType !== "string" ||
+    !eventType.trim() ||
+    eventType.length > 100
+  ) {
     return { ok: false, code: "INVALID_EVENT_ENVELOPE" };
+  }
+
+  if (
+    eventType === "booking-requested" ||
+    eventType === "booking-canceled" ||
+    eventType === "booking-late-canceled"
+  ) {
+    const result = bookingSchema.safeParse(parsed);
+    if (!result.success) {
+      return { ok: false, code: "INVALID_BOOKING_EVENT" };
+    }
+
+    const data = result.data.event_data;
+    const eventKind =
+      result.data.event_type === "booking-requested"
+        ? "REQUESTED"
+        : result.data.event_type === "booking-canceled"
+          ? "CANCELED"
+          : "LATE_CANCELED";
+
+    return {
+      ok: true,
+      kind: "booking",
+      event: {
+        eventType: result.data.event_type,
+        eventKind,
+        externalEventId: data.event_id,
+        externalUserId: data.user.unique_token,
+        externalGymId: data.slot.gym_id,
+        externalClassId: data.slot.class_id,
+        externalSlotId: data.slot.id,
+        bookingNumber: data.slot.booking_number,
+        eventTimestamp: data.timestamp,
+        ...(data.user.name ? { displayName: data.user.name.trim() } : {}),
+        ...(data.user.email
+          ? { email: data.user.email.trim().toLowerCase() }
+          : {}),
+      },
+    };
   }
 
   if (eventType !== "checkin") {

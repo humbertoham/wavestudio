@@ -13,6 +13,8 @@
     "wellhub:reset-confirmations": "node scripts/require-wellhub-plan-confirmation.mjs",
     "wellhub:verify-confirmation-app": "node scripts/verify-wellhub-confirmation-app.mjs",
     "wellhub:sandbox:check": "node scripts/check-wellhub-sandbox.mjs",
+    "wellhub:booking:sync": "tsx scripts/sync-wellhub-booking.ts",
+    "wellhub:booking:sandbox:check": "node scripts/check-wellhub-booking-sandbox.mjs",
     "challenge:verify-point-editing-app": "node scripts/verify-challenge-point-editing-app.mjs",
     "env:check": "node scripts/check-env.mjs",
     "db:generate": "prisma generate",
@@ -59,6 +61,7 @@
     "prisma": "^6.16.2",
     "tailwindcss": "^4.1.12",
     "typescript": "^5",
+    "tsx": "^4.20.5",
     "vitest": "^4.1.5"
   }
 }

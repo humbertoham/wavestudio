@@ -2,11 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
 import { getAuth } from "@/lib/auth";
-import {
-  createSingleSeatBookingWithDebit,
-  isManagedBookingError,
-} from "@/lib/class-booking";
 import { prisma } from "@/lib/prisma";
+import { promoteWaitlistForReleasedSeats } from "@/lib/waitlist-promotion";
+import { notifyWellhubBookingCanceledByWaveSafely } from "@/lib/wellhub/booking/service";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -74,6 +73,8 @@ export async function PATCH(
     if (!booking) return j(404, { code: "NOT_FOUND" });
     if (booking.userId !== auth.sub) return j(403, { code: "FORBIDDEN" });
     if (booking.status !== "ACTIVE") {
+      await notifyWellhubBookingCanceledByWaveSafely(booking.id);
+      await syncWellhubClassSafely(booking.classId);
       return j(409, { code: "ALREADY_CANCELED" });
     }
 
@@ -162,62 +163,10 @@ export async function PATCH(
               }
             }
 
-            const waitlistEntries = await tx.waitlist.findMany({
-              where: { classId: booking.classId },
-              orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-              select: {
-                id: true,
-                userId: true,
-              },
+            await promoteWaitlistForReleasedSeats(tx, {
+              classId: booking.classId,
+              seatsReleased,
             });
-
-            let promotedSeats = 0;
-
-            for (const entry of waitlistEntries) {
-              if (promotedSeats >= seatsReleased) break;
-
-              try {
-                await createSingleSeatBookingWithDebit(tx, {
-                  classId: booking.classId,
-                  userId: entry.userId,
-                });
-
-                await tx.waitlist.delete({
-                  where: { id: entry.id },
-                });
-
-                promotedSeats += 1;
-              } catch (error) {
-                if (
-                  isManagedBookingError(error) &&
-                  error.code === "NO_CREDITS_AVAILABLE"
-                ) {
-                  continue;
-                }
-
-                if (
-                  isManagedBookingError(error) &&
-                  (error.code === "USER_ALREADY_BOOKED" ||
-                    error.code === "USER_NOT_FOUND" ||
-                    error.code === "BOOKING_BLOCKED")
-                ) {
-                  await tx.waitlist.delete({
-                    where: { id: entry.id },
-                  });
-                  continue;
-                }
-
-                if (
-                  isManagedBookingError(error) &&
-                  (error.code === "CLASS_ALREADY_STARTED" ||
-                    error.code === "CLASS_FULL")
-                ) {
-                  break;
-                }
-
-                throw error;
-              }
-            }
 
             return {
               id: updated.id,
@@ -247,6 +196,9 @@ export async function PATCH(
         message: "La clase cambiÃ³ mientras se cancelaba la reserva. Intenta nuevamente.",
       });
     }
+
+    await notifyWellhubBookingCanceledByWaveSafely(booking.id);
+    await syncWellhubClassSafely(booking.classId);
 
     return j(200, {
       id: result.id,

@@ -2,10 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   processWellhubCheckin: vi.fn(),
+  processWellhubBookingEvent: vi.fn(),
 }));
 
 vi.mock("@/lib/wellhub/checkin", () => ({
   processWellhubCheckin: mocks.processWellhubCheckin,
+}));
+
+vi.mock("@/lib/wellhub/booking/service", () => ({
+  processWellhubBookingEvent: mocks.processWellhubBookingEvent,
 }));
 
 import { computeWellhubSignature } from "@/lib/wellhub/signature";
@@ -28,6 +33,24 @@ const validPayload = JSON.stringify({
       product: { id: 2, description: "Sandbox" },
     },
     timestamp: 1786453200,
+  },
+});
+const validBookingPayload = JSON.stringify({
+  event_type: "booking-requested",
+  event_data: {
+    user: {
+      unique_token: "1000000000003",
+      name: "Patty Cork",
+      email: "member@example.com",
+    },
+    slot: {
+      id: 9325,
+      gym_id: 129,
+      class_id: 8268,
+      booking_number: "BK_HEQYZMK",
+    },
+    timestamp: 1664461204015,
+    event_id: "45b4b8a4-f2f3-4b33-adf0-504c33f27642",
   },
 });
 
@@ -62,12 +85,21 @@ describe("Wellhub webhook route", () => {
     vi.stubEnv("WELLHUB_GYM_ID", "129");
     vi.stubEnv("WELLHUB_WEBHOOK_SECRET", webhookSecret);
     vi.stubEnv("WELLHUB_API_TIMEOUT_MS", "800");
+    vi.stubEnv("WELLHUB_BOOKING_ENABLED", "false");
     mocks.processWellhubCheckin.mockReset();
     mocks.processWellhubCheckin.mockResolvedValue({
       kind: "authorized",
       checkinId: "checkin_1",
       matchedUserId: null,
       retried: false,
+    });
+    mocks.processWellhubBookingEvent.mockReset();
+    mocks.processWellhubBookingEvent.mockResolvedValue({
+      kind: "accepted",
+      bookingId: "booking_1",
+      classId: "class_1",
+      matchedUserId: null,
+      activeBookingCount: 1,
     });
   });
 
@@ -93,7 +125,7 @@ describe("Wellhub webhook route", () => {
   });
 
   it("acknowledges unsupported future event types without processing them", async () => {
-    const raw = JSON.stringify({ event_type: "booking-requested", event_data: {} });
+    const raw = JSON.stringify({ event_type: "future-event", event_data: {} });
     const response = await POST(signedRequest(raw));
 
     expect(response.status).toBe(200);
@@ -174,5 +206,65 @@ describe("Wellhub webhook route", () => {
       result: "ERROR",
       retryable: true,
     });
+  });
+
+  it("routes a valid signed booking event when Booking is independently enabled", async () => {
+    vi.stubEnv("WELLHUB_BOOKING_ENABLED", "true");
+    vi.stubEnv(
+      "WELLHUB_BOOKING_API_BASE_URL",
+      "https://apitesting.partners.gympass.com/booking/v1"
+    );
+    vi.stubEnv("WELLHUB_BOOKING_PRODUCT_ID", "100003");
+    vi.stubEnv("WELLHUB_BOOKING_SYNC_HORIZON_DAYS", "30");
+
+    const response = await POST(signedRequest(validBookingPayload));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, result: "RESERVED" });
+    expect(mocks.processWellhubBookingEvent).toHaveBeenCalledOnce();
+    expect(mocks.processWellhubCheckin).not.toHaveBeenCalled();
+  });
+
+  it("requests a retry while a duplicate booking event is still processing", async () => {
+    vi.stubEnv("WELLHUB_BOOKING_ENABLED", "true");
+    vi.stubEnv(
+      "WELLHUB_BOOKING_API_BASE_URL",
+      "https://apitesting.partners.gympass.com/booking/v1"
+    );
+    vi.stubEnv("WELLHUB_BOOKING_PRODUCT_ID", "100003");
+    mocks.processWellhubBookingEvent.mockResolvedValue({
+      kind: "duplicate",
+      status: "PROCESSING",
+    });
+
+    const response = await POST(signedRequest(validBookingPayload));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      ok: false,
+      result: "PROCESSING",
+      retryable: true,
+    });
+  });
+
+  it("rejects unsigned booking events before persistence or confirmation", async () => {
+    vi.stubEnv("WELLHUB_BOOKING_ENABLED", "true");
+    vi.stubEnv(
+      "WELLHUB_BOOKING_API_BASE_URL",
+      "https://apitesting.partners.gympass.com/booking/v1"
+    );
+    vi.stubEnv("WELLHUB_BOOKING_PRODUCT_ID", "100003");
+
+    const response = await POST(request(validBookingPayload));
+    expect(response.status).toBe(401);
+    expect(mocks.processWellhubBookingEvent).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges signed booking events without mutation when Booking is disabled", async () => {
+    const response = await POST(signedRequest(validBookingPayload));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      result: "BOOKING_DISABLED",
+    });
+    expect(mocks.processWellhubBookingEvent).not.toHaveBeenCalled();
   });
 });

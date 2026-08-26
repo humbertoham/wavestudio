@@ -8,6 +8,7 @@ import {
   getClassChallengeSnapshot,
   runChallengeTransaction,
 } from "@/lib/challenge";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
 
 export const runtime = "nodejs";
 
@@ -155,6 +156,8 @@ export async function POST(req: Request) {
         },
       });
     });
+
+    await syncWellhubClassSafely(cls.id);
 
     return NextResponse.json(cls, { status: 201 });
   } catch (e: unknown) {

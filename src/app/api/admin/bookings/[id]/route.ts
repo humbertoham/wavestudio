@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireClassManager } from "../../_utils";
 import { Prisma } from "@prisma/client";
+import { notifyWellhubBookingCanceledByWaveSafely } from "@/lib/wellhub/booking/service";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
 
 export const runtime = "nodejs";
 
@@ -30,6 +32,8 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
 
   // 2️⃣ Idempotencia: si ya está cancelado
   if (booking.status === "CANCELED") {
+    await notifyWellhubBookingCanceledByWaveSafely(booking.id);
+    await syncWellhubClassSafely(booking.classId);
     return j(200, { ok: true, alreadyCanceled: true });
   }
 
@@ -95,6 +99,9 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
       isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     }
   );
+
+  await notifyWellhubBookingCanceledByWaveSafely(booking.id);
+  await syncWellhubClassSafely(booking.classId);
 
   return j(200, {
     ok: true,

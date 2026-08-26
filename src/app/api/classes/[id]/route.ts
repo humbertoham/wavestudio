@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireClassManager } from "../../admin/_utils";
 import { getNewUserBookingIds } from "@/lib/new-user";
 import { executeClassDeletion } from "@/lib/class-deletion-response";
+import {
+  withoutWellhubBookingIdentifiers,
+  withoutWellhubClassIdentifiers,
+} from "@/lib/wellhub/booking/serialize";
 
 type Ctx = {
   params: Promise<{ id: string }>;
@@ -67,13 +71,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     cls.isCanceled
   );
 
+  const safeClass = withoutWellhubClassIdentifiers(cls);
+
   return NextResponse.json({
-    ...cls,
+    ...safeClass,
     bookings: cls.bookings.map((booking) => {
       const isNewUser = newUserBookingIds.has(booking.id);
 
       return {
-        ...booking,
+        ...withoutWellhubBookingIdentifiers(booking),
         isNewUser,
         // Backward-compatible alias for existing class-management clients.
         isFirstBooking: isNewUser,

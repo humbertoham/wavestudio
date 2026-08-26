@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { createBookingWithCreditCheck, isManagedBookingError } from "@/lib/class-booking";
 
 import { prisma, requireClassManager } from "../../../_utils";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
 
 export const runtime = "nodejs";
 
@@ -119,6 +120,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
             isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
           }
         );
+
+        await syncWellhubClassSafely(classId);
 
         return NextResponse.json({
           ok: true,

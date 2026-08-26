@@ -71,3 +71,81 @@ describe("Wellhub official check-in payload", () => {
     expect(laterSameDay.externalEventId).not.toBe(first.externalEventId);
   });
 });
+
+describe("Wellhub official booking payloads", () => {
+  it("parses a booking request and normalizes the optional match email", () => {
+    const result = parseWellhubEvent(
+      JSON.stringify({
+        event_type: "booking-requested",
+        event_data: {
+          user: {
+            unique_token: "1000000000003",
+            name: "Patty Cork",
+            email: "MEMBER@example.com",
+          },
+          slot: {
+            id: 9325,
+            gym_id: 129,
+            class_id: 8268,
+            booking_number: "BK_HEQYZMK",
+          },
+          timestamp: 1664461204015,
+          event_id: "45b4b8a4-f2f3-4b33-adf0-504c33f27642",
+        },
+      })
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      kind: "booking",
+      event: {
+        eventType: "booking-requested",
+        eventKind: "REQUESTED",
+        externalEventId: "45b4b8a4-f2f3-4b33-adf0-504c33f27642",
+        externalUserId: "1000000000003",
+        externalGymId: "129",
+        externalClassId: "8268",
+        externalSlotId: "9325",
+        bookingNumber: "BK_HEQYZMK",
+        eventTimestamp: "1664461204015",
+        displayName: "Patty Cork",
+        email: "member@example.com",
+      },
+    });
+  });
+
+  it.each([
+    ["booking-canceled", "CANCELED"],
+    ["booking-late-canceled", "LATE_CANCELED"],
+  ] as const)("parses %s", (eventType, eventKind) => {
+    const result = parseWellhubEvent(
+      JSON.stringify({
+        event_type: eventType,
+        event_data: {
+          user: { unique_token: "1000000000003" },
+          slot: {
+            id: 9325,
+            gym_id: 129,
+            class_id: 8268,
+            booking_number: "BK_HEQYZMK",
+          },
+          timestamp: 1664461204015,
+          event_id: `event-${eventKind}`,
+        },
+      })
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      kind: "booking",
+      event: { eventType, eventKind },
+    });
+  });
+
+  it("rejects malformed known booking events", () => {
+    expect(
+      parseWellhubEvent(
+        JSON.stringify({ event_type: "booking-requested", event_data: {} })
+      )
+    ).toEqual({ ok: false, code: "INVALID_BOOKING_EVENT" });
+  });
+});

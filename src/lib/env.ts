@@ -21,6 +21,11 @@ export const optionalServerEnvKeys = [
   "WELLHUB_GYM_ID",
   "WELLHUB_WEBHOOK_SECRET",
   "WELLHUB_API_TIMEOUT_MS",
+  "WELLHUB_BOOKING_ENABLED",
+  "WELLHUB_BOOKING_API_BASE_URL",
+  "WELLHUB_BOOKING_PRODUCT_ID",
+  "WELLHUB_BOOKING_CATEGORY_IDS",
+  "WELLHUB_BOOKING_SYNC_HORIZON_DAYS",
 ] as const;
 
 export type RequiredServerEnvKey = (typeof requiredServerEnvKeys)[number];

@@ -12,8 +12,9 @@ Wellhub App
   -> WellhubCheckin AUTHORIZED | REJECTED | ERROR
 ```
 
-The integration handles only the Access Control check-in event. Booking API
-events are acknowledged as unsupported and are not processed. Check-ins do not
+This module handles only the Access Control check-in event. The shared webhook
+router now delegates Booking API events to the independently flagged Booking
+module documented in `wellhub-booking.md`. Check-ins do not
 create WAVE bookings, packages, credits, users, affiliation changes, or access
 device actions.
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
 import { prisma, requireClassManager } from "../../../_utils";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
 
 export const runtime = "nodejs";
 
@@ -103,6 +104,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         message: "La clase cambiÃ³ mientras guardÃ¡bamos al invitado. Intenta nuevamente.",
       });
     }
+
+    await syncWellhubClassSafely(classId);
 
     return NextResponse.json({
       ok: true,

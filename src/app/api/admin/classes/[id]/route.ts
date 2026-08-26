@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdmin, requireClassManager } from "../../_utils";
 import { Prisma } from "@prisma/client";
 import { executeClassDeletion } from "@/lib/class-deletion-response";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
+import { withoutWellhubClassIdentifiers } from "@/lib/wellhub/booking/serialize";
 
 export const runtime = "nodejs";
 
@@ -41,10 +43,23 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
 
   const existing = await prisma.class.findUnique({
     where: { id },
-    select: { deletedAt: true },
+    include: {
+      bookings: {
+        where: { status: "ACTIVE" },
+        select: { quantity: true },
+      },
+    },
   });
   if (!existing || existing.deletedAt) {
     return j(404, { error: "CLASS_NOT_FOUND" });
+  }
+
+  const usedSpots = existing.bookings.reduce(
+    (sum, booking) => sum + (booking.quantity ?? 1),
+    0
+  );
+  if (capacity !== undefined && Number(capacity) < usedSpots) {
+    return j(400, { error: "CAPACITY_TOO_SMALL", usedSpots });
   }
 
   const item = await prisma.class.update({
@@ -52,7 +67,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     data,
   });
 
-  return NextResponse.json(item);
+  await syncWellhubClassSafely(id);
+
+  return NextResponse.json(withoutWellhubClassIdentifiers(item));
 }
 
 export async function DELETE(req: NextRequest, ctx: Ctx) {
@@ -163,7 +180,9 @@ if (time) {
   },
 });
 
+  await syncWellhubClassSafely(id);
 
-  return NextResponse.json(updated);
+
+  return NextResponse.json(withoutWellhubClassIdentifiers(updated));
 }
 

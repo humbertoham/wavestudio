@@ -6,6 +6,8 @@ import {
   getClassChallengeSnapshot,
   runChallengeTransaction,
 } from "@/lib/challenge";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
+import { withoutWellhubClassIdentifiers } from "@/lib/wellhub/booking/serialize";
 
 export const runtime = "nodejs";
 
@@ -67,7 +69,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     items: items.map((item) => ({
-      ...item,
+      ...withoutWellhubClassIdentifiers(item),
       challengePointsLocked: item._count.challengeAwards > 0,
       _count: undefined,
     })),
@@ -102,30 +104,42 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    let duplicated = 0;
+    const duplicatedIds: string[] = [];
     if (body.repeatNextMonth) {
       const offsets = [7, 14, 21, 28];
       const datesUtc = offsets.map((d) => addDaysKeepingWallTimeUTC(baseUtc, d));
 
-      const data = datesUtc.map((date) => ({
-        title: body.title,
-        focus: safeFocus,
-        date,
-        durationMin: body.durationMin,
-        capacity: body.capacity,
-        instructorId: body.instructorId,
-        ...challengeSnapshot,
-      }));
-
-      await tx.class.createMany({ data });
-      duplicated = datesUtc.length;
+      for (const date of datesUtc) {
+        const duplicate = await tx.class.create({
+          data: {
+            title: body.title,
+            focus: safeFocus,
+            date,
+            durationMin: body.durationMin,
+            capacity: body.capacity,
+            instructorId: body.instructorId,
+            ...challengeSnapshot,
+          },
+          select: { id: true },
+        });
+        duplicatedIds.push(duplicate.id);
+      }
     }
 
-    return { created, duplicated };
+    return { created, duplicatedIds };
   });
 
+  await Promise.all(
+    [result.created.id, ...result.duplicatedIds].map((classId) =>
+      syncWellhubClassSafely(classId)
+    )
+  );
+
   return NextResponse.json(
-    { item: result.created, duplicated: result.duplicated },
+    {
+      item: withoutWellhubClassIdentifiers(result.created),
+      duplicated: result.duplicatedIds.length,
+    },
     { status: 201 }
   );
 }

@@ -8,6 +8,8 @@ import {
 } from "@/lib/class-booking";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
+import { withoutWellhubBookingIdentifiers } from "@/lib/wellhub/booking/serialize";
 
 export const runtime = "nodejs";
 
@@ -129,8 +131,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    await syncWellhubClassSafely(classId);
+
     return NextResponse.json(
-      { ok: true, booking },
+      { ok: true, booking: withoutWellhubBookingIdentifiers(booking) },
       { status: 201, headers: { "Cache-Control": "no-store" } }
     );
   } catch (error: unknown) {
