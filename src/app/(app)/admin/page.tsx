@@ -256,6 +256,7 @@ type ChallengeLeaderboardItem = {
   id: string;
   name: string;
   email: string;
+  phone: string | null;
   points: number;
   updatedAt: string | null;
 };
@@ -734,6 +735,11 @@ function ChallengePointsEditor({
 
 function ChallengeSection() {
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [pointsFilter, setPointsFilter] = useState<
+    "all" | "with-points" | "without-points"
+  >("all");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -742,12 +748,36 @@ function ChallengeSection() {
     fetcher
   );
   const challenge = status.data?.challenge;
+  const leaderboardUrl = useMemo(() => {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: "25",
+    });
+    if (debouncedSearch) params.set("q", debouncedSearch);
+    if (pointsFilter !== "all") params.set("points", pointsFilter);
+    return `/api/admin/challenge/leaderboard?${params.toString()}`;
+  }, [debouncedSearch, page, pointsFilter]);
   const leaderboard = useSWR<ChallengeLeaderboard>(
-    challenge?.active
-      ? "/api/admin/challenge/leaderboard?page=" + page + "&pageSize=25"
-      : null,
+    challenge?.active ? leaderboardUrl : null,
     fetcher
   );
+
+  useEffect(() => {
+    const normalizedSearch = search.trim();
+    const timeout = window.setTimeout(() => {
+      setPage(1);
+      setDebouncedSearch(normalizedSearch);
+    }, 350);
+
+    return () => window.clearTimeout(timeout);
+  }, [search]);
+
+  function clearLeaderboardFilters() {
+    setSearch("");
+    setDebouncedSearch("");
+    setPointsFilter("all");
+    setPage(1);
+  }
 
   async function pointSaved(
     updated: Pick<ChallengeLeaderboardItem, "id" | "points" | "updatedAt">
@@ -886,18 +916,62 @@ function ChallengeSection() {
             </span>
           </div>
 
+          <div className="mt-5 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,auto)_auto] sm:items-end">
+            <label className="grid gap-1 text-sm font-medium">
+              Buscar usuarios
+              <input
+                className="input w-full"
+                type="search"
+                value={search}
+                maxLength={100}
+                autoComplete="off"
+                placeholder="Nombre, correo o teléfono"
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium">
+              Puntos
+              <select
+                className="input w-full"
+                value={pointsFilter}
+                onChange={(event) => {
+                  setPointsFilter(
+                    event.target.value as
+                      | "all"
+                      | "with-points"
+                      | "without-points"
+                  );
+                  setPage(1);
+                }}
+              >
+                <option value="all">Todos</option>
+                <option value="with-points">Con puntos</option>
+                <option value="without-points">Sin puntos</option>
+              </select>
+            </label>
+            <button
+              className="btn-outline"
+              type="button"
+              disabled={!search && pointsFilter === "all"}
+              onClick={clearLeaderboardFilters}
+            >
+              Limpiar filtros
+            </button>
+          </div>
+
           {leaderboard.isLoading && <p className="mt-5 text-sm text-muted-foreground">Cargando leaderboard...</p>}
           {leaderboard.error && <p className="mt-5 text-sm text-red-600">No se pudo cargar el leaderboard.</p>}
 
           {leaderboard.data && (
             <>
               <div className="mt-5 overflow-x-auto">
-                <table className="min-w-full text-sm">
+                <table className="min-w-[800px] w-full text-sm">
                   <thead className="border-b text-left">
                     <tr>
                       <th className="py-2 pr-4">Posición</th>
                       <th className="py-2 pr-4">Usuario</th>
                       <th className="py-2 pr-4">Correo</th>
+                      <th className="py-2 pr-4">Teléfono</th>
                       <th className="py-2 text-right">Puntos</th>
                     </tr>
                   </thead>
@@ -907,6 +981,9 @@ function ChallengeSection() {
                         <td className="py-2 pr-4">#{item.rank}</td>
                         <td className="py-2 pr-4 font-medium">{item.name}</td>
                         <td className="py-2 pr-4 text-muted-foreground">{item.email}</td>
+                        <td className="py-2 pr-4 text-muted-foreground">
+                          {item.phone ?? "-"}
+                        </td>
                         <td className="py-2 text-right align-top">
                           <ChallengePointsEditor
                             item={item}
@@ -918,6 +995,16 @@ function ChallengeSection() {
                         </td>
                       </tr>
                     ))}
+                    {leaderboard.data.items.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={5}
+                          className="py-6 text-center text-muted-foreground"
+                        >
+                          No hay usuarios que coincidan con la búsqueda y los filtros.
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
