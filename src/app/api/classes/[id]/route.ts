@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireClassManager } from "../../admin/_utils";
 import { getNewUserBookingIds } from "@/lib/new-user";
 import { executeClassDeletion } from "@/lib/class-deletion-response";
+import { redactClassPayroll } from "@/lib/payroll";
 
 type Ctx = {
   params: Promise<{ id: string }>;
@@ -68,7 +69,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   );
 
   return NextResponse.json({
-    ...cls,
+    ...redactClassPayroll(cls),
     bookings: cls.bookings.map((booking) => {
       const isNewUser = newUserBookingIds.has(booking.id);
 

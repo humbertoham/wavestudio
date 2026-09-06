@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, requireAdmin } from "../_utils";
+import { prisma, requireAdminUser } from "../_utils";
 import { zonedTimeToUtc, utcToZonedTime } from "date-fns-tz";
 import { addDays } from "date-fns";
 import {
   getClassChallengeSnapshot,
   runChallengeTransaction,
 } from "@/lib/challenge";
+import {
+  getInstructorPayrollSnapshot,
+  payrollErrorResponse,
+} from "@/lib/payroll";
 
 export const runtime = "nodejs";
 
@@ -45,8 +49,8 @@ function addDaysKeepingWallTimeUTC(baseUtc: Date, days: number): Date {
 
 // ==================== GET ====================
 export async function GET(req: NextRequest) {
-  const auth = await requireAdmin(req);
-  if (auth) return auth;
+  const auth = await requireAdminUser(req);
+  if (!auth.ok) return auth.response;
 
   const now = new Date(); // UTC actual
 
@@ -77,55 +81,76 @@ export async function GET(req: NextRequest) {
 
 // ==================== POST ====================
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req); if (auth) return auth;
+  const auth = await requireAdminUser(req);
+  if (!auth.ok) return auth.response;
 
-  const body = (await req.json()) as CreateClassBody;
+  try {
+    const body = (await req.json()) as CreateClassBody;
 
-  if (!body?.title || !isValidLocalDatetime(body?.date) || !body?.instructorId) {
-    return NextResponse.json({ error: "Datos inválidos" }, { status: 400 });
-  }
-
-  const baseUtc = localStringToUtc(body.date);
-  const safeFocus = body.focus ?? "";
-
-  const result = await runChallengeTransaction(async (tx) => {
-    const challengeSnapshot = await getClassChallengeSnapshot(tx);
-    const created = await tx.class.create({
-      data: {
-        title: body.title,
-        focus: safeFocus,
-        date: baseUtc,
-        durationMin: body.durationMin,
-        capacity: body.capacity,
-        instructorId: body.instructorId,
-        ...challengeSnapshot,
-      },
-    });
-
-    let duplicated = 0;
-    if (body.repeatNextMonth) {
-      const offsets = [7, 14, 21, 28];
-      const datesUtc = offsets.map((d) => addDaysKeepingWallTimeUTC(baseUtc, d));
-
-      const data = datesUtc.map((date) => ({
-        title: body.title,
-        focus: safeFocus,
-        date,
-        durationMin: body.durationMin,
-        capacity: body.capacity,
-        instructorId: body.instructorId,
-        ...challengeSnapshot,
-      }));
-
-      await tx.class.createMany({ data });
-      duplicated = datesUtc.length;
+    if (!body?.title || !isValidLocalDatetime(body?.date) || !body?.instructorId) {
+      return NextResponse.json({ error: "Datos inválidos" }, { status: 400 });
     }
 
-    return { created, duplicated };
-  });
+    const baseUtc = localStringToUtc(body.date);
+    const safeFocus = body.focus ?? "";
 
-  return NextResponse.json(
-    { item: result.created, duplicated: result.duplicated },
-    { status: 201 }
-  );
+    const result = await runChallengeTransaction(async (tx) => {
+      const challengeSnapshot = await getClassChallengeSnapshot(tx);
+      const payrollSnapshot = await getInstructorPayrollSnapshot(
+        tx,
+        body.instructorId
+      );
+      const created = await tx.class.create({
+        data: {
+          title: body.title,
+          focus: safeFocus,
+          date: baseUtc,
+          durationMin: body.durationMin,
+          capacity: body.capacity,
+          instructorId: body.instructorId,
+          payrollRateSnapshot: payrollSnapshot.payrollRateSnapshot,
+          payrollRateEffectiveAt: payrollSnapshot.payrollRateEffectiveAt,
+          ...challengeSnapshot,
+        },
+      });
+
+      let duplicated = 0;
+      if (body.repeatNextMonth) {
+        const offsets = [7, 14, 21, 28];
+        const datesUtc = offsets.map((d) =>
+          addDaysKeepingWallTimeUTC(baseUtc, d)
+        );
+
+        const data = datesUtc.map((date) => ({
+          title: body.title,
+          focus: safeFocus,
+          date,
+          durationMin: body.durationMin,
+          capacity: body.capacity,
+          instructorId: body.instructorId,
+          payrollRateSnapshot: payrollSnapshot.payrollRateSnapshot,
+          payrollRateEffectiveAt: payrollSnapshot.payrollRateEffectiveAt,
+          ...challengeSnapshot,
+        }));
+
+        await tx.class.createMany({ data });
+        duplicated = datesUtc.length;
+      }
+
+      return { created, duplicated };
+    });
+
+    return NextResponse.json(
+      { item: result.created, duplicated: result.duplicated },
+      { status: 201 }
+    );
+  } catch (error) {
+    const known = payrollErrorResponse(error);
+    if (known) return NextResponse.json(known.body, { status: known.status });
+    console.error("ADMIN_CLASS_POST_ERROR", error);
+    return NextResponse.json(
+      { error: "CLASS_CREATE_FAILED", message: "No se pudo crear la clase." },
+      { status: 500 }
+    );
+  }
 }

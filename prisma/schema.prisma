@@ -83,6 +83,11 @@ enum ChallengePointReason {
   ATTENDANCE_REVERSAL
 }
 
+enum AccountingAuditType {
+  INSTRUCTOR_RATE_CHANGED
+  CLASS_INSTRUCTOR_REASSIGNED
+}
+
 /**
  * =========================
  * Modelos base
@@ -116,6 +121,7 @@ model User {
   challengePointAdjustmentsMade ChallengePointAdjustment[] @relation("ChallengePointAdjustmentActor")
   challengeActivations          Challenge[]                @relation("ChallengeActivatedBy")
   challengeDeactivations        Challenge[]                @relation("ChallengeDeactivatedBy")
+  accountingAuditActions        AccountingAudit[]          @relation("AccountingAuditActor")
 
   // password reset
   passwordResetTokens PasswordResetToken[]
@@ -169,10 +175,11 @@ model WellhubPlanConfirmation {
 }
 
 model Instructor {
-  id        String   @id @default(cuid())
-  name      String
-  bio       String?
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  name        String
+  bio         String?
+  payrollRate Decimal? @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
 
   isVisible Boolean @default(true)
 
@@ -196,6 +203,11 @@ model Class {
   instructorId String
   bookings     Booking[]
 
+  // Immutable for the current instructor assignment. Reassignment replaces
+  // this snapshot with the new instructor's current rate.
+  payrollRateSnapshot    Decimal?  @db.Decimal(10, 2)
+  payrollRateEffectiveAt DateTime?
+
   // extras opcionales útiles
   location        String?
   isCanceled      Boolean    @default(false)
@@ -215,8 +227,34 @@ model Class {
   challengePointLedger       ChallengePointLedger[]
 
   @@index([date])
+  @@index([date, instructorId])
   @@index([deletedAt, date])
   @@index([challengeId])
+}
+
+// Append-only audit history for payroll-relevant administrative changes.
+// Entity ids/names are snapshotted as scalar values so the audit survives
+// later class deletion or instructor archival.
+model AccountingAudit {
+  id                     String              @id @default(cuid())
+  type                   AccountingAuditType
+  instructorId           String?
+  instructorName         String?
+  classId                String?
+  classTitle             String?
+  previousInstructorId   String?
+  previousInstructorName String?
+  newInstructorId        String?
+  newInstructorName      String?
+  previousRate           Decimal?            @db.Decimal(10, 2)
+  newRate                Decimal?            @db.Decimal(10, 2)
+  actor                  User?               @relation("AccountingAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorUserId            String?
+  createdAt              DateTime            @default(now())
+
+  @@index([instructorId, createdAt])
+  @@index([classId, createdAt])
+  @@index([actorUserId, createdAt])
 }
 
 model Booking {

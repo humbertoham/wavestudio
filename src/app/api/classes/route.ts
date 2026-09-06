@@ -8,6 +8,10 @@ import {
   getClassChallengeSnapshot,
   runChallengeTransaction,
 } from "@/lib/challenge";
+import {
+  getInstructorPayrollSnapshot,
+  payrollErrorResponse,
+} from "@/lib/payroll";
 
 export const runtime = "nodejs";
 
@@ -134,7 +138,7 @@ export async function GET(req: Request) {
  */
 export async function POST(req: Request) {
   try {
-    await requireAdmin();
+    await requireAdmin(req);
 
     const body = await req.json();
     const parsed = classCreateSchema.safeParse(body);
@@ -147,10 +151,16 @@ export async function POST(req: Request) {
 
     const cls = await runChallengeTransaction(async (tx) => {
       const challengeSnapshot = await getClassChallengeSnapshot(tx);
+      const payrollSnapshot = await getInstructorPayrollSnapshot(
+        tx,
+        rest.instructorId
+      );
       return tx.class.create({
         data: {
           ...rest,
           date: new Date(date),
+          payrollRateSnapshot: payrollSnapshot.payrollRateSnapshot,
+          payrollRateEffectiveAt: payrollSnapshot.payrollRateEffectiveAt,
           ...challengeSnapshot,
         },
       });
@@ -158,6 +168,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json(cls, { status: 201 });
   } catch (e: unknown) {
+    const known = payrollErrorResponse(e);
+    if (known) return NextResponse.json(known.body, { status: known.status });
     const message = e instanceof Error ? e.message : "INTERNAL";
     const code =
       message === "UNAUTHORIZED" ? 401 : message === "FORBIDDEN" ? 403 : 500;

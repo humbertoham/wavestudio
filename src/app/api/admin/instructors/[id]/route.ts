@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, requireAdmin } from "../../_utils";
+import { prisma, requireAdmin, requireAdminUser } from "../../_utils";
 import { Prisma } from "@prisma/client";
+import {
+  payrollErrorResponse,
+  updateInstructorWithRate,
+} from "@/lib/payroll";
 
 export const runtime = "nodejs";
 
@@ -10,16 +14,18 @@ type Ctx = { params: Promise<{ id: string }> };
    UPDATE Instructor
 ======================== */
 export async function PUT(req: NextRequest, ctx: Ctx) {
-  const auth = await requireAdmin(req);
-  if (auth) return auth;
+  const auth = await requireAdminUser(req);
+  if (!auth.ok) return auth.response;
 
   try {
     const { id } = await ctx.params;
     const patch = await req.json();
 
-    const item = await prisma.instructor.update({
-      where: { id },
-      data: patch,
+    const item = await updateInstructorWithRate({
+      instructorId: id,
+      name: patch?.name,
+      payrollRate: patch?.payrollRate,
+      actorUserId: auth.user.id,
     });
 
     return NextResponse.json(item, {
@@ -27,6 +33,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     });
 
   } catch (e: any) {
+    const known = payrollErrorResponse(e);
+    if (known) return NextResponse.json(known.body, { status: known.status });
+
     if (e?.message === "UNAUTHORIZED")
       return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
 

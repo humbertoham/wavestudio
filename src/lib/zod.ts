@@ -170,6 +170,7 @@ export const loginSchema = z.object({
 export const instructorCreateSchema = z.object({
   name: z.string().min(2).max(80),
   bio: z.string().max(200).optional(),
+  payrollRate: z.union([z.string(), z.number()]),
 });
 
 export const classCreateSchema = z.object({

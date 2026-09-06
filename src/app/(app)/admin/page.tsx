@@ -129,6 +129,7 @@ type AdminTab =
   | "classes"
   | "instructors"
   | "packs"
+  | "accounting"
   | "purchases"
   | "revenue"
   | "users"
@@ -180,6 +181,7 @@ function isAdminTab(value: string | null): value is AdminTab {
     value === "classes" ||
     value === "instructors" ||
     value === "packs" ||
+    value === "accounting" ||
     value === "purchases" ||
     value === "revenue" ||
     value === "users" ||
@@ -232,7 +234,12 @@ function getAdminWhatsAppMessage(name?: string | null) {
     : "Hola, te contactamos de WAVE Studio.";
 }
 
-type Instructor = { id: string; name: string; bio?: string | null };
+type Instructor = {
+  id: string;
+  name: string;
+  bio?: string | null;
+  payrollRate?: string | null;
+};
 type ClassItem = {
   id: string; title: string; focus: string; date: string; durationMin: number; capacity: number;
   instructorId: string; instructor?: { id: string; name: string };
@@ -383,6 +390,52 @@ type PaginatedPurchasedPackages = {
   total: number;
   totalPages: number;
 };
+type PayrollClass = {
+  id: string;
+  title: string;
+  date: string;
+  localDate: string;
+  localTime: string;
+  durationMin: number;
+  rate: string | null;
+  effectiveAt: string | null;
+  status: "PAYABLE" | "CANCELED" | "MISSING_SNAPSHOT";
+  reassignment: {
+    previousInstructorName: string | null;
+    newInstructorName: string | null;
+    previousRate: string | null;
+    newRate: string | null;
+    createdAt: string;
+    actorName: string | null;
+  } | null;
+};
+type PayrollReport = {
+  month: string;
+  timeZone: string;
+  summary: {
+    total: string;
+    instructorCount: number;
+    payableClassCount: number;
+    canceledClassCount: number;
+    missingSnapshotCount: number;
+  };
+  instructors: Array<{
+    id: string;
+    name: string;
+    currentRate: string | null;
+    classCount: number;
+    listedClassCount: number;
+    missingSnapshotCount: number;
+    monthlyTotal: string;
+    weeks: Array<{
+      weekStart: string;
+      weekEnd: string;
+      total: string;
+      classCount: number;
+      classes: PayrollClass[];
+    }>;
+  }>;
+};
 type BookingRow = {
   id: string;
   status: "ACTIVE" | "CANCELED";
@@ -431,8 +484,7 @@ function AdminPageContent() {
     ["classes", "Clases"],
     ["instructors", "Instructores"],
     ["packs", "Paquetes"],
-    ["purchases", "Compras"],
-    ["revenue", "Ingresos"],
+    ["accounting", "Contabilidad"],
     ["users", "Usuarios"],
     ["challenge", "CHALLENGE"],
   ];
@@ -461,7 +513,10 @@ function AdminPageContent() {
       {/* Tabs */}
       <div className="flex gap-2 flex-wrap" role="tablist" aria-label="Secciones del panel">
         {tabs.map(([value, label]) => {
-          const selected = tab === value;
+          const selected =
+            tab === value ||
+            (value === "accounting" &&
+              (tab === "purchases" || tab === "revenue"));
           return (
             <button
               key={value}
@@ -509,27 +564,25 @@ function AdminPageContent() {
       </section>
 
       <section
-        id="panel-purchases"
+        id="panel-accounting"
         role="tabpanel"
-        hidden={tab !== "purchases"}
-        aria-labelledby="purchases"
+        hidden={
+          tab !== "accounting" && tab !== "purchases" && tab !== "revenue"
+        }
+        aria-labelledby="accounting"
         className="space-y-6"
       >
-        {tab === "purchases" && <PurchasedPackagesSection />}
-      </section>
-
-     
-
-      
-
-      <section
-        id="panel-revenue"
-        role="tabpanel"
-        hidden={tab !== "revenue"}
-        aria-labelledby="revenue"
-        className="space-y-6"
-      >
-        {tab === "revenue" && <RevenueSection />}
+        {(tab === "accounting" || tab === "purchases" || tab === "revenue") && (
+          <AccountingSection
+            legacySection={
+              tab === "purchases"
+                ? "purchases"
+                : tab === "revenue"
+                  ? "revenue"
+                  : undefined
+            }
+          />
+        )}
       </section>
 
       
@@ -961,6 +1014,7 @@ function ClassesSection() {
 
   const [search, setSearch] = useState("");
   const [deletingClassId, setDeletingClassId] = useState<string | null>(null);
+  const [classActionError, setClassActionError] = useState<string | null>(null);
   const [creating, setCreating] = useState<Partial<ClassItem> & { repeatNextMonth?: boolean }>({
     durationMin: 60,
     capacity: 12,
@@ -981,13 +1035,23 @@ function ClassesSection() {
 
   async function createClass(e: React.FormEvent) {
     e.preventDefault();
-    await fetch("/api/admin/classes", {
-      method:"POST",
-      headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify(creating), // ← incluye repeatNextMonth
-    });
-    setCreating({ durationMin: 60, capacity: 12, repeatNextMonth: false });
-    mutate();
+    setClassActionError(null);
+    try {
+      const response = await fetch("/api/admin/classes", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify(creating),
+      });
+      if (!response.ok) {
+        throw new Error(await readApiMessage(response, "No se pudo crear la clase."));
+      }
+      setCreating({ durationMin: 60, capacity: 12, repeatNextMonth: false });
+      await mutate();
+    } catch (failure) {
+      setClassActionError(
+        failure instanceof Error ? failure.message : "No se pudo crear la clase."
+      );
+    }
   }
 
   async function deleteClass(id: string) {
@@ -1059,7 +1123,11 @@ function ClassesSection() {
           value={creating.instructorId ?? ""}
           onChange={e=>setCreating(f=>({...f, instructorId:e.target.value}))}>
           <option value="">-- Instructor --</option>
-          {instructors?.items.map(i=> <option key={i.id} value={i.id}>{i.name}</option>)}
+          {instructors?.items.map(i=> (
+            <option key={i.id} value={i.id} disabled={!i.payrollRate}>
+              {i.name}{i.payrollRate ? "" : " · configura su tarifa"}
+            </option>
+          ))}
         </select>
 
         {/* ← NUEVO: check para replicar en el mes siguiente */}
@@ -1082,6 +1150,11 @@ function ClassesSection() {
   </select>
 </div>
 
+        {classActionError && (
+          <p role="alert" className="text-sm text-red-600 md:col-span-3">
+            {classActionError}
+          </p>
+        )}
         <button className="btn-primary md:col-span-3">Agregar clase</button>
       </form>
 
@@ -1171,7 +1244,12 @@ function EditableClassRow({
       body: JSON.stringify(payload),
     });
     setSaving(false);
-    if (res.ok) { setEditing(false); onSaved(); }
+    if (res.ok) {
+      setEditing(false);
+      onSaved();
+    } else {
+      alert(await readApiMessage(res, "No se pudo guardar la clase."));
+    }
   }
 
   return (
@@ -1208,7 +1286,15 @@ function EditableClassRow({
         {editing
           ? (
             <select className="input" value={draft.instructorId ?? ""} onChange={e=>setDraft(d=>({...d, instructorId:e.target.value}))}>
-              {instructors.map(i=> <option key={i.id} value={i.id}>{i.name}</option>)}
+              {instructors.map(i=> (
+                <option
+                  key={i.id}
+                  value={i.id}
+                  disabled={!i.payrollRate && i.id !== item.instructorId}
+                >
+                  {i.name}{i.payrollRate ? "" : " · tarifa pendiente"}
+                </option>
+              ))}
             </select>
           ) : (item.instructor?.name ?? "—")}
       </td>
@@ -1284,20 +1370,46 @@ function EditableClassRow({
 function InstructorsSection() {
   const { data, error, isLoading, mutate } = useSWR<{items: Instructor[]}>("/api/admin/instructors", fetcher);
   const [search, setSearch] = useState("");
-  const [creating, setCreating] = useState<{name:string; bio?:string}>({ name:"", bio:"" });
+  const [creating, setCreating] = useState({ name: "", payrollRate: "" });
+  const [creatingBusy, setCreatingBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const filtered = useMemo(()=>{
     const q = search.trim().toLowerCase();
-    return (data?.items ?? []).filter(i =>
-      i.name.toLowerCase().includes(q) || (i.bio ?? "").toLowerCase().includes(q)
-    );
+    return (data?.items ?? []).filter(i => i.name.toLowerCase().includes(q));
   }, [data, search]);
 
   async function createInstructor(e: React.FormEvent){
     e.preventDefault();
-    await fetch("/api/admin/instructors",{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(creating)});
-    setCreating({ name:"", bio:"" });
-    mutate();
+    setCreateError(null);
+    if (!isValidPayrollRateInput(creating.payrollRate)) {
+      setCreateError("Ingresa una tarifa mayor a $0 con máximo 2 decimales.");
+      return;
+    }
+
+    setCreatingBusy(true);
+    try {
+      const response = await fetch("/api/admin/instructors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(creating),
+      });
+      if (!response.ok) {
+        throw new Error(
+          await readApiMessage(response, "No se pudo crear el instructor.")
+        );
+      }
+      setCreating({ name: "", payrollRate: "" });
+      await mutate();
+    } catch (createFailure) {
+      setCreateError(
+        createFailure instanceof Error
+          ? createFailure.message
+          : "No se pudo crear el instructor."
+      );
+    } finally {
+      setCreatingBusy(false);
+    }
   }
 
   async function deleteInstructor(id: string){
@@ -1315,10 +1427,33 @@ function InstructorsSection() {
         <input className="input" placeholder="Buscar…" value={search} onChange={e=>setSearch(e.target.value)}/>
       </div>
 
-      <form onSubmit={createInstructor} className="grid md:grid-cols-3 gap-3 mb-6">
-        <input className="input" placeholder="Nombre" required value={creating.name} onChange={e=>setCreating(f=>({...f, name:e.target.value}))}/>
-        <input className="input md:col-span-2" placeholder="Bio" value={creating.bio} onChange={e=>setCreating(f=>({...f, bio:e.target.value}))}/>
-        <button className="btn-primary md:col-span-3">Agregar instructor</button>
+      <form onSubmit={createInstructor} className="grid gap-3 mb-6 md:grid-cols-3">
+        <label className="grid gap-1 text-sm font-medium md:col-span-2">
+          Nombre
+          <input className="input" required value={creating.name} onChange={e=>setCreating(f=>({...f, name:e.target.value}))}/>
+        </label>
+        <label className="grid gap-1 text-sm font-medium">
+          Tarifa por clase (MXN)
+          <input
+            className="input"
+            type="number"
+            min="0.01"
+            max="99999999.99"
+            step="0.01"
+            inputMode="decimal"
+            required
+            value={creating.payrollRate}
+            onChange={e=>setCreating(f=>({...f, payrollRate:e.target.value}))}
+          />
+        </label>
+        {createError && (
+          <p role="alert" className="text-sm text-red-600 md:col-span-3">
+            {createError}
+          </p>
+        )}
+        <button className="btn-primary md:col-span-3" disabled={creatingBusy}>
+          {creatingBusy ? "Guardando..." : "Agregar instructor"}
+        </button>
       </form>
 
       {isLoading && <p className="text-sm text-gray-500">Cargando…</p>}
@@ -1338,42 +1473,93 @@ function EditableInstructorRow({ item, onSaved, onDeleted }:{
   item: Instructor; onSaved: ()=>void; onDeleted: ()=>void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<Partial<Instructor>>({ name: item.name, bio: item.bio ?? "" });
+  const [draft, setDraft] = useState({
+    name: item.name,
+    payrollRate: item.payrollRate ?? "",
+  });
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function save(){
+    setSaveError(null);
+    if (!isValidPayrollRateInput(draft.payrollRate)) {
+      setSaveError("Ingresa una tarifa mayor a $0 con máximo 2 decimales.");
+      return;
+    }
     setSaving(true);
-    const res = await fetch(`/api/admin/instructors/${item.id}`,{
-      method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(draft)
-    });
-    setSaving(false);
-    if (res.ok) { setEditing(false); onSaved(); }
+    try {
+      const res = await fetch(`/api/admin/instructors/${item.id}`,{
+        method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(draft)
+      });
+      if (!res.ok) {
+        throw new Error(await readApiMessage(res, "No se pudo guardar la tarifa."));
+      }
+      setEditing(false);
+      onSaved();
+    } catch (failure) {
+      setSaveError(
+        failure instanceof Error ? failure.message : "No se pudo guardar la tarifa."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <li className="flex flex-col md:flex-row md:items-center gap-2">
+    <li className="rounded-xl border p-3">
       {editing ? (
-        <>
-          <input className="input" value={draft.name ?? ""} onChange={e=>setDraft(d=>({...d, name:e.target.value}))}/>
-          <input className="input flex-1" value={draft.bio ?? ""} onChange={e=>setDraft(d=>({...d, bio:e.target.value}))}/>
-          <div className="flex gap-2">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)_auto] md:items-end">
+          <label className="grid gap-1 text-sm font-medium">
+            Nombre
+            <input className="input" value={draft.name} onChange={e=>setDraft(d=>({...d, name:e.target.value}))}/>
+          </label>
+          <label className="grid gap-1 text-sm font-medium">
+            Tarifa por clase (MXN)
+            <input
+              className="input"
+              type="number"
+              min="0.01"
+              max="99999999.99"
+              step="0.01"
+              inputMode="decimal"
+              value={draft.payrollRate}
+              onChange={e=>setDraft(d=>({...d, payrollRate:e.target.value}))}
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
             <button className="btn-primary" onClick={save} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</button>
-            <button className="btn-ghost" onClick={()=>{ setEditing(false); setDraft({ name:item.name, bio:item.bio ?? "" }); }}>Cancelar</button>
+            <button className="btn-ghost" onClick={()=>{ setEditing(false); setSaveError(null); setDraft({ name:item.name, payrollRate:item.payrollRate ?? "" }); }}>Cancelar</button>
             <button className="btn-danger" onClick={onDeleted}>Eliminar</button>
           </div>
-        </>
+          {saveError && <p role="alert" className="text-sm text-red-600 md:col-span-3">{saveError}</p>}
+        </div>
       ) : (
-        <>
-          <div className="font-medium">{item.name}</div>
-          <div className="text-sm text-gray-600 flex-1">{item.bio || "—"}</div>
-          <div className="flex gap-2">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">{item.name}</div>
+            <div className={item.payrollRate ? "text-sm text-gray-600" : "text-sm text-amber-700"}>
+              {item.payrollRate
+                ? `${formatPayrollMoney(item.payrollRate)} por clase`
+                : "Tarifa pendiente"}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <button className="btn-outline" onClick={()=>setEditing(true)}>Editar</button>
             <button className="btn-danger" onClick={onDeleted}>Eliminar</button>
           </div>
-        </>
+        </div>
       )}
     </li>
   );
+}
+
+function isValidPayrollRateInput(value: string) {
+  const normalized = value.trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return false;
+  const [whole, decimals = ""] = normalized.split(".");
+  const significantWhole = whole.replace(/^0+/, "");
+  const hasValue = significantWhole.length > 0 || /[1-9]/.test(decimals);
+  return hasValue && significantWhole.length <= 8;
 }
 
 /* ---------------------------------------------------
@@ -1932,6 +2118,335 @@ function EditablePackRow({
 }
 
 
+type AccountingSectionKey = "payroll" | "revenue" | "purchases";
+
+function isAccountingSection(value: string | null): value is AccountingSectionKey {
+  return value === "payroll" || value === "revenue" || value === "purchases";
+}
+
+function AccountingSection({
+  legacySection,
+}: {
+  legacySection?: Exclude<AccountingSectionKey, "payroll">;
+}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const sectionParam = searchParams.get("accounting");
+  const section: AccountingSectionKey =
+    legacySection ?? (isAccountingSection(sectionParam) ? sectionParam : "payroll");
+  const sections: Array<[AccountingSectionKey, string]> = [
+    ["payroll", "Nómina"],
+    ["revenue", "Ingresos"],
+    ["purchases", "Compras"],
+  ];
+
+  function selectSection(next: AccountingSectionKey) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", "accounting");
+    if (next === "payroll") params.delete("accounting");
+    else params.set("accounting", next);
+    router.push(`?${params.toString()}`, { scroll: false });
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-2xl font-bold">Contabilidad</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Nómina, ingresos y compras del estudio.
+        </p>
+      </div>
+      <div
+        className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap"
+        role="tablist"
+        aria-label="Secciones de Contabilidad"
+      >
+        {sections.map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={section === value}
+            className={section === value ? "btn-primary" : "btn-outline"}
+            onClick={() => selectSection(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {section === "payroll" && <PayrollSection />}
+      {section === "revenue" && <RevenueSection />}
+      {section === "purchases" && <PurchasedPackagesSection />}
+    </div>
+  );
+}
+
+function currentMonthInStudioTimeZone() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Monterrey",
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  return `${year}-${month}`;
+}
+
+function shiftMonth(month: string, delta: number) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year, monthNumber - 1 + delta, 1));
+  return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function formatPayrollMoney(value: string | null) {
+  if (value == null) return "Sin configurar";
+  return Number(value).toLocaleString("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatPayrollMonth(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  return new Intl.DateTimeFormat("es-MX", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, monthNumber - 1, 1)));
+}
+
+function PayrollSection() {
+  const currentMonth = currentMonthInStudioTimeZone();
+  const [month, setMonth] = useState(currentMonth);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const { data, error, isLoading, mutate } = useSWR<PayrollReport>(
+    `/api/admin/accounting/payroll?month=${encodeURIComponent(month)}`,
+    fetcher
+  );
+
+  function toggleInstructor(id: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <Section>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h3 className="text-xl font-semibold">Nómina</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Clases agrupadas de lunes a domingo en horario de Monterrey.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
+          <label className="col-span-2 grid gap-1 text-sm sm:col-span-1">
+            Mes y año
+            <input
+              className="input"
+              type="month"
+              min="2000-01"
+              max="2100-12"
+              value={month}
+              onChange={(event) => {
+                if (/^\d{4}-\d{2}$/.test(event.target.value)) {
+                  setMonth(event.target.value);
+                }
+              }}
+            />
+          </label>
+          <button
+            className="btn-outline"
+            type="button"
+            onClick={() => setMonth((value) => shiftMonth(value, -1))}
+          >
+            Mes anterior
+          </button>
+          <button
+            className="btn-outline"
+            type="button"
+            onClick={() => setMonth((value) => shiftMonth(value, 1))}
+          >
+            Mes siguiente
+          </button>
+          <button
+            className="btn-outline col-span-2 sm:col-span-1"
+            type="button"
+            disabled={month === currentMonth}
+            onClick={() => setMonth(currentMonth)}
+          >
+            Mes actual
+          </button>
+          <button
+            className="btn-outline col-span-2 sm:col-span-1"
+            type="button"
+            onClick={() => mutate()}
+          >
+            Actualizar
+          </button>
+        </div>
+      </div>
+
+      {isLoading && (
+        <p className="mt-6 text-sm text-muted-foreground">Calculando nómina...</p>
+      )}
+      {error && (
+        <p role="alert" className="mt-6 text-sm text-red-600">
+          No se pudo cargar la nómina. Intenta nuevamente.
+        </p>
+      )}
+
+      {data && (
+        <>
+          <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border p-4">
+              <p className="text-sm text-muted-foreground">Nómina del mes</p>
+              <p className="mt-1 text-2xl font-semibold">
+                {formatPayrollMoney(data.summary.total)}
+              </p>
+            </div>
+            <div className="rounded-xl border p-4">
+              <p className="text-sm text-muted-foreground">Instructores con clases</p>
+              <p className="mt-1 text-2xl font-semibold">
+                {data.summary.instructorCount}
+              </p>
+            </div>
+            <div className="rounded-xl border p-4">
+              <p className="text-sm text-muted-foreground">Clases pagables</p>
+              <p className="mt-1 text-2xl font-semibold">
+                {data.summary.payableClassCount}
+              </p>
+            </div>
+          </div>
+
+          {data.summary.missingSnapshotCount > 0 && (
+            <div role="status" className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+              {data.summary.missingSnapshotCount} clase
+              {data.summary.missingSnapshotCount === 1 ? "" : "s"} anterior
+              {data.summary.missingSnapshotCount === 1 ? "" : "es"} a Nómina no
+              {data.summary.missingSnapshotCount === 1 ? " tiene" : " tienen"} una
+              tarifa histórica confiable y no se incluye
+              {data.summary.missingSnapshotCount === 1 ? "" : "n"} en los totales.
+            </div>
+          )}
+
+          <div className="mt-5 space-y-3">
+            {data.instructors.map((instructor) => {
+              const isExpanded = expanded.has(instructor.id);
+              return (
+                <article key={instructor.id} className="rounded-xl border">
+                  <button
+                    type="button"
+                    className="grid w-full gap-3 p-4 text-left sm:grid-cols-[minmax(0,1fr)_auto_auto_auto] sm:items-center"
+                    aria-expanded={isExpanded}
+                    onClick={() => toggleInstructor(instructor.id)}
+                  >
+                    <span>
+                      <span className="block font-semibold">{instructor.name}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        Tarifa actual: {formatPayrollMoney(instructor.currentRate)}
+                      </span>
+                    </span>
+                    <span className="text-sm">
+                      {instructor.classCount} clase{instructor.classCount === 1 ? "" : "s"}
+                    </span>
+                    <span className="font-semibold">
+                      {formatPayrollMoney(instructor.monthlyTotal)}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {isExpanded ? "Ocultar" : "Ver detalle"}
+                    </span>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="border-t p-4">
+                      <div className="space-y-5">
+                        {instructor.weeks.map((week) => (
+                          <section key={week.weekStart}>
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                              <h4 className="font-medium">
+                                Semana {week.weekStart} a {week.weekEnd}
+                              </h4>
+                              <span className="text-sm font-semibold">
+                                {week.classCount} clases · {formatPayrollMoney(week.total)}
+                              </span>
+                            </div>
+                            <div className="overflow-x-auto">
+                              <table className="min-w-[760px] w-full text-sm">
+                                <thead className="border-b text-left">
+                                  <tr>
+                                    <th className="py-2 pr-3">Fecha</th>
+                                    <th className="py-2 pr-3">Clase</th>
+                                    <th className="py-2 pr-3">Duración</th>
+                                    <th className="py-2 pr-3">Estado</th>
+                                    <th className="py-2 text-right">Tarifa efectiva</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {week.classes.map((cls) => (
+                                    <tr key={cls.id} className="border-b align-top">
+                                      <td className="py-2 pr-3 whitespace-nowrap">
+                                        {cls.localDate} · {cls.localTime}
+                                      </td>
+                                      <td className="py-2 pr-3">
+                                        <span className="font-medium">{cls.title}</span>
+                                        {cls.reassignment && (
+                                          <span className="mt-1 block text-xs text-amber-700">
+                                            Reasignada: {cls.reassignment.previousInstructorName ?? "-"} → {cls.reassignment.newInstructorName ?? "-"}
+                                            {cls.reassignment.actorName
+                                              ? ` por ${cls.reassignment.actorName}`
+                                              : ""}
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className="py-2 pr-3">{cls.durationMin} min</td>
+                                      <td className="py-2 pr-3">
+                                        {cls.status === "PAYABLE"
+                                          ? "Pagable"
+                                          : cls.status === "CANCELED"
+                                            ? "Cancelada · $0.00"
+                                            : "Sin tarifa histórica"}
+                                      </td>
+                                      <td className="py-2 text-right font-medium">
+                                        {formatPayrollMoney(cls.rate)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+
+            {data.instructors.length === 0 && (
+              <div className="rounded-xl border border-dashed p-8 text-center text-muted-foreground">
+                Sin clases asignadas en este periodo.
+              </div>
+            )}
+          </div>
+
+          <p className="mt-4 text-xs text-muted-foreground">
+            Periodo: {formatPayrollMonth(data.month)} · Zona horaria: {data.timeZone}.
+            Las clases canceladas no generan nómina.
+          </p>
+        </>
+      )}
+    </Section>
+  );
+}
+
 function PurchasedPackagesSection() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1999,7 +2514,8 @@ function PurchasedPackagesSection() {
     options: { resetPage?: boolean; replace?: boolean } = { resetPage: true }
   ) {
     const params = new URLSearchParams(searchParams.toString());
-    params.set("tab", "purchases");
+    params.set("tab", "accounting");
+    params.set("accounting", "purchases");
 
     for (const [key, value] of Object.entries(next)) {
       const param = `p${key}`;
@@ -2034,7 +2550,8 @@ function PurchasedPackagesSection() {
 
   function clearPurchaseFilters() {
     const params = new URLSearchParams(searchParams.toString());
-    params.set("tab", "purchases");
+    params.set("tab", "accounting");
+    params.set("accounting", "purchases");
     [
       "pPage",
       "pPageSize",

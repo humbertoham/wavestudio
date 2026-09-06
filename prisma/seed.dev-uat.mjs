@@ -60,12 +60,14 @@ async function seed() {
     update: {
       name: `${label} Instructor`,
       bio: `Seed instructor for ${label}.`,
+      payrollRate: "150.00",
       isVisible: true,
     },
     create: {
       id: instructorId,
       name: `${label} Instructor`,
       bio: `Seed instructor for ${label}.`,
+      payrollRate: "150.00",
       isVisible: true,
     },
   });
@@ -128,6 +130,7 @@ async function seed() {
     },
   });
 
+  const payrollRateEffectiveAt = new Date();
   const classes = [
     {
       id: `seed_${envName}_class_1`,
@@ -138,6 +141,8 @@ async function seed() {
       capacity: 10,
       creditCost: 1,
       instructorId,
+      payrollRateSnapshot: "150.00",
+      payrollRateEffectiveAt,
     },
     {
       id: `seed_${envName}_class_2`,
@@ -148,16 +153,39 @@ async function seed() {
       capacity: 10,
       creditCost: 1,
       instructorId,
+      payrollRateSnapshot: "150.00",
+      payrollRateEffectiveAt,
     },
   ];
 
   for (const item of classes) {
     await prisma.class.upsert({
       where: { id: item.id },
-      update: item,
+      // Re-running the seed must never rewrite an existing class snapshot.
+      update: {
+        title: item.title,
+        focus: item.focus,
+        date: item.date,
+        durationMin: item.durationMin,
+        capacity: item.capacity,
+        creditCost: item.creditCost,
+        instructorId: item.instructorId,
+      },
       create: item,
     });
   }
+
+  await prisma.class.updateMany({
+    where: {
+      id: { in: classes.map((item) => item.id) },
+      date: { gte: payrollRateEffectiveAt },
+      payrollRateSnapshot: null,
+    },
+    data: {
+      payrollRateSnapshot: "150.00",
+      payrollRateEffectiveAt,
+    },
+  });
 
   console.log(
     JSON.stringify(
