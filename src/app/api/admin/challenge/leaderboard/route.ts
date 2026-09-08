@@ -17,9 +17,22 @@ type LeaderboardRow = {
   id: string;
   name: string;
   email: string;
+  phone: string | null;
   points: number;
   updatedAt: Date | null;
 };
+
+type PointsFilter = "all" | "with-points" | "without-points";
+
+function parsePointsFilter(value: string | null): PointsFilter {
+  return value === "with-points" || value === "without-points"
+    ? value
+    : "all";
+}
+
+function escapeLikePattern(value: string) {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
 
 export async function GET(req: NextRequest) {
   const auth = await requireChallengeAdmin(req);
@@ -45,7 +58,40 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const page = parsePositiveInt(url.searchParams.get("page"), 1, 100_000);
   const pageSize = parsePositiveInt(url.searchParams.get("pageSize"), 25, 100);
+  const search = (url.searchParams.get("q") ?? "").trim().slice(0, 100);
+  const pointsFilter = parsePointsFilter(url.searchParams.get("points"));
   const offset = (page - 1) * pageSize;
+  const escapedSearch = escapeLikePattern(search);
+  const searchPattern = `%${escapedSearch}%`;
+  const phoneDigits = search.replace(/\D/g, "");
+  const phonePattern = `%${escapeLikePattern(phoneDigits)}%`;
+  const searchClause = search
+    ? Prisma.sql`
+        AND (
+          u."name" ILIKE ${searchPattern} ESCAPE '\\'
+          OR u."email" ILIKE ${searchPattern} ESCAPE '\\'
+          OR COALESCE(u."phone", '') ILIKE ${searchPattern} ESCAPE '\\'
+          ${
+            phoneDigits
+              ? Prisma.sql`OR regexp_replace(COALESCE(u."phone", ''), '[^0-9]', '', 'g') LIKE ${phonePattern} ESCAPE '\\'`
+              : Prisma.empty
+          }
+        )
+      `
+    : Prisma.empty;
+  const pointsClause =
+    pointsFilter === "with-points"
+      ? Prisma.sql`AND COALESCE(t."points", 0) > 0`
+      : pointsFilter === "without-points"
+        ? Prisma.sql`AND COALESCE(t."points", 0) = 0`
+        : Prisma.empty;
+  const countTotalsJoin =
+    pointsFilter === "all"
+      ? Prisma.empty
+      : Prisma.sql`
+          LEFT JOIN "ChallengeUserTotal" t
+            ON t."userId" = u."id" AND t."challengeId" = ${challenge.id}
+        `;
 
   const [rows, counts] = await Promise.all([
     prisma.$queryRaw<LeaderboardRow[]>(Prisma.sql`
@@ -53,16 +99,25 @@ export async function GET(req: NextRequest) {
         u."id",
         u."name",
         u."email",
+        u."phone",
         COALESCE(t."points", 0)::int AS "points",
         t."updatedAt" AS "updatedAt"
       FROM "User" u
       LEFT JOIN "ChallengeUserTotal" t
         ON t."userId" = u."id" AND t."challengeId" = ${challenge.id}
+      WHERE TRUE
+      ${searchClause}
+      ${pointsClause}
       ORDER BY COALESCE(t."points", 0) DESC, LOWER(u."name") ASC, u."id" ASC
       LIMIT ${pageSize} OFFSET ${offset}
     `),
     prisma.$queryRaw<Array<{ count: number }>>(Prisma.sql`
-      SELECT COUNT(*)::int AS "count" FROM "User"
+      SELECT COUNT(*)::int AS "count"
+      FROM "User" u
+      ${countTotalsJoin}
+      WHERE TRUE
+      ${searchClause}
+      ${pointsClause}
     `),
   ]);
 
@@ -75,6 +130,7 @@ export async function GET(req: NextRequest) {
         id: row.id,
         name: row.name,
         email: row.email,
+        phone: row.phone,
         points: Number(row.points),
         updatedAt: row.updatedAt?.toISOString() ?? null,
       })),
