@@ -61,7 +61,8 @@ WAVE occurrence maps to one Wellhub class and one slot:
 
 - `Class.wellhubClassId` stores the Wellhub class ID.
 - `Class.wellhubSlotId` stores the Wellhub slot ID.
-- the Wellhub class `reference` is the stable WAVE class ID.
+- the Wellhub class `reference` is the WAVE class ID when it fits Wellhub's
+  20-character limit, otherwise a stable `wave_`-prefixed SHA-256 digest.
 - the slot carries WAVE time, duration, capacity, active booking count, location,
   instructor, and active/canceled state.
 

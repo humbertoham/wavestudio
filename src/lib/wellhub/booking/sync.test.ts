@@ -37,7 +37,7 @@ function harness() {
   let booked = 12;
 
   const tx = {
-    $queryRaw: vi.fn().mockResolvedValue([{ pg_advisory_xact_lock: null }]),
+    $executeRaw: vi.fn().mockResolvedValue(1),
     class: {
       findUnique: vi.fn().mockImplementation(async () => ({ ...cls })),
       update: vi.fn().mockImplementation(async ({ data }) => {
@@ -134,6 +134,35 @@ describe("Wellhub class/slot synchronization", () => {
       where: { classId: "wave_class_1", status: "ACTIVE" },
       _sum: { quantity: true },
     });
+  });
+
+  it("executes the advisory lock without deserializing its void result", async () => {
+    await expect(
+      syncWellhubClass("wave_class_1", {
+        db: subject.db as never,
+        client: subject.client,
+        config,
+      })
+    ).resolves.toMatchObject({ kind: "synced" });
+
+    expect(subject.tx.$executeRaw).toHaveBeenCalledOnce();
+  });
+
+  it("uses and recovers a stable reference within Wellhub's 20-character limit", async () => {
+    subject.cls.id = "wellhub_sandbox_dev_class_20260914T150000Z";
+    vi.mocked(subject.client.listClasses).mockResolvedValue([
+      { id: "8268", reference: "wave_0920d69b5a85629" },
+    ]);
+
+    await syncWellhubClass(subject.cls.id, {
+      db: subject.db as never,
+      client: subject.client,
+      config,
+    });
+
+    expect(subject.client.listClasses).toHaveBeenCalledOnce();
+    expect(subject.client.createClass).not.toHaveBeenCalled();
+    expect(subject.cls.wellhubClassId).toBe("8268");
   });
 
   it("re-syncs by updating the same resources without duplicates", async () => {

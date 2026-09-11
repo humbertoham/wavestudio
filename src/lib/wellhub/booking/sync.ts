@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
@@ -41,6 +43,14 @@ function activeConfig(config?: WellhubBookingConfig) {
   return config ?? getWellhubBookingConfig();
 }
 
+function classReference(classId: string) {
+  if (classId.length <= 20) return classId;
+  return `wave_${createHash("sha256")
+    .update(classId)
+    .digest("hex")
+    .slice(0, 15)}`;
+}
+
 function classPayload(
   cls: {
     id: string;
@@ -60,7 +70,7 @@ function classPayload(
     ...(cls.location?.trim() ? { notes: cls.location.trim().slice(0, 500) } : {}),
     bookable: active,
     visible: active,
-    reference: cls.id,
+    reference: classReference(cls.id),
     product_id: config.productId,
   };
 }
@@ -133,7 +143,7 @@ export async function syncWellhubClass(
   return db.$transaction(async (tx) => {
     // A transaction-scoped advisory lock serializes sync for this WAVE class
     // across server instances and prevents duplicate external resources.
-    await tx.$queryRaw(
+    await tx.$executeRaw(
       Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${classId}))`
     );
 
@@ -162,7 +172,7 @@ export async function syncWellhubClass(
     let wellhubClassId = cls.wellhubClassId;
     if (!wellhubClassId) {
       const existing = (await client.listClasses()).find(
-        (item) => item.reference === classId
+        (item) => item.reference === waveClassPayload.reference
       );
       wellhubClassId =
         existing?.id ?? (await client.createClass(waveClassPayload));
