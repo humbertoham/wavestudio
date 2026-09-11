@@ -52,7 +52,7 @@ PostgreSQL transaction reads the class and aggregate, creates the booking, and
 retries serialization failures. The unique Wellhub booking number and unique
 event constraints provide additional duplicate/concurrency protection.
 
-## Class, category, and slot synchronization
+## Class and slot synchronization
 
 WAVE currently has no normalized class-type/category model; each `Class` is a
 scheduled occurrence with free-form `title` and `focus`. The Wellhub FAQ
@@ -69,11 +69,9 @@ Repeated sync updates the stored resources. If an external create succeeded but
 the local mapping write failed, reconciliation lists classes by `reference` and
 slots by exact occurrence time before creating anything, avoiding duplicates.
 
-Wellhub categories are provider-owned taxonomy values exposed by `GET
-/gyms/{gym_id}/categories`; the current official API does not provide a
-category-create endpoint. Optional configured category IDs are validated
-against that taxonomy and referenced on class create/update. WAVE does not
-invent or create provider categories.
+Wellhub confirmed that categories are no longer used in Sandbox or Production.
+WAVE neither configures categories nor calls a category endpoint, and class
+create/update payloads omit the obsolete `categories` field.
 
 Class edits update the external class/slot. Cancellation or archived deletion
 makes the Wellhub class non-bookable/invisible and the slot inactive. A class
@@ -167,7 +165,6 @@ Server-side names only:
 - `WELLHUB_BOOKING_ENABLED`
 - `WELLHUB_BOOKING_API_BASE_URL`
 - `WELLHUB_BOOKING_PRODUCT_ID`
-- `WELLHUB_BOOKING_CATEGORY_IDS`
 - `WELLHUB_BOOKING_SYNC_HORIZON_DAYS`
 - `WELLHUB_API_TOKEN`
 - `WELLHUB_GYM_ID`
@@ -202,8 +199,9 @@ The command is never invoked by build, startup, migration, or deployment.
 
 ## Sandbox certification with Marco / Wellhub
 
-1. Marco supplies the DEV sandbox gym ID, Booking product ID, Bearer token,
-   webhook secret, and optional valid `es_MX` category IDs.
+1. Marco supplies the DEV sandbox gym ID, Bearer token, and webhook secret.
+   Discover the Booking product with `GET /setup/v1/gyms/{gym_id}/products`;
+   for WAVE Sandbox, select the unique `outdoor` product returned by Wellhub.
 2. Configure the variables in DEV only and register
    `https://<dev-host>/api/integrations/wellhub/webhook` as the single callback.
 3. Run preflight and dry-run, then run the initial sync.
@@ -233,5 +231,4 @@ The integration cannot be enabled until Marco/Wellhub provides or confirms:
 - DEV sandbox Booking product ID applicable to the studio classes
 - DEV sandbox Bearer token
 - webhook signing secret and registered DEV callback
-- optional category IDs to associate (or confirmation to omit categories)
 - actual sandbox redelivery behavior for a promptly returned HTTP 503

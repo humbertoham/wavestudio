@@ -11,7 +11,6 @@ const config = {
   apiToken: "fake",
   gymId: "129",
   productId: 100003,
-  categoryIds: [],
   webhookSecret: "fake",
   timeoutMs: 800,
   syncHorizonDays: 30,
@@ -253,7 +252,6 @@ function harness(options: {
   };
 
   const client: WellhubBookingClient = {
-    listCategoryIds: vi.fn(),
     listClasses: vi.fn(),
     createClass: vi.fn(),
     updateClass: vi.fn(),

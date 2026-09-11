@@ -27,7 +27,6 @@ const bookingEnv: NodeJS.ProcessEnv = {
   WELLHUB_GYM_ID: "129",
   WELLHUB_WEBHOOK_SECRET: "fake-secret",
   WELLHUB_BOOKING_PRODUCT_ID: "100003",
-  WELLHUB_BOOKING_CATEGORY_IDS: "7,8,7",
   WELLHUB_BOOKING_SYNC_HORIZON_DAYS: "30",
 };
 
@@ -88,14 +87,22 @@ describe("Wellhub Booking configuration", () => {
     });
   });
 
-  it("loads only the official sandbox host and normalizes category IDs", () => {
+  it("loads the official sandbox configuration without category IDs", () => {
     expect(getWellhubBookingConfig(bookingEnv)).toMatchObject({
       enabled: true,
       gymId: "129",
       productId: 100003,
-      categoryIds: [7, 8],
       syncHorizonDays: 30,
     });
+  });
+
+  it("ignores the obsolete category environment variable", () => {
+    expect(
+      getWellhubBookingConfig({
+        ...bookingEnv,
+        WELLHUB_BOOKING_CATEGORY_IDS: "obsolete-and-not-an-id",
+      })
+    ).toMatchObject({ enabled: true, productId: 100003 });
   });
 
   it("hard-rejects production activation", () => {
@@ -108,7 +115,7 @@ describe("Wellhub Booking configuration", () => {
     );
   });
 
-  it("rejects arbitrary Booking API hosts and invalid provider IDs", () => {
+  it("rejects arbitrary Booking API hosts and invalid product IDs", () => {
     expect(() =>
       getWellhubBookingConfig({
         ...bookingEnv,
@@ -118,7 +125,7 @@ describe("Wellhub Booking configuration", () => {
     expect(() =>
       getWellhubBookingConfig({
         ...bookingEnv,
-        WELLHUB_BOOKING_CATEGORY_IDS: "7,not-an-id",
+        WELLHUB_BOOKING_PRODUCT_ID: "not-an-id",
       })
     ).toThrowError(WellhubConfigError);
   });

@@ -21,7 +21,6 @@ export type WellhubClassPayload = {
   visible: boolean;
   reference: string;
   product_id: number;
-  categories?: number[];
 };
 
 export type WellhubSlotPayload = {
@@ -66,7 +65,6 @@ type WellhubSlotRecord = {
 };
 
 export interface WellhubBookingClient {
-  listCategoryIds(locale?: string): Promise<Set<number>>;
   listClasses(): Promise<WellhubClassRecord[]>;
   createClass(payload: WellhubClassPayload): Promise<string>;
   updateClass(classId: string, payload: WellhubClassPayload): Promise<void>;
@@ -171,26 +169,6 @@ export function createWellhubBookingClient(
   const gymPath = `/gyms/${encodeURIComponent(config.gymId)}`;
 
   return {
-    async listCategoryIds(locale = "es_MX") {
-      const raw = await request(
-        `${gymPath}/categories?locale=${encodeURIComponent(locale)}`,
-        { method: "GET" },
-        [200]
-      );
-      const parsed = parseObject(raw);
-      const results = Array.isArray(parsed?.results) ? parsed.results : null;
-      if (!results) {
-        throw new WellhubBookingApiError("MALFORMED_CATEGORY_RESPONSE");
-      }
-      const ids = new Set<number>();
-      for (const item of results) {
-        if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-        const id = Number((item as Record<string, unknown>).id);
-        if (Number.isSafeInteger(id) && id > 0) ids.add(id);
-      }
-      return ids;
-    },
-
     async listClasses() {
       const raw = await request(`${gymPath}/classes`, { method: "GET" }, [200]);
       const parsed = parseObject(raw);

@@ -13,7 +13,6 @@ const config = {
   apiToken: "fake",
   gymId: "129",
   productId: 100003,
-  categoryIds: [7],
   webhookSecret: "fake",
   timeoutMs: 800,
   syncHorizonDays: 30,
@@ -56,7 +55,6 @@ function harness() {
     $transaction: vi.fn().mockImplementation(async (callback) => callback(tx)),
   };
   const client: WellhubBookingClient = {
-    listCategoryIds: vi.fn().mockResolvedValue(new Set([7, 8])),
     listClasses: vi.fn().mockResolvedValue([]),
     createClass: vi.fn().mockResolvedValue("8268"),
     updateClass: vi.fn().mockResolvedValue(undefined),
@@ -107,7 +105,7 @@ describe("Wellhub class/slot synchronization", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
-  it("validates provider categories and creates a stable class and slot mapping", async () => {
+  it("creates a stable class and slot mapping without categories", async () => {
     const result = await syncWellhubClass("wave_class_1", {
       db: subject.db as never,
       client: subject.client,
@@ -119,13 +117,14 @@ describe("Wellhub class/slot synchronization", () => {
       wellhubSlotId: "9325",
       activeBookingCount: 12,
     });
-    expect(subject.client.listCategoryIds).toHaveBeenCalledWith("es_MX");
     expect(subject.client.createClass).toHaveBeenCalledWith(
       expect.objectContaining({
         reference: "wave_class_1",
-        categories: [7],
         product_id: 100003,
       })
+    );
+    expect(subject.client.createClass).toHaveBeenCalledWith(
+      expect.not.objectContaining({ categories: expect.anything() })
     );
     expect(subject.client.createSlot).toHaveBeenCalledWith(
       "8268",
@@ -219,14 +218,4 @@ describe("Wellhub class/slot synchronization", () => {
     ).rejects.toMatchObject({ code: "CAPACITY_BELOW_ACTIVE_BOOKINGS" });
   });
 
-  it("rejects category IDs that are not in Wellhub's taxonomy", async () => {
-    vi.mocked(subject.client.listCategoryIds).mockResolvedValue(new Set([8]));
-    await expect(
-      syncWellhubClass("wave_class_1", {
-        db: subject.db as never,
-        client: subject.client,
-        config,
-      })
-    ).rejects.toMatchObject({ code: "UNKNOWN_WELLHUB_CATEGORY_ID" });
-  });
 });

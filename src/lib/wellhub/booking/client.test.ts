@@ -9,7 +9,6 @@ const config = {
   apiToken: "secret-test-token",
   gymId: "129",
   productId: 100003,
-  categoryIds: [],
   webhookSecret: "secret",
   timeoutMs: 800,
   syncHorizonDays: 30,
@@ -20,18 +19,6 @@ function response(body: unknown, status = 200) {
 }
 
 describe("Wellhub Booking API client", () => {
-  it("lists provider-owned category IDs", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      response({ results: [{ id: 7 }, { id: 8, name: "Pilates" }] })
-    );
-    const client = createWellhubBookingClient(config, { fetchImpl });
-    expect(await client.listCategoryIds()).toEqual(new Set([7, 8]));
-    expect(fetchImpl).toHaveBeenCalledWith(
-      "https://apitesting.partners.gympass.com/booking/v1/gyms/129/categories?locale=es_MX",
-      expect.objectContaining({ method: "GET" })
-    );
-  });
-
   it("creates and updates a class with Bearer auth", async () => {
     const fetchImpl = vi
       .fn()

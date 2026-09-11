@@ -32,7 +32,6 @@ export type WellhubBookingConfig =
       apiToken: string;
       gymId: string;
       productId: number;
-      categoryIds: number[];
       webhookSecret: string;
       timeoutMs: number;
       syncHorizonDays: number;
@@ -169,22 +168,6 @@ function readPositiveInteger(
   return value;
 }
 
-function readCategoryIds(env: NodeJS.ProcessEnv) {
-  const raw = env.WELLHUB_BOOKING_CATEGORY_IDS?.trim();
-  if (!raw) return [];
-
-  const values = raw.split(",").map((part) => part.trim());
-  if (values.length > 20 || values.some((value) => !/^\d{1,10}$/.test(value))) {
-    throw new WellhubConfigError("INVALID_WELLHUB_BOOKING_CATEGORY_IDS");
-  }
-
-  const ids = [...new Set(values.map(Number))];
-  if (ids.some((value) => !Number.isSafeInteger(value) || value <= 0)) {
-    throw new WellhubConfigError("INVALID_WELLHUB_BOOKING_CATEGORY_IDS");
-  }
-  return ids;
-}
-
 /**
  * Booking remains hard-disabled in production for this DEV-only phase. The
  * sandbox host/path allowlist also prevents an environment value from turning
@@ -211,7 +194,6 @@ export function getWellhubBookingConfig(
     productId: readPositiveInteger(env, "WELLHUB_BOOKING_PRODUCT_ID", {
       required: true,
     })!,
-    categoryIds: readCategoryIds(env),
     webhookSecret: required(env, "WELLHUB_WEBHOOK_SECRET"),
     timeoutMs: readTimeout(env),
     syncHorizonDays: readPositiveInteger(

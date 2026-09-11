@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 const SANDBOX_BASE = "https://apitesting.partners.gympass.com/booking/v1";
 
 function present(name) {
@@ -23,12 +25,16 @@ const checks = {
   webhookSecretPresent: present("WELLHUB_WEBHOOK_SECRET"),
   gymIdValid: positiveInteger("WELLHUB_GYM_ID"),
   productIdValid: positiveInteger("WELLHUB_BOOKING_PRODUCT_ID"),
+  categoriesNotRequired: true,
   horizonValid: (() => {
     const value = Number(
       process.env.WELLHUB_BOOKING_SYNC_HORIZON_DAYS?.trim() || "30"
     );
     return Number.isInteger(value) && value >= 1 && value <= 90;
   })(),
+  webhookRouteExists: existsSync(
+    "src/app/api/integrations/wellhub/webhook/route.ts"
+  ),
 };
 const ok = Object.values(checks).every(Boolean);
 console.log(JSON.stringify({ ok, externalRequestSent: false, checks }, null, 2));

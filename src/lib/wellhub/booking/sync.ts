@@ -62,7 +62,6 @@ function classPayload(
     visible: active,
     reference: cls.id,
     product_id: config.productId,
-    ...(config.categoryIds.length ? { categories: config.categoryIds } : {}),
   };
 }
 
@@ -108,18 +107,6 @@ function slotPayload(
     ],
     virtual: false,
   };
-}
-
-async function validateConfiguredCategories(
-  client: WellhubBookingClient,
-  categoryIds: number[]
-) {
-  if (!categoryIds.length) return;
-  const available = await client.listCategoryIds("es_MX");
-  const missing = categoryIds.filter((id) => !available.has(id));
-  if (missing.length) {
-    throw new WellhubBookingApiError("UNKNOWN_WELLHUB_CATEGORY_ID");
-  }
 }
 
 function sameInstant(value: string, expected: Date) {
@@ -170,7 +157,6 @@ export async function syncWellhubClass(
     });
     const activeBookingCount = aggregate._sum.quantity ?? 0;
 
-    await validateConfiguredCategories(client, config.categoryIds);
     const waveClassPayload = classPayload(cls, config);
 
     let wellhubClassId = cls.wellhubClassId;
