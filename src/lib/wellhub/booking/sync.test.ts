@@ -88,9 +88,25 @@ describe("Wellhub class/slot synchronization", () => {
     vi.restoreAllMocks();
   });
 
-  it("does not write sync metadata when production activation is forbidden", async () => {
+  it("does not access the database or provider while production Booking is disabled", async () => {
+    vi.stubEnv("APP_ENV", "production");
+    vi.stubEnv("WELLHUB_BOOKING_ENABLED", "false");
+
+    await expect(syncWellhubClassSafely("wave_class_1", {
+      db: subject.db as never,
+      client: subject.client,
+    })).resolves.toEqual({ kind: "skipped", reason: "DISABLED" });
+    expect(subject.db.$transaction).not.toHaveBeenCalled();
+    expect(subject.client.listClasses).not.toHaveBeenCalled();
+    expect(subject.client.createClass).not.toHaveBeenCalled();
+    expect(subject.client.createSlot).not.toHaveBeenCalled();
+  });
+
+  it("does not write sync metadata when the production API host is invalid", async () => {
     vi.stubEnv("APP_ENV", "production");
     vi.stubEnv("WELLHUB_BOOKING_ENABLED", "true");
+    vi.stubEnv("WELLHUB_GYM_ID", "129");
+    vi.stubEnv("WELLHUB_BOOKING_API_BASE_URL", config.apiBaseUrl);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const updateMany = vi.fn();
 
@@ -100,7 +116,7 @@ describe("Wellhub class/slot synchronization", () => {
       })
     ).resolves.toEqual({
       kind: "error",
-      code: "WELLHUB_BOOKING_PRODUCTION_FORBIDDEN",
+      code: "INVALID_WELLHUB_BOOKING_API_BASE_URL",
     });
     expect(updateMany).not.toHaveBeenCalled();
   });

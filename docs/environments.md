@@ -82,6 +82,25 @@ DIRECT_URL_UAT_BRANCH="postgresql://..."
 
 Do not commit these files. They are ignored by `.gitignore`.
 
+## Local Wellhub Production Readiness
+
+Use ignored `.env.prod.local` for local Wellhub production validation. Confirm
+`git check-ignore .env.prod.local` before adding credentials. This file is loaded
+explicitly by the read-only investigation; it is not an automatic Next.js env
+file. Keep it limited to Wellhub variables, without production database or
+payment credentials. Never print its values or commit it.
+
+Keep `WELLHUB_CHECKIN_ENABLED=false` and `WELLHUB_BOOKING_ENABLED=false`.
+Production API bases are `https://api.partners.gympass.com/access/v1` and
+`https://api.partners.gympass.com/booking/v1`. Obtain the production gym ID from
+Wellhub; never substitute the sandbox ID. Discover the unique Outdoor product
+with `GET /setup/v1/gyms/{gym_id}/products`, then validate Booking authentication
+using a GET/list endpoint. Do not call Access Control `/validate` during readiness.
+
+No class creation, booking creation, synchronization, migrations, or production
+activation is part of this investigation. Vercel Production values must be
+verified separately; a local file does not prove the deployed configuration.
+
 ## Manual Vercel Checklist
 
 1. Create Neon project/database wave-uat.

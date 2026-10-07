@@ -66,6 +66,22 @@ describe("Wellhub configuration", () => {
     ).toThrowError(WellhubConfigError);
   });
 
+  it.each(["APP_ENV", "VERCEL_ENV"])(
+    "accepts the official production Access Control host when %s is production",
+    (environmentKey) => {
+      expect(getWellhubConfig({
+        ...sandboxEnv,
+        [environmentKey]: "production",
+        WELLHUB_API_BASE_URL:
+          "https://api.partners.gympass.com/access/v1",
+      })).toMatchObject({
+        enabled: true,
+        apiBaseUrl: "https://api.partners.gympass.com/access/v1",
+        timeoutMs: 800,
+      });
+    }
+  );
+
   it("keeps the timeout below the documented webhook response window", () => {
     expect(() =>
       getWellhubConfig({
@@ -105,14 +121,66 @@ describe("Wellhub Booking configuration", () => {
     ).toMatchObject({ enabled: true, productId: 100003 });
   });
 
-  it("hard-rejects production activation", () => {
+  it.each(["APP_ENV", "VERCEL_ENV"])(
+    "accepts the official production host when %s is production",
+    (environmentKey) => {
+      expect(getWellhubBookingConfig({
+        ...bookingEnv,
+        [environmentKey]: "production",
+        WELLHUB_BOOKING_API_BASE_URL:
+          "https://api.partners.gympass.com/booking/v1/",
+      })).toMatchObject({
+        enabled: true,
+        apiBaseUrl: "https://api.partners.gympass.com/booking/v1",
+        timeoutMs: 800,
+      });
+    }
+  );
+
+  it("keeps production disabled with an absent or false feature flag", () => {
+    for (const flag of [undefined, "false"]) {
+      expect(getWellhubBookingConfig({
+        APP_ENV: "production",
+        WELLHUB_BOOKING_ENABLED: flag,
+      })).toEqual({ enabled: false });
+    }
+  });
+
+  it("rejects the sandbox host in production", () => {
     expect(() =>
       getWellhubBookingConfig({ ...bookingEnv, APP_ENV: "production" })
     ).toThrowError(
       expect.objectContaining<Partial<WellhubConfigError>>({
-        code: "WELLHUB_BOOKING_PRODUCTION_FORBIDDEN",
+        code: "INVALID_WELLHUB_BOOKING_API_BASE_URL",
       })
     );
+  });
+
+  it("rejects the production host outside production", () => {
+    expect(() => getWellhubBookingConfig({
+      ...bookingEnv,
+      WELLHUB_BOOKING_API_BASE_URL:
+        "https://api.partners.gympass.com/booking/v1",
+    })).toThrowError(WellhubConfigError);
+  });
+
+  it.each([
+    "http://api.partners.gympass.com/booking/v1",
+    "https://api.partners.gympass.com:8443/booking/v1",
+    "https://user:password@api.partners.gympass.com/booking/v1",
+    "https://api.partners.gympass.com/booking/v1?target=other",
+    "https://api.partners.gympass.com/booking/v1#other",
+    "https://api.partners.gympass.com/booking/v2",
+    "https://api.partners.gympass.com.attacker.example/booking/v1",
+    "https://attacker.example/booking/v1",
+  ])("rejects unsafe production Booking URL %s", (apiBaseUrl) => {
+    expect(() => getWellhubBookingConfig({
+      ...bookingEnv,
+      APP_ENV: "production",
+      WELLHUB_BOOKING_API_BASE_URL: apiBaseUrl,
+    })).toThrowError(expect.objectContaining({
+      code: "INVALID_WELLHUB_BOOKING_API_BASE_URL",
+    }));
   });
 
   it("rejects arbitrary Booking API hosts and invalid product IDs", () => {

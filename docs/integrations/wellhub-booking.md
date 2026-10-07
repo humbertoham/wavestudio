@@ -1,11 +1,18 @@
-# Wellhub Booking API integration (DEV only)
+# Wellhub Booking API integration
 
 ## Scope and architecture
 
-This integration is deliberately limited to `dev` and the official Wellhub
-sandbox. `getWellhubBookingConfig` refuses to enable Booking when `APP_ENV` or
-`VERCEL_ENV` is `production`, and its URL allowlist accepts only
-`https://apitesting.partners.gympass.com/booking/v1`.
+Booking is disabled by default. When `APP_ENV` or `VERCEL_ENV` is `production`,
+the URL allowlist accepts only `https://api.partners.gympass.com/booking/v1`.
+Other environments accept only `https://apitesting.partners.gympass.com/booking/v1`.
+HTTPS, the exact path, and the default port are required; credentials, query
+parameters, and fragments are rejected. The official Postman guide below names
+`https://api.partners.gympass.com` as the production Booking host.
+
+Production readiness does not authorize activation. Keep
+`WELLHUB_CHECKIN_ENABLED=false` and `WELLHUB_BOOKING_ENABLED=false` until the
+validated implementation and additive migrations have been selectively promoted
+and a controlled pilot has been explicitly authorized.
 
 ```text
 WAVE Class

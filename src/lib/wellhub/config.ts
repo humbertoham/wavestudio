@@ -99,9 +99,13 @@ function readBookingApiBaseUrl(env: NodeJS.ProcessEnv) {
   }
 
   const path = url.pathname.replace(/\/+$/, "") || "/";
+  const expectedHost = isProductionDeployment(env)
+    ? PRODUCTION_HOST
+    : SANDBOX_HOST;
   if (
     url.protocol !== "https:" ||
-    url.hostname !== SANDBOX_HOST ||
+    url.hostname !== expectedHost ||
+    url.port ||
     url.username ||
     url.password ||
     url.search ||
@@ -169,17 +173,13 @@ function readPositiveInteger(
 }
 
 /**
- * Booking remains hard-disabled in production for this DEV-only phase. The
- * sandbox host/path allowlist also prevents an environment value from turning
- * the client into an SSRF primitive.
+ * Booking is disabled by default. Match the official host to the deployment
+ * environment and restrict the path to prevent arbitrary API targets.
  */
 export function getWellhubBookingConfig(
   env: NodeJS.ProcessEnv = process.env
 ): WellhubBookingConfig {
   if (!readEnabled(env, "WELLHUB_BOOKING_ENABLED")) return { enabled: false };
-  if (isProductionDeployment(env)) {
-    throw new WellhubConfigError("WELLHUB_BOOKING_PRODUCTION_FORBIDDEN");
-  }
 
   const gymId = required(env, "WELLHUB_GYM_ID");
   if (!/^\d{1,20}$/.test(gymId)) {
