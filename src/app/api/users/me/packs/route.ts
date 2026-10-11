@@ -15,6 +15,7 @@ type PackPurchaseResponse = {
   id: string;
   createdAt: string;
   expiresAt: string;
+  type?: string; unlimitedMonth?: number | null; unlimitedYear?: number | null; revokedAt?: string | null;
   classesLeft: number;
   pausedDays: number;
   pausedUntil: string | null;
@@ -55,9 +56,10 @@ export async function GET(req: NextRequest) {
           id: true,
           createdAt: true,
           expiresAt: true,
-          classesLeft: true,
+          classesLeft: true, type: true, unlimitedMonth: true, unlimitedYear: true, nameSnapshot: true, priceSnapshot: true, revokedAt: true,
           pausedDays: true,
           pausedUntil: true,
+          ledgerEntries: { where: { delta: { gt: 0 } }, orderBy: { createdAt: "asc" }, take: 1, select: { delta: true } },
           pack: {
             select: {
               id: true,
@@ -65,6 +67,7 @@ export async function GET(req: NextRequest) {
               classes: true,
               price: true,
               classesLabel: true,
+              type: true,
             },
           },
         },
@@ -75,15 +78,15 @@ export async function GET(req: NextRequest) {
           id: purchase.id,
           createdAt: purchase.createdAt.toISOString(),
           expiresAt: purchase.expiresAt.toISOString(),
-          classesLeft: purchase.classesLeft,
+          classesLeft: purchase.classesLeft, type: purchase.type ?? "STANDARD", unlimitedMonth: purchase.unlimitedMonth, unlimitedYear: purchase.unlimitedYear, revokedAt: purchase.revokedAt?.toISOString() ?? null,
           pausedDays: purchase.pausedDays,
           pausedUntil: purchase.pausedUntil?.toISOString() ?? null,
           pack: {
             id: purchase.pack.id,
-            name: purchase.pack.name,
-            classes: purchase.pack.classes,
-            price: purchase.pack.price,
-            classesLabel: purchase.pack.classesLabel ?? null,
+            name: purchase.nameSnapshot ?? purchase.pack.name,
+            classes: purchase.type === "MONTHLY_UNLIMITED" ? 0 : purchase.ledgerEntries?.[0]?.delta ?? purchase.pack.classes,
+            price: purchase.priceSnapshot ?? purchase.pack.price,
+            classesLabel: purchase.type === "MONTHLY_UNLIMITED" ? "Una clase por día" : purchase.pack.type === "MONTHLY_UNLIMITED" ? null : purchase.pack.classesLabel ?? null,
           },
         })),
         page: pagination.page,

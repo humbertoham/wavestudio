@@ -76,6 +76,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
               data: {
                 classId,
                 guestName,
+                entitlementType: "ADMIN_GUEST",
                 quantity: 1,
                 status: "ACTIVE",
               },

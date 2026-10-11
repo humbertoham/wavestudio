@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdmin, requireClassManager } from "../../_utils";
+import { businessClassDay } from "@/lib/unlimited-calendar";
 import { Prisma } from "@prisma/client";
 import { executeClassDeletion } from "@/lib/class-deletion-response";
 import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
@@ -18,6 +19,14 @@ type Ctx = { params: Promise<{ id: string }> };
 function j(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
+
+async function hasUnlimitedDateConflict(classId: string, date: unknown) {
+  if (!(date instanceof Date)) return false;
+  const day = businessClassDay(date).serviceDate;
+  return Boolean(await prisma.unlimitedUsage.findFirst({ where: { booking: { classId }, releasedAt: null, serviceDate: { not: day } }, select: { id: true } }));
+}
+function dateConflict() { return j(409, { code: "CLASS_HAS_UNLIMITED_USAGE", error: "CLASS_HAS_UNLIMITED_USAGE", message: "Esta clase tiene usos ilimitados registrados y no puede cambiar de día. Crea otra sesión para la nueva fecha." }); }
+function isDateConstraint(error: unknown) { return /CLASS_HAS_UNLIMITED_USAGE/.test(String((error as { meta?: { database_error?: string }; message?: string })?.meta?.database_error ?? (error as { message?: string })?.message)); }
 
 export async function PUT(req: NextRequest, ctx: Ctx) {
   const auth = await requireAdmin(req);
@@ -62,11 +71,14 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     return j(400, { error: "CAPACITY_TOO_SMALL", usedSpots });
   }
 
-  const item = await prisma.class.update({
+  if (await hasUnlimitedDateConflict(id, data.date)) return dateConflict();
+  let item;
+  try { item = await prisma.class.update({
     where: { id },
     data,
   });
 
+  } catch (error) { if (isDateConstraint(error)) return dateConflict(); throw error; }
   await syncWellhubClassSafely(id);
 
   return NextResponse.json(withoutWellhubClassIdentifiers(item));
@@ -171,7 +183,9 @@ if (time) {
 
 
 
-  const updated = await prisma.class.update({
+  if (await hasUnlimitedDateConflict(id, data.date)) return dateConflict();
+  let updated;
+  try { updated = await prisma.class.update({
   where: { id },
   data,
   include: {
@@ -180,9 +194,9 @@ if (time) {
   },
 });
 
+  } catch (error) { if (isDateConstraint(error)) return dateConflict(); throw error; }
   await syncWellhubClassSafely(id);
 
 
   return NextResponse.json(withoutWellhubClassIdentifiers(updated));
 }
-

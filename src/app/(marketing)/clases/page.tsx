@@ -9,10 +9,11 @@ import {
   ClassesAccountSummary,
   shouldLoadClassesPrivateData,
 } from "@/components/booking/ClassesAccountSummary";
+import { businessClassDay, monthLabel } from "@/lib/unlimited-calendar";
 import { useSession } from "@/lib/useSession";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
-const MX_TZ = "America/Mexico_City";
+const MX_TZ = "America/Monterrey";
 const MX_LOCALE: Intl.LocalesArgument = "es-MX";
 const BOOKING_BLOCKED_MESSAGE =
   "Hola, tu cuenta está temporalmente bloqueada para nuevas reservas por una cancelación tardía o falta a clase. Nuestro equipo se pondrá en contacto contigo para realizar el pago de $100 MXN.";
@@ -266,11 +267,21 @@ function useIsomorphicLayoutEffect(effect: () => void, deps: unknown[]) {
   return useEff(effect, deps);
 }
 
+type UnlimitedSummary = { purchases: { id: string; name: string | null; month: number; year: number; available: boolean }[]; consumedDates: string[] };
+const emptyUnlimited: UnlimitedSummary = { purchases: [], consumedDates: [] };
+function eligibleUnlimited(summary: UnlimitedSummary, session: Session | null) {
+  if (!session) return null;
+  const day = businessClassDay(new Date(session.startsAtISO));
+  if (summary.consumedDates.includes(day.key)) return null;
+  return summary.purchases.find(p => p.available && p.month === day.month && p.year === day.year) ?? null;
+}
+
 type ReserveMenuProps = {
   open: boolean;
   onClose: () => void;
   session: Session | null;
   tokens: number;
+  unlimited: UnlimitedSummary;
   affiliation: string | null;
   onBooked: (result: BookingMutationResult) => void;
   onBlocked: () => void;
@@ -281,6 +292,7 @@ function ReserveMenu({
   onClose,
   session,
   tokens,
+  unlimited,
   onBooked,
   onBlocked,
   affiliation,
@@ -295,7 +307,8 @@ function ReserveMenu({
 
   const maxBySpots = session?.spots ?? 0;
   const creditCost = Math.max(1, session?.creditCost ?? 1);
-  const maxByCredits = Math.floor(tokens / creditCost);
+  const unlimitedForClass = eligibleUnlimited(unlimited, session);
+  const maxByCredits = Math.floor(tokens / creditCost) + (unlimitedForClass ? 1 : unlimited.purchases.length && tokens < creditCost ? 1 : 0);
   const baseMax = Math.max(0, Math.min(maxBySpots, maxByCredits));
   const max = isCorporate ? Math.min(1, baseMax) : baseMax;
 
@@ -379,6 +392,7 @@ function ReserveMenu({
         {session && (
           <>
             <div className="mt-3 space-y-1">
+              {unlimitedForClass && <div className="text-sm font-semibold">{unlimitedForClass.name ?? "Ilimitado mensual"} - un lugar incluido</div>}
               <div className="font-semibold">{session.title}</div>
               <div className="text-sm text-muted-foreground">
                 {session.time} - {session.duration} - {session.coach}
@@ -437,7 +451,7 @@ function ReserveMenu({
                   Max. permitido por disponibilidad y saldo: <b>{max}</b>
                 </div>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Total a debitar: <b>{qty * creditCost}</b>
+                  Total a debitar: <b>{Math.max(0, qty - (unlimitedForClass ? 1 : 0)) * creditCost}</b> creditos
                 </div>
               </div>
 
@@ -751,6 +765,7 @@ export default function ClassesPage() {
   const [days, setDays] = useState<Day[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tokens, setTokens] = useState(0);
+  const [unlimited, setUnlimited] = useState<UnlimitedSummary>(emptyUnlimited);
   const [hasLoadedPrivateData, setHasLoadedPrivateData] = useState(false);
   const [challenge, setChallenge] = useState({ active: false, points: 0 });
   const [bookingBlocked, setBookingBlocked] = useState(false);
@@ -825,7 +840,7 @@ export default function ClassesPage() {
       return;
     }
 
-    if (tokens < session.creditCost) {
+    if (tokens < session.creditCost && unlimited.purchases.length === 0) {
       setReserveSession(session);
       openNoCreditsModal("reserve", session.creditCost);
       return;
@@ -846,7 +861,7 @@ export default function ClassesPage() {
       return;
     }
 
-    if (tokens < session.creditCost) {
+    if (tokens < session.creditCost && unlimited.purchases.length === 0) {
       openNoCreditsModal("waitlist", session.creditCost);
       return;
     }
@@ -865,7 +880,7 @@ export default function ClassesPage() {
       return false;
     }
 
-    if (tokens < session.creditCost) {
+    if (tokens < session.creditCost && unlimited.purchases.length === 0) {
       openNoCreditsModal("waitlist", session.creditCost);
       return false;
     }
@@ -889,7 +904,7 @@ export default function ClassesPage() {
           return false;
         }
 
-        if (res.status === 402) {
+        if (res.status === 402 && unlimited.purchases.length === 0) {
           openNoCreditsModal("waitlist", session.creditCost);
           return false;
         }
@@ -1109,6 +1124,7 @@ export default function ClassesPage() {
     if (!shouldLoadPrivateData) {
       setHasLoadedPrivateData(false);
       setTokens(0);
+      setUnlimited(emptyUnlimited);
       setAffiliation(null);
       setChallenge({ active: false, points: 0 });
       setBookingBlocked(false);
@@ -1139,6 +1155,12 @@ export default function ClassesPage() {
             : "NONE"
         );
         setTokens(typeof data.tokens === "number" ? data.tokens : 0);
+        const unlimitedResponse = await fetch("/api/users/me/unlimited", { cache: "no-store", credentials: "include" });
+        if (unlimitedResponse.ok) {
+          const summary = await unlimitedResponse.json();
+          if (!mounted) return;
+          setUnlimited(summary);
+        } else { setUnlimited(emptyUnlimited); }
         setChallenge({
           active: data.challenge?.active === true,
           points:
@@ -1166,6 +1188,7 @@ export default function ClassesPage() {
 
   function handleBooked(result: BookingMutationResult) {
     setTokens((current) => Math.max(0, current - result.debitedCredits));
+    setReloadTick(current => current + 1);
 
     if (!reserveSession) return;
 
@@ -1216,6 +1239,7 @@ export default function ClassesPage() {
             tokens={tokens}
             challenge={challenge}
           />
+          {shouldLoadPrivateData && hasLoadedPrivateData && unlimited.purchases.filter(p => p.available).map(p => <p key={p.id} className="mt-2 text-sm font-semibold">{p.name ?? "Ilimitado mensual"} - {monthLabel(p.year, p.month)} - una clase por dia</p>)}
         </motion.div>
 
         {error && (
@@ -1366,6 +1390,7 @@ export default function ClassesPage() {
         open={reserveOpen}
         onClose={() => setReserveOpen(false)}
         session={reserveSession}
+        unlimited={unlimited}
         tokens={tokens}
         affiliation={affiliation}
         onBooked={handleBooked}

@@ -1,4 +1,6 @@
 // src/app/api/checkout-links/route.ts
+import { assertNoMonthlyDuplicate } from "@/lib/package-checkout";
+import { packageSnapshot } from "@/lib/monthly-unlimited";
 import { NextResponse } from "next/server";
 import { getAuthFromRequest } from "@/lib/auth";
 import { getOptionalServerEnv } from "@/lib/env";
@@ -19,10 +21,7 @@ function isProdAccessToken(token: string | undefined): token is string {
   return !!token && /^APP_USR-/.test(token);
 }
 
-function redactToken(token?: string) {
-  if (!token) return null;
-  return token.slice(0, 10) + "...redacted";
-}
+
 
 function getBaseUrl(req: Request) {
   const env = getOptionalServerEnv("APP_BASE_URL");
@@ -66,7 +65,7 @@ export async function POST(req: Request) {
       where: { id: packId },
       select: {
         id: true,
-        name: true,
+        name: true, type: true, unlimitedMonth: true, unlimitedYear: true,
         classes: true,
         price: true,
         validityDays: true,
@@ -115,7 +114,6 @@ export async function POST(req: Request) {
         error: "NON_PROD_TOKEN",
         detail: "El access token no es de producción (debe comenzar con APP_USR-).",
         hint: "Coloca el access token de producción en MP_ACCESS_TOKEN (no la public key).",
-        observed: redactToken(token),
       });
     }
 
@@ -126,10 +124,14 @@ export async function POST(req: Request) {
     };
 
     // ── Registros locales
-    const link = await prisma.checkoutLink.create({
+    const snapshot = packageSnapshot(pack);
+    const { link, payment } = await prisma.$transaction(async tx => {
+      await assertNoMonthlyDuplicate(tx, auth.sub, snapshot);
+    const link = await tx.checkoutLink.create({
       data: {
         code: crypto.randomUUID().slice(0, 8),
         status: "CREATED",
+        expiresAt: snapshot.type === "MONTHLY_UNLIMITED" ? new Date(Date.now() + 30 * 60 * 1000) : undefined,
         packId,
         userId: auth.sub,
         successUrl: backUrls.success,
@@ -138,15 +140,19 @@ export async function POST(req: Request) {
       },
     });
 
-    const payment = await prisma.payment.create({
+    const payment = await tx.payment.create({
       data: {
         provider: "MERCADOPAGO",
         status: "PENDING",
         amount: pack.price,
         currency: "MXN",
+        packSnapshot: snapshot,
         userId: auth.sub,
         checkoutLink: { connect: { id: link.id } },
       },
+    });
+
+      return { link, payment };
     });
 
     // ── Mercado Pago
@@ -189,7 +195,6 @@ export async function POST(req: Request) {
 
     // Log inocuo
     console.log("MP Preference.create →", {
-      token: redactToken(token),
       baseUrl,
       back_urls: prefBody.back_urls,
       notification_url: prefBody.notification_url,
@@ -200,6 +205,10 @@ export async function POST(req: Request) {
     try {
       pref = await preference.create({ body: prefBody });
     } catch (mpErr: any) {
+      if (snapshot.type === "MONTHLY_UNLIMITED") {
+        await prisma.payment.update({ where: { id: payment.id }, data: { status: "CANCELED" } });
+        await prisma.checkoutLink.update({ where: { id: link.id }, data: { status: "CANCELED" } });
+      }
       const detail = {
         message: mpErr?.message,
         status: mpErr?.status,
@@ -217,10 +226,9 @@ export async function POST(req: Request) {
       const error =
         isInvalidToken ? "MP_INVALID_ACCESS_TOKEN" : "MP_PREFERENCE_CREATE_FAILED";
 
-      console.error("MP preference.create error:", detail);
+      console.error("MP preference.create failed", { status: mpErr?.status });
       return j(code, {
         error,
-        detail,
         sent: { back_urls: prefBody.back_urls, external_reference: !!prefBody.external_reference },
         hints: isInvalidToken
           ? [
@@ -300,7 +308,8 @@ export async function POST(req: Request) {
 
     return j(200, { checkoutUrl: initPoint!, code: link.code });
   } catch (e: any) {
-    console.error("CHECKOUT_LINKS_POST_FATAL:", e);
-    return j(500, { error: "INTERNAL_ERROR", detail: e?.message ?? String(e) });
+    if (e?.code === "UNLIMITED_MONTH_ALREADY_PURCHASED" || e?.code === "UNLIMITED_NOT_ACTIVE") return j(409, { error: e.code, code: e.code, message: e.code === "UNLIMITED_NOT_ACTIVE" ? "El mes de este paquete ya finalizo." : "Ya tienes un ilimitado para este mes o una compra en proceso. Revisa Mis clases o termina tu pago pendiente." });
+    console.error("CHECKOUT_LINKS_POST_FATAL");
+    return j(500, { error: "INTERNAL_ERROR" });
   }
 }

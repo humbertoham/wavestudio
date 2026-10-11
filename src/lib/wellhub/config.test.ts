@@ -141,6 +141,7 @@ describe("Wellhub Booking configuration", () => {
     for (const flag of [undefined, "false"]) {
       expect(getWellhubBookingConfig({
         APP_ENV: "production",
+        NODE_ENV: "test",
         WELLHUB_BOOKING_ENABLED: flag,
       })).toEqual({ enabled: false });
     }

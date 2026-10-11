@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { BookingStatus, Prisma } from "@prisma/client";
 
 import { getAuthFromRequest } from "@/lib/auth";
+import { getUnlimitedEligibility } from "@/lib/monthly-unlimited";
 import { getAvailableBookingCredits } from "@/lib/class-booking";
 import { prisma } from "@/lib/prisma";
 
@@ -37,6 +38,8 @@ function isRetryableTransactionError(error: unknown) {
 }
 
 function errorResponse(error: unknown) {
+  const unlimited = error as { code?: string; message?: string };
+  if (unlimited?.code?.startsWith("UNLIMITED_")) return j(402, { error: unlimited.code, code: unlimited.code, message: unlimited.message });
   if (
     typeof error === "object" &&
     error !== null &&
@@ -192,7 +195,9 @@ export async function POST(req: NextRequest, ctx: Ctx) {
               auth.sub
             );
 
-            if (availableCredits < requiredCredits) {
+            const unlimited = await getUnlimitedEligibility(tx, auth.sub, klass.date);
+            if (!unlimited.purchase && availableCredits < requiredCredits) {
+              if (unlimited.reason) throw { code: unlimited.reason, message: unlimited.message };
               fail("NO_CREDITS_AVAILABLE");
             }
 

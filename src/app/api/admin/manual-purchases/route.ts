@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getPackageExpirationAt11Pm } from "@/lib/package-expiration";
+import { grantPackagePurchase, packageSnapshot } from "@/lib/monthly-unlimited";
+import { assertNoMonthlyDuplicate } from "@/lib/package-checkout";
 import { prisma } from "@/lib/prisma";
 import { getAuth } from "@/lib/auth";
 
@@ -34,10 +35,10 @@ export async function POST(req: Request) {
     if (!pack) return j(404, { error: "Pack not found" });
 
     // Calcula expiración (hoy + validityDays)
-    const now = new Date();
-    const expiresAt = getPackageExpirationAt11Pm(now, pack.validityDays);
 
+    const snapshot = packageSnapshot(pack);
     const result = await prisma.$transaction(async (tx) => {
+      await assertNoMonthlyDuplicate(tx, user.id, snapshot);
       // 1) Payment APPROVED (proveedor MERCADOPAGO para mantener el enum)
       const payment = await tx.payment.create({
         data: {
@@ -45,6 +46,7 @@ export async function POST(req: Request) {
           status: "APPROVED",
           amount: pack.price,
           currency: "MXN",
+          packSnapshot: snapshot,
           userId: user.id,
           // Campos MP en null; tag para identificar que fue venta manual
           mpExternalRef: "ADMIN_MANUAL",
@@ -52,26 +54,7 @@ export async function POST(req: Request) {
         }
       });
 
-      // 2) PackPurchase
-      const purchase = await tx.packPurchase.create({
-        data: {
-          userId: user.id,
-          packId: pack.id,
-          classesLeft: pack.classes,
-          expiresAt,
-          paymentId: payment.id, // 1–1
-        }
-      });
-
-      // 3) TokenLedger (+classes)
-      await tx.tokenLedger.create({
-        data: {
-          userId: user.id,
-          packPurchaseId: purchase.id,
-          delta: pack.classes,
-          reason: "PURCHASE_CREDIT",
-        }
-      });
+      const purchase = await grantPackagePurchase(tx, { userId: user.id, packId: pack.id, paymentId: payment.id, snapshot });
 
       return { payment, purchase };
     });
@@ -80,11 +63,12 @@ export async function POST(req: Request) {
       ok: true,
       paymentId: result.payment.id,
       packPurchaseId: result.purchase.id,
-      expiresAt,
-      classesLeft: pack.classes,
+      expiresAt: result.purchase.expiresAt,
+      classesLeft: result.purchase.classesLeft,
       amount: pack.price,
     });
   } catch (err: any) {
+    if (err?.code?.startsWith("UNLIMITED_")) return j(409, { error: err.code });
     console.error("manual-purchase error:", err);
     return j(500, { error: "INTERNAL_ERROR" });
   }

@@ -23,6 +23,7 @@ describe("GET /api/packs", () => {
     mocks.prisma.pack.findMany.mockResolvedValue([
       {
         id: "public_pack",
+        type: "STANDARD",
         name: "Public Pack",
         classes: 4,
         price: 500,
@@ -39,6 +40,7 @@ describe("GET /api/packs", () => {
     await expect(res.json()).resolves.toEqual([
       {
         id: "public_pack",
+        type: "STANDARD",
         name: "Public Pack",
         classesLabel: "4 clases",
         classesCount: 4,

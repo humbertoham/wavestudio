@@ -341,6 +341,7 @@ async function createRequestedBooking(
               quantity: 1,
               status: "ACTIVE",
               source: "WELLHUB",
+              entitlementType: "WELLHUB",
               packPurchaseId: null,
               wellhubBookingNumber: event.bookingNumber,
               wellhubUserId: event.externalUserId,

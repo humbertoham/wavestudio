@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdmin } from "../../_utils";
-import { z } from "zod";
-import { Prisma, PackHighlight } from "@prisma/client";
+import { packConfigurationSchema } from "@/lib/package-config";
+import { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
 
@@ -9,63 +9,7 @@ export const runtime = "nodejs";
    Helpers
 ------------------------- */
 
-function normalizeDescription(input: unknown): string[] | undefined {
-  if (input == null) return undefined;
-  if (Array.isArray(input))
-    return input
-      .map((v) => (typeof v === "string" ? v.trim() : ""))
-      .filter(Boolean);
-  if (typeof input === "string")
-    return input
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  return undefined;
-}
-
-// acepta "popular" | "best" (minúsculas) o enum; convierte a enum
-const highlightSchema = z.preprocess(
-  (v) => (typeof v === "string" ? v.toUpperCase() : v),
-  z.nativeEnum(PackHighlight).nullable().optional()
-);
-
-/* -------------------------
-   Zod schema (UPDATE)
-------------------------- */
-
-const packUpdateSchema = z
-  .object({
-    name: z.string().min(1).optional(),
-
-    classes: z.coerce.number().int().positive().optional(),
-    classesCount: z.coerce.number().int().positive().optional(),
-
-    price: z
-      .coerce
-      .number()
-      .nonnegative("price inválido")
-      .transform((v) => Math.round(v))
-      .optional(),
-
-    validityDays: z.coerce.number().int().positive().optional(),
-
-    isActive: z.coerce.boolean().optional(),
-
-    // ✅ NUEVO
-    oncePerUser: z.coerce.boolean().optional(),
-
-    classesLabel: z.string().trim().min(1).nullable().optional(),
-    highlight: highlightSchema,
-    description: z.any().optional(),
-  })
-  .transform((v) => ({
-    ...v,
-    classes:
-      typeof v.classes === "number"
-        ? v.classes
-        : (v.classesCount as number | undefined),
-    description: normalizeDescription(v.description),
-  }));
+const packUpdateSchema = packConfigurationSchema;
 
 /* -------------------------
    Context (Next App Router)
@@ -85,7 +29,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const { id } = await ctx.params;
 
     const raw = await req.json();
-    const parsed = packUpdateSchema.safeParse(raw);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return NextResponse.json({ error: "INVALID_BODY" }, { status: 400 });
+    const existing = await prisma.pack.findUnique({ where: { id } });
+    if (!existing) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
+    const parsed = packUpdateSchema.safeParse({ ...existing, ...raw, description: raw.description, classes: raw.classes ?? raw.classesCount ?? existing.classes });
 
     if (!parsed.success) {
       const msg = parsed.error.issues
@@ -97,14 +44,15 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       );
     }
 
-    // elimina classesCount (no existe en Prisma)
-    const { classesCount: _drop, ...data } =
-      parsed.data as Record<string, unknown>;
-
-    // limpia undefined
+    // Validate the complete configuration, but preserve PATCH's partial-write
+    // semantics so unrelated fields and legacy JSON descriptions stay intact.
+    const data = parsed.data as Record<string, unknown>;
+    const requested = new Set(Object.keys(raw));
+    if (requested.has("classesCount")) requested.add("classes");
+    if (requested.has("type")) for (const key of ["classes", "validityDays", "unlimitedMonth", "unlimitedYear"]) requested.add(key);
     const clean: Record<string, any> = {};
     for (const [k, v] of Object.entries(data)) {
-      if (v !== undefined) clean[k] = v;
+      if (requested.has(k) && v !== undefined && !(k === "description" && raw.description == null)) clean[k] = v;
     }
 
     const updated = await prisma.pack.update({

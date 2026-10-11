@@ -37,7 +37,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       where: { id: purchaseId },
       select: {
         id: true,
-        userId: true,
+        userId: true, type: true,
         expiresAt: true,
         pausedDays: true,
         pausedUntil: true,
@@ -48,6 +48,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return null;
     }
 
+    if (purchase.type === "MONTHLY_UNLIMITED") return { code: "UNLIMITED_CANNOT_PAUSE" } as const;
     const now = new Date();
     const pauseBase =
       purchase.pausedUntil && purchase.pausedUntil > now
@@ -76,6 +77,8 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       message: "Paquete no encontrado para este usuario",
     });
   }
+
+  if ("code" in result) return json(409, { ok: false, code: result.code, message: "El ilimitado corresponde a un mes calendario y no admite pausas ni extensiones." });
 
   return json(200, {
     ok: true,

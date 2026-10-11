@@ -149,7 +149,7 @@ export async function GET(req: NextRequest) {
       select: {
         id: true,
         createdAt: true,
-        classesLeft: true,
+        classesLeft: true, type: true, unlimitedMonth: true, unlimitedYear: true, nameSnapshot: true, priceSnapshot: true, revokedAt: true,
         expiresAt: true,
         user: {
           select: {
@@ -195,15 +195,15 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     items: rows.map((row) => ({
-      id: row.id,
+      id: row.id, type: row.type, unlimitedMonth: row.unlimitedMonth, unlimitedYear: row.unlimitedYear, revokedAt: row.revokedAt,
       createdAt: row.createdAt,
       expiresAt: row.expiresAt,
       classesLeft: row.classesLeft,
       classesPurchased: row.ledgerEntries[0]?.delta ?? row.pack.classes,
       creditReason: row.ledgerEntries[0]?.reason ?? null,
       user: row.user,
-      pack: row.pack,
-      amountPaid: row.payment?.amount ?? row.pack.price,
+      pack: { ...row.pack, name: row.nameSnapshot ?? row.pack.name, price: row.priceSnapshot ?? row.pack.price },
+      amountPaid: row.payment?.amount ?? row.priceSnapshot ?? row.pack.price,
       paymentStatus: row.payment?.status ?? null,
       paymentProvider: row.payment?.provider ?? null,
       paymentReference:

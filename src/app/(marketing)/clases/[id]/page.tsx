@@ -55,6 +55,7 @@ type ClassApi = {
     quantity: number;
     status?: "ACTIVE" | "CANCELED";
     source?: "WAVE" | "WELLHUB";
+    entitlementType?: string;
     attended?: boolean;
     canceledAt?: string | null;
     isNewUser?: boolean;
@@ -92,6 +93,7 @@ type AttendeeRow = {
   affiliation: Affiliation;
   isNewUser: boolean;
   source: "WAVE" | "WELLHUB";
+  entitlementType?: string;
 };
 
 type CanceledRow = {
@@ -102,6 +104,7 @@ type CanceledRow = {
   affiliation: Affiliation;
   canceledAt?: string | null;
   source: "WAVE" | "WELLHUB";
+  entitlementType?: string;
 };
 
 type WaitlistRow = {
@@ -516,6 +519,7 @@ export default function ClassAdminPage() {
         quantity: booking.quantity ?? 1,
         affiliation: booking.user?.affiliation ?? "NONE",
         source: booking.source ?? "WAVE",
+        entitlementType: booking.entitlementType,
         isNewUser: !booking.user
           ? false
           : !!(booking.isNewUser ?? booking.isFirstBooking),
@@ -535,6 +539,7 @@ export default function ClassAdminPage() {
         affiliation: booking.user?.affiliation ?? "NONE",
         canceledAt: booking.canceledAt ?? null,
         source: booking.source ?? "WAVE",
+        entitlementType: booking.entitlementType,
       }));
   }, [cls]);
 
@@ -933,6 +938,7 @@ export default function ClassAdminPage() {
                           Invitado
                         </span>
                       )}
+                      {(attendee.entitlementType === "MONTHLY_UNLIMITED" || attendee.entitlementType === "MIXED") && <span className="rounded bg-primary/10 px-2 py-0.5 text-xs">{attendee.entitlementType === "MIXED" ? "Ilimitado + creditos" : "Ilimitado mensual"}</span>}
                       {attendee.source === "WELLHUB" && (
                         <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800">
                           Wellhub

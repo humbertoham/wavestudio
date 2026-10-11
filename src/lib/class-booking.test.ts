@@ -74,7 +74,7 @@ describe("createBookingWithCreditCheck", () => {
         classId: "class_1",
         userId: "user_1",
       })
-    ).resolves.toEqual({ id: "booking_1" });
+    ).resolves.toEqual({ id: "booking_1", debitedCredits: 1, creditCost: 1, entitlementType: "CREDITS" });
 
     expect(tx.class.findUnique).toHaveBeenCalledWith({
       where: { id: "class_1" },
@@ -91,6 +91,7 @@ describe("createBookingWithCreditCheck", () => {
         classId: "class_1",
         quantity: 1,
         status: BookingStatus.ACTIVE,
+        entitlementType: "CREDITS",
         packPurchaseId: "purchase_1",
       },
       select: { id: true },

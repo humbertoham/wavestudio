@@ -85,7 +85,9 @@ describe("PATCH /api/bookings/[id]/cancel", () => {
     );
 
     const tx = {
+      unlimitedUsage: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       booking: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         update: vi.fn().mockResolvedValue({
           id: "booking_1",
           status: "CANCELED",
@@ -154,7 +156,9 @@ describe("PATCH /api/bookings/[id]/cancel", () => {
       .mockResolvedValueOnce({ id: "promoted_booking" });
 
     const tx = {
+      unlimitedUsage: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
       booking: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         update: vi.fn().mockResolvedValue({
           id: "booking_1",
           status: "CANCELED",

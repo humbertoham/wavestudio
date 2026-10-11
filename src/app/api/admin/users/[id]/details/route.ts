@@ -164,7 +164,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     tokenBalance,
 
     purchases: purchases.map((p) => ({
-      id: p.id,
+      id: p.id, type: p.type, unlimitedMonth: p.unlimitedMonth, unlimitedYear: p.unlimitedYear, revokedAt: p.revokedAt,
       createdAt: p.createdAt,
       expiresAt: p.expiresAt,
       classesLeft: p.classesLeft,
@@ -172,12 +172,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       pausedUntil: p.pausedUntil,
       isPaused: !!p.pausedUntil && p.pausedUntil > now,
       isExpired: p.expiresAt < now,
-      pack: p.pack,
+      pack: { ...p.pack, name: p.nameSnapshot ?? p.pack.name, price: p.priceSnapshot ?? p.pack.price },
       payment: p.payment ?? null,
     })),
 
     bookings: bookings.map((b) => ({
-      id: b.id,
+      id: b.id, entitlementType: b.entitlementType,
       status: b.status,
       quantity: b.quantity,
       createdAt: b.createdAt,

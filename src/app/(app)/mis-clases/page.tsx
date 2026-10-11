@@ -21,10 +21,11 @@ import {
   type PaginatedResponse,
   updatePaginationSearchParams,
 } from "@/lib/my-classes-pagination";
+import { monthlyPeriod, monthLabel } from "@/lib/unlimited-calendar";
 import { useSession } from "@/lib/useSession";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
-const MX_TZ = "America/Mexico_City";
+const MX_TZ = "America/Monterrey";
 const CANCEL_WINDOW_MIN = 240;
 
 type BookingStatus = "ACTIVE" | "CANCELED";
@@ -50,6 +51,7 @@ type ClassLite = {
 type Booking = {
   id: string;
   status: BookingStatus;
+  entitlementType?: string;
   createdAt: string;
   canceledAt?: string | null;
   quantity: number;
@@ -65,6 +67,7 @@ type PackLite = {
 };
 
 type PackPurchase = {
+  type?: string; unlimitedMonth?: number | null; unlimitedYear?: number | null; revokedAt?: string | null;
   id: string;
   createdAt: string;
   expiresAt: string;
@@ -528,7 +531,10 @@ function SectionHeading({
 }
 
 function PackCard({ purchase, idx }: { purchase: PackPurchase; idx: number }) {
-  const expired = new Date(purchase.expiresAt).getTime() < Date.now();
+  const expired = new Date(purchase.expiresAt).getTime() <= Date.now();
+  const unlimited = purchase.type === "MONTHLY_UNLIMITED";
+  const period = unlimited ? monthlyPeriod(purchase.unlimitedYear!, purchase.unlimitedMonth!) : null;
+  const status = purchase.revokedAt ? "Revocado" : expired ? (unlimited ? "Finalizado" : "Expirado") : period && period.startsAt.getTime() > Date.now() ? "Proximamente" : "Vigente";
 
   return (
     <motion.div
@@ -546,15 +552,12 @@ function PackCard({ purchase, idx }: { purchase: PackPurchase; idx: number }) {
             {purchase.pack.name}
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            {purchase.pack.classesLabel ?? `${purchase.pack.classes} clases`} ·{" "}
-            <span className="font-medium">
-              {purchase.classesLeft} restantes
-            </span>
+            {unlimited ? "Una clase por dia - un lugar por clase" : <>{purchase.pack.classesLabel ?? <>{purchase.pack.classes} clases</>} - <span className="font-medium">{purchase.classesLeft} clases disponibles</span></>}
           </p>
           <div className="mt-2 text-xs text-muted-foreground">
             Comprado: {formatDate(purchase.createdAt)}
             <br />
-            Expira: {formatDate(purchase.expiresAt)}
+            {unlimited ? <>Clases de {monthLabel(purchase.unlimitedYear!, purchase.unlimitedMonth!)}<br />Del {formatDate(period!.startsAt.toISOString())} al {formatDate(new Date(period!.expiresAt.getTime() - 1).toISOString())}</> : <>Expira: {formatDate(purchase.expiresAt)}</>}
           </div>
         </div>
 
@@ -563,7 +566,7 @@ function PackCard({ purchase, idx }: { purchase: PackPurchase; idx: number }) {
             expired ? "text-red-600" : "text-emerald-600"
           }`}
         >
-          {expired ? "Expirado" : "Activo"}
+          {status}
         </span>
       </div>
     </motion.div>
@@ -591,7 +594,7 @@ function BookingCard({
   const canceled = booking.status === "CANCELED";
   const spots = booking.quantity ?? 1;
   const cost = classItem.creditCost ?? 1;
-  const refundTokens = spots * cost;
+  const refundTokens = (spots - (booking.entitlementType === "MONTHLY_UNLIMITED" || booking.entitlementType === "MIXED" ? 1 : 0)) * cost;
   const minutesUntilStart = Math.floor(
     (new Date(classItem.date).getTime() - Date.now()) / 60_000
   );
@@ -620,6 +623,7 @@ function BookingCard({
             </span>
           </h3>
 
+          <p className="mt-1 text-sm font-semibold">{booking.entitlementType === "MONTHLY_UNLIMITED" ? "Ilimitado mensual" : booking.entitlementType === "MIXED" ? "Un lugar ilimitado + lugares con creditos" : booking.entitlementType === "WELLHUB" ? "Wellhub" : booking.entitlementType === "ADMIN_GUEST" ? "Invitado WAVE" : "Creditos de clases"}</p>
           <div className="mt-1 flex flex-wrap gap-4 text-sm text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <FiCalendar /> {formatDate(classItem.date)}
@@ -657,7 +661,7 @@ function BookingCard({
                   ? hasPenalty
                     ? "Cancelar ($100 penalización)"
                     : "Cancelar (sin reembolso)"
-                  : `Cancelar (${refundTokens})`}
+                  : refundTokens === 0 ? "Cancelar ilimitado" : `Cancelar (${refundTokens})`}
             </button>
           ) : null}
         </div>

@@ -1,6 +1,9 @@
 // /src/app/api/bookings/route.ts
-import { BookingStatus, Prisma, TokenReason } from "@prisma/client";
+import { BookingStatus, Prisma } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
+
+import { createBookingWithCreditCheck } from "@/lib/class-booking";
+import { getUnlimitedEligibility, isBookingTransactionConflict, unlimitedErrorMessages } from "@/lib/monthly-unlimited";
 
 import { getAuthFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -168,7 +171,8 @@ export async function POST(req: NextRequest) {
     }
 
     const perSeatCost = Math.max(1, klass.creditCost ?? 1);
-    const neededTokens = perSeatCost * quantity;
+    const eligibility = await getUnlimitedEligibility(prisma, auth.sub, klass.date);
+    const neededTokens = perSeatCost * (quantity - (eligibility.purchase ? 1 : 0));
 
     const [alreadyBookedSpots, tokenBalance] = await Promise.all([
       getBookedSpots(classId),
@@ -191,6 +195,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (tokenBalance < neededTokens) {
+      if (eligibility.purchase && quantity > 1) throw { code: "UNLIMITED_SEAT_LIMIT" };
+      if (eligibility.reason) throw { code: eligibility.reason, message: eligibility.message };
       return j(402, {
         error: `No tienes creditos suficientes. Necesitas ${neededTokens} y actualmente tienes ${tokenBalance}.`,
       });
@@ -208,147 +214,7 @@ export async function POST(req: NextRequest) {
       try {
         result = await prisma.$transaction(
           async (tx) => {
-            const now = new Date();
-
-            const userInside = await tx.user.findUnique({
-              where: { id: auth.sub },
-              select: { bookingBlocked: true },
-            });
-
-            if (!userInside || userInside.bookingBlocked) {
-              throw Object.assign(new Error("BOOKING_BLOCKED"), {
-                code: "BOOKING_BLOCKED",
-              });
-            }
-
-            const existingInside = await tx.booking.findFirst({
-              where: {
-                userId: auth.sub,
-                classId,
-                status: BookingStatus.ACTIVE,
-              },
-              select: { id: true },
-            });
-
-            if (existingInside) {
-              throw Object.assign(new Error("ALREADY_BOOKED"), {
-                code: "ALREADY_BOOKED",
-              });
-            }
-
-            const locked = await tx.class.findUnique({
-              where: { id: classId },
-              select: {
-                capacity: true,
-                creditCost: true,
-                date: true,
-                isCanceled: true,
-                deletedAt: true,
-              },
-            });
-
-            if (!locked || locked.deletedAt || locked.isCanceled) {
-              throw Object.assign(new Error("CLASS_NOT_BOOKABLE"), {
-                code: "CLASS_NOT_BOOKABLE",
-              });
-            }
-
-            if (locked.date.getTime() <= Date.now()) {
-              throw Object.assign(new Error("CLASS_ALREADY_STARTED"), {
-                code: "CLASS_ALREADY_STARTED",
-              });
-            }
-
-            const againBookedAgg = await tx.booking.aggregate({
-              where: { classId, status: BookingStatus.ACTIVE },
-              _sum: { quantity: true },
-            });
-
-            const sumBooked = againBookedAgg._sum.quantity ?? 0;
-            const cap = locked.capacity ?? 0;
-            const spotsLeft = Math.max(0, cap - sumBooked);
-
-            if (spotsLeft < quantity) {
-              throw Object.assign(new Error("NOT_ENOUGH_SPOTS"), {
-                code: "NOT_ENOUGH_SPOTS",
-                available: spotsLeft,
-              });
-            }
-
-            const currentPerSeatCost = Math.max(1, locked.creditCost ?? 1);
-            const totalCost = quantity * currentPerSeatCost;
-
-            const packs = await tx.packPurchase.findMany({
-              where: {
-                userId: auth.sub,
-                expiresAt: { gt: now },
-                classesLeft: { gt: 0 },
-                OR: [{ pausedUntil: null }, { pausedUntil: { lte: now } }],
-              },
-              orderBy: { expiresAt: "asc" },
-              select: { id: true, classesLeft: true },
-            });
-
-            const currentTokens = packs.reduce(
-              (sum, pack) => sum + pack.classesLeft,
-              0
-            );
-
-            if (currentTokens < totalCost) {
-              throw Object.assign(new Error("INSUFFICIENT_TOKENS"), {
-                code: "INSUFFICIENT_TOKENS",
-              });
-            }
-
-            const booking = await tx.booking.create({
-              data: {
-                userId: auth.sub,
-                classId,
-                quantity,
-                status: BookingStatus.ACTIVE,
-              },
-              select: { id: true },
-            });
-
-            let remaining = totalCost;
-
-            for (const pack of packs) {
-              if (remaining <= 0) break;
-
-              const use = Math.min(pack.classesLeft, remaining);
-
-              const updatedPack = await tx.packPurchase.updateMany({
-                where: {
-                  id: pack.id,
-                  classesLeft: { gte: use },
-                },
-                data: { classesLeft: { decrement: use } },
-              });
-
-              if (updatedPack.count !== 1) {
-                throw Object.assign(new Error("INSUFFICIENT_TOKENS"), {
-                  code: "INSUFFICIENT_TOKENS",
-                });
-              }
-
-              await tx.tokenLedger.create({
-                data: {
-                  userId: auth.sub,
-                  packPurchaseId: pack.id,
-                  delta: -use,
-                  reason: TokenReason.BOOKING_DEBIT,
-                  bookingId: booking.id,
-                },
-              });
-
-              remaining -= use;
-            }
-
-            if (remaining !== 0) {
-              throw Object.assign(new Error("DEBIT_MISMATCH"), {
-                code: "INSUFFICIENT_TOKENS",
-              });
-            }
+            const booking = await createBookingWithCreditCheck(tx, { classId, userId: auth.sub, quantity });
 
             await tx.waitlist.deleteMany({
               where: {
@@ -359,8 +225,8 @@ export async function POST(req: NextRequest) {
 
             return {
               bookingId: booking.id,
-              debitedCredits: totalCost,
-              creditCost: currentPerSeatCost,
+              debitedCredits: booking.debitedCredits,
+              creditCost: booking.creditCost,
             };
           },
           { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
@@ -369,8 +235,7 @@ export async function POST(req: NextRequest) {
         break;
       } catch (error) {
         if (
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === "P2034" &&
+          isBookingTransactionConflict(error) &&
           attempt < MAX_SERIALIZABLE_RETRIES - 1
         ) {
           continue;
@@ -396,6 +261,7 @@ export async function POST(req: NextRequest) {
       creditCost: result.creditCost,
     });
   } catch (err: any) {
+    if (err?.code?.startsWith("UNLIMITED_")) return j(402, { code: err.code, error: err.message ?? unlimitedErrorMessages[err.code as keyof typeof unlimitedErrorMessages] });
     if (err?.code === "BOOKING_BLOCKED") {
       return j(403, {
         code: "BOOKING_BLOCKED",
@@ -407,9 +273,11 @@ export async function POST(req: NextRequest) {
       return j(404, { error: "Usuario no encontrado." });
     }
 
-    if (err?.code === "ALREADY_BOOKED") {
+    if (err?.code === "ALREADY_BOOKED" || err?.code === "USER_ALREADY_BOOKED") {
       return alreadyBookedResponse();
     }
+
+    if (err?.code === "CLASS_FULL") return j(409, { error: "CLASS_FULL", message: "Esta clase ya esta llena." });
 
     if (err?.code === "NOT_ENOUGH_SPOTS") {
       return j(409, {
@@ -417,7 +285,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (err?.code === "INSUFFICIENT_TOKENS") {
+    if (err?.code === "INSUFFICIENT_TOKENS" || err?.code === "NO_CREDITS_AVAILABLE") {
       return j(402, {
         error: "No tienes creditos suficientes para completar esta reserva.",
       });
@@ -429,7 +297,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (err?.code === "CLASS_NOT_BOOKABLE") {
+    if (err?.code === "CLASS_NOT_BOOKABLE" || err?.code === "CLASS_NOT_FOUND" || err?.code === "CLASS_CANCELED") {
       return j(409, {
         error: "Esta clase no esta disponible para reservas.",
       });

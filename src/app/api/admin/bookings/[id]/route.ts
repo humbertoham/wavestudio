@@ -1,111 +1,83 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, requireClassManager } from "../../_utils";
 import { Prisma } from "@prisma/client";
+import { prisma, requireClassManager } from "../../_utils";
+import {
+  isBookingTransactionConflict,
+  refundBookingCredits,
+  releaseUnlimitedUsage,
+} from "@/lib/monthly-unlimited";
 import { notifyWellhubBookingCanceledByWaveSafely } from "@/lib/wellhub/booking/service";
 import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
 
 export const runtime = "nodejs";
-
 type Ctx = { params: Promise<{ id: string }> };
 
-function j(status: number, body: any) {
-  return NextResponse.json(body, { status });
-}
-
 export async function DELETE(req: NextRequest, ctx: Ctx) {
-  const auth = await requireClassManager(req);
-  if (auth) return auth;
-
+  const denied = await requireClassManager(req);
+  if (denied) return denied;
   const { id } = await ctx.params;
-
-  // 1️⃣ Cargar booking
-  const booking = await prisma.booking.findUnique({
-    where: { id },
-    include: {
-      user: true,
-    },
-  });
-
-  if (!booking) {
-    return j(404, { error: "BOOKING_NOT_FOUND" });
-  }
-
-  // 2️⃣ Idempotencia: si ya está cancelado
-  if (booking.status === "CANCELED") {
-    await notifyWellhubBookingCanceledByWaveSafely(booking.id);
-    await syncWellhubClassSafely(booking.classId);
-    return j(200, { ok: true, alreadyCanceled: true });
-  }
-
-  await prisma.$transaction(
-    async (tx) => {
-
-      // 🔒 evitar doble refund
-      const alreadyRefunded = await tx.tokenLedger.findFirst({
-        where: {
-          bookingId: booking.id,
-          reason: "CANCEL_REFUND",
-        },
-      });
-
-      // 3️⃣ Cancelar booking
-      await tx.booking.update({
-        where: { id: booking.id },
-        data: {
-          status: "CANCELED",
-          canceledAt: new Date(),
-        },
-      });
-
-      if (alreadyRefunded) return;
-
-      // 4️⃣ Buscar TODOS los debits asociados
-      const debits = await tx.tokenLedger.findMany({
-        where: {
-          bookingId: booking.id,
-          reason: "BOOKING_DEBIT",
-        },
-      });
-
-      for (const d of debits) {
-
-        const refundAmount = Math.abs(d.delta);
-
-        // devolver tokens al pack si existe
-        if (d.packPurchaseId) {
-          await tx.packPurchase.update({
-            where: { id: d.packPurchaseId },
-            data: {
-              classesLeft: {
-                increment: refundAmount,
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const result = await prisma.$transaction(
+          async (tx) => {
+            const booking = await tx.booking.findUnique({
+              where: { id },
+              include: { class: { select: { date: true } } },
+            });
+            if (!booking) return null;
+            if (booking.status !== "ACTIVE")
+              return { ...booking, alreadyCanceled: true, refunded: false };
+            const now = new Date();
+            const unlimited =
+              booking.entitlementType === "MONTHLY_UNLIMITED" ||
+              booking.entitlementType === "MIXED";
+            const onTime =
+              Math.floor(
+                (booking.class.date.getTime() - now.getTime()) / 60000,
+              ) >= 240;
+            const refund = !unlimited || onTime;
+            const changed = await tx.booking.updateMany({
+              where: { id, status: "ACTIVE" },
+              data: {
+                status: "CANCELED",
+                canceledAt: now,
+                refundToken: refund,
               },
-            },
-          });
-        }
-
-        // ledger refund
-        await tx.tokenLedger.create({
-          data: {
-            userId: booking.userId!,
-            bookingId: booking.id,
-            packPurchaseId: d.packPurchaseId,
-            delta: refundAmount,
-            reason: "CANCEL_REFUND",
+            });
+            if (!changed.count) throw { code: "P2034" };
+            if (refund) await refundBookingCredits(tx, booking);
+            if (unlimited && onTime) await releaseUnlimitedUsage(tx, id, now);
+            return { ...booking, alreadyCanceled: false, refunded: refund };
           },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+        if (!result)
+          return NextResponse.json(
+            { error: "BOOKING_NOT_FOUND" },
+            { status: 404 },
+          );
+        await notifyWellhubBookingCanceledByWaveSafely(id);
+        await syncWellhubClassSafely(result.classId);
+        return NextResponse.json({
+          ok: true,
+          alreadyCanceled: result.alreadyCanceled,
+          refunded: result.refunded,
+          quantity: result.quantity,
         });
+      } catch (error) {
+        if (isBookingTransactionConflict(error) && attempt < 2) continue;
+        throw error;
       }
-    },
-    {
-      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     }
-  );
-
-  await notifyWellhubBookingCanceledByWaveSafely(booking.id);
-  await syncWellhubClassSafely(booking.classId);
-
-  return j(200, {
-    ok: true,
-    refunded: true,
-    quantity: booking.quantity ?? 1,
-  });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: isBookingTransactionConflict(error)
+          ? "REQUEST_CONFLICT"
+          : "INTERNAL_ERROR",
+      },
+      { status: isBookingTransactionConflict(error) ? 409 : 500 },
+    );
+  }
 }

@@ -30,7 +30,7 @@ export async function promoteWaitlistForReleasedSeats(
     } catch (error) {
       if (
         isManagedBookingError(error) &&
-        error.code === "NO_CREDITS_AVAILABLE"
+        (error.code === "NO_CREDITS_AVAILABLE" || error.code.startsWith("UNLIMITED_"))
       ) {
         continue;
       }

@@ -1,11 +1,15 @@
 // src/app/api/packs/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { monthLabel } from "@/lib/monthly-unlimited";
 import { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
 
 type ApiPack = {
+  type?: string;
+  unlimitedMonth?: number | null;
+  unlimitedYear?: number | null;
   id: string;
   name: string;
   classesLabel?: string | null;
@@ -36,7 +40,7 @@ export async function GET() {
       orderBy: [{ highlight: "desc" }, { createdAt: "asc" }],
       select: {
         id: true,
-        name: true,
+        name: true, type: true, unlimitedMonth: true, unlimitedYear: true,
         classes: true,
         price: true,
         validityDays: true,
@@ -48,20 +52,20 @@ export async function GET() {
     });
 
     const data: ApiPack[] = rows.map((p) => ({
-      id: p.id,
+      id: p.id, type: p.type ?? "STANDARD", unlimitedMonth: p.unlimitedMonth, unlimitedYear: p.unlimitedYear,
       name: p.name,
       classesLabel:
-        p.classesLabel ??
+        (p.type === "MONTHLY_UNLIMITED" ? "Una clase por dia" : p.classesLabel) ??
         (typeof p.classes === "number"
           ? `${p.classes} ${p.classes === 1 ? "clase" : "clases"}`
           : null),
-      classesCount: typeof p.classes === "number" ? p.classes : null,
+      classesCount: p.type === "MONTHLY_UNLIMITED" ? null : typeof p.classes === "number" ? p.classes : null,
       price: p.price,
-      validity:
+      validity: p.type === "MONTHLY_UNLIMITED" ? `Clases de ${monthLabel(p.unlimitedYear!, p.unlimitedMonth!)}` :
         typeof p.validityDays === "number"
           ? `Vigencia de ${p.validityDays} días`
           : null,
-      validityDays: p.validityDays ?? null,
+      validityDays: p.type === "MONTHLY_UNLIMITED" ? null : p.validityDays ?? null,
       highlight: (p.highlight as unknown as "popular" | "best" | null) ?? null,
       description: toStringArray(p.description),
       oncePerUser: p.oncePerUser,

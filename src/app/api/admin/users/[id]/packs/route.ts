@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPackageExpirationAt11Pm } from "@/lib/package-expiration";
+import { grantPackagePurchase, packageSnapshot } from "@/lib/monthly-unlimited";
+import { assertNoMonthlyDuplicate } from "@/lib/package-checkout";
 import { prisma, requireAdmin } from "../../../_utils";
 
 export const runtime = "nodejs";
@@ -53,46 +54,21 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   }
 
   // 5️⃣ Calcular vencimiento
-  const expiresAt = getPackageExpirationAt11Pm(new Date(), pack.validityDays);
 
   // 6️⃣ Transacción (IMPORTANTÍSIMO)
-  const result = await prisma.$transaction(async (tx) => {
-  // 1️⃣ Crear PackPurchase
-  const purchase = await tx.packPurchase.create({
-    data: {
-      userId,
-      packId: pack.id,
-      classesLeft: pack.classes,
-      expiresAt,
-    },
-  });
-
-  // 2️⃣ Acreditar tokens
-  await tx.tokenLedger.create({
-    data: {
-      userId,
-      packPurchaseId: purchase.id,
-      delta: pack.classes,
-      reason: "PURCHASE_CREDIT",
-    },
-  });
-
-  // 3️⃣ 🔥 Crear Payment ADMIN (esto es lo nuevo)
-  await tx.payment.create({
-    data: {
-      provider: "ADMIN",
-      status: "APPROVED",
-      amount: pack.price,
-      currency: "MXN",
-      userId,
-      packPurchase: {
-  connect: { id: purchase.id }
-}
-    },
-  });
-
-  return purchase;
-});
+  const snapshot = packageSnapshot(pack);
+  let result;
+  try {
+    result = await prisma.$transaction(async tx => {
+      await assertNoMonthlyDuplicate(tx, userId, snapshot);
+      const payment = await tx.payment.create({ data: { provider: "ADMIN", status: "APPROVED", amount: pack.price, currency: "MXN", userId, packSnapshot: snapshot } });
+      return grantPackagePurchase(tx, { userId, packId: pack.id, paymentId: payment.id, snapshot });
+    });
+  } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code?.startsWith("UNLIMITED_")) return json(409, { ok: false, code });
+    throw error;
+  }
 
   // 7️⃣ Respuesta
   return json(200, {

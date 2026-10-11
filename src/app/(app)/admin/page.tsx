@@ -1,5 +1,7 @@
 "use client";
 
+import { PackageTypeFields, type PackageCalendarDraft } from "@/components/packages/PackageTypeFields";
+import { monthLabel } from "@/lib/unlimited-calendar";
 import useSWR from "swr";
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useState } from "react";
@@ -266,7 +268,7 @@ type ChallengeLeaderboard = {
   total: number;
   totalPages: number;
 };
-type Pack = {
+type Pack = PackageCalendarDraft & {
   id: string;
   name: string;
   classes: number;
@@ -321,7 +323,8 @@ type UserDetails = {
     createdAt: string;
   };
   tokenBalance: number;
-  purchases: Array<{
+  purchases: Array<PackageCalendarDraft & {
+    revokedAt?: string | null;
     id: string;
     createdAt: string;
     expiresAt: string;
@@ -361,7 +364,8 @@ type UserDetails = {
     } | null;
   }>;
 };
-type PurchasedPackage = {
+type PurchasedPackage = PackageCalendarDraft & {
+  revokedAt?: string | null;
   id: string;
   createdAt: string;
   expiresAt: string;
@@ -1388,7 +1392,7 @@ function PacksSection() {
   const isHighlight = (v: unknown): v is HighlightOpt => v === "popular" || v === "best";
 
   // Estado del formulario de creación (separado del tipo Pack para no pelear con Json/enum)
-  const [creating, setCreating] = useState<{
+  const [creating, setCreating] = useState<PackageCalendarDraft & {
     name: string;
     classes?: number;
     price?: number;           // entero en pesos; si usas centavos cambia en el API
@@ -1424,10 +1428,11 @@ function PacksSection() {
 
     // Construye payload limpio (sin undefineds)
     const payload: any = {
+  type: creating.type ?? "STANDARD", unlimitedMonth: creating.unlimitedMonth, unlimitedYear: creating.unlimitedYear,
   name: creating.name?.trim(),
-  classes: creating.classes,
+  classes: creating.type === "MONTHLY_UNLIMITED" ? 0 : creating.classes,
   price: creating.price,
-  validityDays: creating.validityDays,
+  validityDays: creating.type === "MONTHLY_UNLIMITED" ? 0 : creating.validityDays,
   isActive: !!creating.isActive,
   oncePerUser: !!creating.oncePerUser, // 👈 NUEVO
   classesLabel: creating.classesLabel?.trim() || undefined,
@@ -1479,6 +1484,7 @@ function PacksSection() {
 
       {/* Crear */}
       <form onSubmit={createPack} className="grid md:grid-cols-5 gap-3 mb-6">
+        <PackageTypeFields value={creating} onChange={change => setCreating(f => ({ ...f, ...change }))} />
         <input
           className="input"
           placeholder="Nombre"
@@ -1487,7 +1493,7 @@ function PacksSection() {
           onChange={(e) => setCreating((f) => ({ ...f, name: e.target.value }))}
         />
 
-        <input
+        {creating.type !== "MONTHLY_UNLIMITED" && (        <input
           className="input"
           type="number"
           placeholder="# clases"
@@ -1501,7 +1507,7 @@ function PacksSection() {
               classes: e.target.value === "" ? undefined : Number(e.target.value),
             }))
           }
-        />
+        />)}
 
         <input
           className="input"
@@ -1519,7 +1525,7 @@ function PacksSection() {
           }
         />
 
-        <input
+        {creating.type !== "MONTHLY_UNLIMITED" && (        <input
           className="input"
           type="number"
           placeholder="Vigencia (días)"
@@ -1533,7 +1539,7 @@ function PacksSection() {
               validityDays: e.target.value === "" ? undefined : Number(e.target.value),
             }))
           }
-        />
+        />)}
      <label className="inline-flex items-center gap-2">
   <input
     type="checkbox"
@@ -1640,7 +1646,7 @@ function EditablePackRow({
     ? (item.description as string[]).join("\n")
     : "";
 
-  const [draft, setDraft] = useState<{
+  const [draft, setDraft] = useState<PackageCalendarDraft & {
     name?: string;
     classes?: number;
     price?: number; // entero (pesos)
@@ -1651,6 +1657,7 @@ function EditablePackRow({
     highlight?: "" | HighlightOpt | null; // "" = sin highlight
     descriptionText?: string; // textarea → string[]
   }>({
+    type: item.type ?? "STANDARD", unlimitedMonth: item.unlimitedMonth, unlimitedYear: item.unlimitedYear,
     name: item.name,
     classes: item.classes,
     price: item.price,
@@ -1685,10 +1692,11 @@ function EditablePackRow({
 
     // Construir payload PATCH (solo lo que cambió o es relevante)
     const payload: any = {
+      type: draft.type ?? "STANDARD", unlimitedMonth: draft.unlimitedMonth, unlimitedYear: draft.unlimitedYear,
       name: draft.name?.trim(),
-      classes: draft.classes,
+      classes: draft.type === "MONTHLY_UNLIMITED" ? 0 : draft.classes,
       price: draft.price, // el backend redondea a int
-      validityDays: draft.validityDays,
+      validityDays: draft.type === "MONTHLY_UNLIMITED" ? 0 : draft.validityDays,
       isActive: draft.isActive,
       oncePerUser: draft.oncePerUser, // 👈 FALTA ESTO
       classesLabel:
@@ -1733,7 +1741,7 @@ function EditablePackRow({
         </td>
 
         <td className="py-2">
-          {editing ? (
+          {(editing ? draft.type : item.type) === "MONTHLY_UNLIMITED" ? "Una clase por dia" : (          editing ? (
             <input
               className="input"
               type="number"
@@ -1750,7 +1758,7 @@ function EditablePackRow({
             />
           ) : (
             item.classes
-          )}
+           ))}
         </td>
 
         <td className="py-2">
@@ -1775,7 +1783,7 @@ function EditablePackRow({
         </td>
 
         <td className="py-2">
-          {editing ? (
+          {(editing ? draft.type : item.type) === "MONTHLY_UNLIMITED" ? (item.unlimitedYear && item.unlimitedMonth ? monthLabel(item.unlimitedYear, item.unlimitedMonth) : "Mes calendario") : (          editing ? (
             <input
               className="input"
               type="number"
@@ -1794,7 +1802,7 @@ function EditablePackRow({
             />
           ) : (
             `${item.validityDays} días`
-          )}
+           ))}
         </td>
 
         <td className="py-2">
@@ -1874,6 +1882,7 @@ function EditablePackRow({
         <tr className="border-b">
           <td colSpan={6} className="py-3">
             <div className="grid md:grid-cols-4 gap-3">
+              <div className="md:col-span-4"><PackageTypeFields value={draft} onChange={change => setDraft(d => ({ ...d, ...change }))} /></div>
               <div className="md:col-span-2">
                 <label className="block text-xs text-gray-500 mb-1">
                   Etiqueta de clases
@@ -2227,8 +2236,8 @@ function PurchasedPackagesSection() {
                     {AFFILIATION_LABELS[item.user.affiliation]}
                   </td>
                   <td className="py-2">{item.pack.name}</td>
-                  <td className="py-2">{item.classesPurchased}</td>
-                  <td className="py-2">{item.classesLeft}</td>
+                  <td className="py-2">{item.type === "MONTHLY_UNLIMITED" ? "Una clase por dia" : item.classesPurchased}</td>
+                  <td className="py-2">{item.type === "MONTHLY_UNLIMITED" ? (item.revokedAt ? "Revocado" : monthLabel(item.unlimitedYear!, item.unlimitedMonth!)) : item.classesLeft}</td>
                   <td className="py-2">{formatMoneyMXN(item.amountPaid)}</td>
                   <td className="py-2">
                     <span className="font-medium">
@@ -3252,14 +3261,14 @@ function UserInspectorSection() {
           return (
             <tr key={p.id} className="border-b border-[var(--color-border)]">
               <td className="py-2">{p.pack.name}</td>
-              <td className="py-2">{p.classesLeft}</td>
+              <td className="py-2">{p.type === "MONTHLY_UNLIMITED" ? "Una clase por dia" : p.classesLeft}</td>
               <td className="py-2">
                 <span className="whitespace-nowrap">
                   {new Date(p.expiresAt).toLocaleDateString()}
                 </span>
               </td>
               <td className="py-2">
-                {isPaused ? (
+                {p.revokedAt ? <span className="text-xs font-medium text-red-600">Revocado</span> : isPaused ? (
                   <span className="rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">
                     Pausado hasta {pausedUntilDate?.toLocaleDateString()}
                   </span>
@@ -3292,12 +3301,12 @@ function UserInspectorSection() {
                         [p.id]: Number(e.target.value),
                       }))
                     }
-                    disabled={pausingPackId === p.id}
+                    disabled={pausingPackId === p.id || p.type === "MONTHLY_UNLIMITED"}
                   />
                   <button
                     className="btn btn-outline whitespace-nowrap"
                     disabled={
-                      pausingPackId === p.id || pauseDays < 1 || pauseDays > 30
+                      pausingPackId === p.id || p.type === "MONTHLY_UNLIMITED" || pauseDays < 1 || pauseDays > 30
                     }
                     onClick={() => pausePurchase(p.id)}
                   >

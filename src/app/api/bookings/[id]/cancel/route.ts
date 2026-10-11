@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isBookingTransactionConflict, releaseUnlimitedUsage } from "@/lib/monthly-unlimited";
 import { Prisma } from "@prisma/client";
 
 import { getAuth } from "@/lib/auth";
@@ -18,8 +19,7 @@ function j(status: number, body: unknown) {
 
 function isRetryableTransactionError(error: unknown) {
   return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === "P2034"
+    isBookingTransactionConflict(error)
   );
 }
 
@@ -88,7 +88,7 @@ export async function PATCH(
     const minutesUntilStart = Math.floor(
       (booking.class.date.getTime() - Date.now()) / 60000
     );
-    const isLateCancel = minutesUntilStart < CANCEL_WINDOW_MIN;
+    let isLateCancel = minutesUntilStart < CANCEL_WINDOW_MIN;
     const seatsReleased = booking.quantity ?? 1;
 
     let result: CancelResult | null = null;
@@ -97,6 +97,11 @@ export async function PATCH(
       try {
         result = await prisma.$transaction(
           async (tx) => {
+            const now = new Date();
+            if (booking.class.date <= now) throw { code: "CLASS_ALREADY_STARTED" };
+            isLateCancel = Math.floor((booking.class.date.getTime() - now.getTime()) / 60000) < CANCEL_WINDOW_MIN;
+            const claimed = await tx.booking.updateMany({ where: { id: booking.id, status: "ACTIVE" }, data: { status: "CANCELED", canceledAt: now, refundToken: !isLateCancel } });
+            if (claimed.count !== 1) throw { code: "ALREADY_CANCELED" };
             const updated = await tx.booking.update({
               where: { id: booking.id },
               data: {
@@ -122,6 +127,7 @@ export async function PATCH(
             let refundedCredits = 0;
 
             if (!isLateCancel) {
+              await releaseUnlimitedUsage(tx, booking.id, now);
               const alreadyRefunded = await tx.tokenLedger.findFirst({
                 where: {
                   bookingId: booking.id,
@@ -219,6 +225,8 @@ export async function PATCH(
       },
     });
   } catch (error) {
+    const code = (error as { code?: string })?.code;
+    if (code === "ALREADY_CANCELED" || code === "CLASS_ALREADY_STARTED") return j(409, { code });
     if (isRetryableTransactionError(error)) {
       return j(409, {
         code: "REQUEST_CONFLICT",

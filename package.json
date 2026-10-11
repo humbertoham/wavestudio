@@ -27,6 +27,7 @@
     "db:seed:dev-uat": "node prisma/seed.dev-uat.mjs",
     "postinstall": "prisma generate",
     "test": "vitest run",
+    "test:monthly:dev": "node scripts/test-monthly-unlimited-dev.mjs",
     "build": "prisma generate && next build",
     "start": "next start"
   },
