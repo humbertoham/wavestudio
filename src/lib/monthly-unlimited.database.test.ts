@@ -80,6 +80,7 @@ import { POST as assignPack } from "@/app/api/admin/users/[id]/packs/route";
 import { POST as pausePack } from "@/app/api/admin/users/[id]/packs/[purchaseId]/pause/route";
 import { PUT as updateClass } from "@/app/api/admin/classes/[id]/route";
 import { GET as getUnlimitedSummary } from "@/app/api/users/me/unlimited/route";
+import { GET as purchasedPackages } from "@/app/api/admin/purchased-packages/route";
 
 const run = `monthly_dev_${randomUUID().replaceAll("-", "")}`;
 const ids = {
@@ -761,7 +762,7 @@ describe.skipIf(!optIn)(
         classesLeft: 0,
       });
     });
-    it("manual admin sales and assignments grant audited unlimited purchases without credits", async () => {
+    it("manual admin sales and assignments grant audited unlimited purchases without payments or credits", async () => {
       const admin = await createUser("ADMIN");
       mocks.actor = admin.id;
       const first = await json(
@@ -779,16 +780,146 @@ describe.skipIf(!optIn)(
         (await assignPack(req("/assign", { packId: pack.id }), ctx(other.id)))
           .status,
       ).toBe(200);
-      expect(
-        await prisma.tokenLedger.count({
-          where: { userId: { in: [user.id, other.id] } },
-        }),
-      ).toBe(0);
+      expect(await prisma.tokenLedger.count({ where: {
+        userId: { in: [user.id, other.id] }, delta: { not: 0 },
+      } })).toBe(0);
       expect(
         await prisma.payment.count({
           where: { userId: { in: [user.id, other.id] }, status: "APPROVED" },
         }),
-      ).toBe(2);
+      ).toBe(0);
+    });
+    describe("manual unlimited assignment", () => {
+      let admin: User;
+      const assign = (packId = pack.id, key?: string) => {
+        const request = req("/assign", { packId });
+        if (key) request.headers.set("Idempotency-Key", key);
+        return assignPack(request, ctx(user.id)).then(json);
+      };
+      beforeEach(async () => {
+        admin = await createUser("ADMIN");
+        mocks.actor = admin.id;
+      });
+      it("grants with immutable terms, actor audit, no payment/revenue/credit, and appears in mis-clases", async () => {
+        const assigned = await assign();
+        expect(assigned).toMatchObject({ status: 200, body: { ok: true, purchase: { type: "MONTHLY_UNLIMITED", classes: 0 } } });
+        const purchase = await prisma.packPurchase.findUniqueOrThrow({ where: { id: assigned.body.purchase.id } });
+        expect(purchase).toMatchObject({ paymentId: null, classesLeft: 0, nameSnapshot: pack.name, priceSnapshot: 1500, unlimitedMonth: 10, unlimitedYear: 2026 });
+        expect(await prisma.payment.count({ where: { userId: user.id } })).toBe(0);
+        expect(await prisma.tokenLedger.findMany({ where: { packPurchaseId: purchase.id } })).toEqual([
+          expect.objectContaining({ delta: 0, reason: "ADMIN_ADJUST", userId: user.id, createdAt: expect.any(Date), metadata: expect.objectContaining({ source: "ADMIN", action: "PACKAGE_ASSIGNMENT", actorUserId: admin.id, packId: pack.id }) }),
+        ]);
+        const report = await json(await purchasedPackages(req("/api/admin/purchased-packages", undefined, "GET")));
+        expect(report.body.items.find((p: { id: string }) => p.id === purchase.id)).toMatchObject({ amountPaid: 0, assignmentSource: "ADMIN", paymentStatus: null, paymentProvider: null });
+        mocks.actor = user.id;
+        const dashboard = await json(await getPacks(req("/api/users/me/packs", undefined, "GET")));
+        expect(dashboard.body.items).toEqual([expect.objectContaining({ id: purchase.id, type: "MONTHLY_UNLIMITED", unlimitedMonth: 10, unlimitedYear: 2026 })]);
+      });
+      it.each(["USER", "COACH"] as const)("rejects %s without granting anything", async role => {
+        mocks.actor = (await createUser(role)).id;
+        expect((await assign()).status).toBe(403);
+        expect(await prisma.packPurchase.count({ where: { userId: user.id } })).toBe(0);
+      });
+      it("rejects an unauthenticated request", async () => {
+        mocks.actor = "";
+        expect((await assign()).status).toBe(401);
+      });
+      it("preserves standard manual assignment and deduplicates its request", async () => {
+        const standard = await credits(3, await createUser());
+        const key = randomUUID();
+        const first = await assign(standard.packId, key);
+        const retry = await assign(standard.packId, key);
+        expect(first.status).toBe(200);
+        expect(retry.body.purchase.id).toBe(first.body.purchase.id);
+        expect(await prisma.packPurchase.count({ where: { userId: user.id } })).toBe(1);
+        expect(await prisma.tokenLedger.aggregate({ where: { userId: user.id }, _sum: { delta: true } })).toMatchObject({ _sum: { delta: 3 } });
+        expect(await prisma.payment.findFirst({ where: { userId: user.id } })).toMatchObject({ provider: "ADMIN", status: "APPROVED", amount: 500 });
+      });
+      it("preserves the separate standard manual-sale endpoint including nullable notes", async () => {
+        const standard = await credits(3, await createUser());
+        const response = await json(await manualPurchase(req("/manual", { userId: user.id, packId: standard.packId, note: null })));
+        expect(response).toMatchObject({ status: 201, body: { amount: 500, classesLeft: 3 } });
+        expect(await prisma.payment.findUnique({ where: { id: response.body.paymentId } })).toMatchObject({ provider: "MERCADOPAGO", status: "APPROVED", amount: 500, mpExternalRef: "ADMIN_MANUAL" });
+      });
+      it.each(["USER", "COACH"] as const)("also rejects %s at the alternate manual endpoint", async role => {
+        mocks.actor = (await createUser(role)).id;
+        expect((await manualPurchase(req("/manual", { userId: user.id, packId: pack.id }))).status).toBe(403);
+        expect(await prisma.packPurchase.count({ where: { userId: user.id } })).toBe(0);
+      });
+      it("replays the same request and rejects concurrent distinct requests for the same month", async () => {
+        const key = randomUUID();
+        const [first, retry] = await Promise.all([assign(pack.id, key), assign(pack.id, key)]);
+        expect([first.status, retry.status]).toEqual([200, 200]);
+        expect(retry.body.purchase.id).toBe(first.body.purchase.id);
+        const duplicate = await assign();
+        expect(duplicate).toMatchObject({ status: 409, body: { code: "UNLIMITED_MONTH_ALREADY_PURCHASED", message: expect.stringContaining("mes") } });
+        expect(await prisma.packPurchase.count({ where: { userId: user.id } })).toBe(1);
+      });
+      it("allows only one grant when distinct requests race", async () => {
+        const results = await Promise.all([assign(), assign()]);
+        expect(results.map(r => r.status).sort()).toEqual([200, 409]);
+        expect(await prisma.packPurchase.count({ where: { userId: user.id } })).toBe(1);
+      });
+      it("cannot reuse a request key with another package", async () => {
+        const key = randomUUID();
+        await assign(pack.id, key);
+        const standard = await credits(2, await createUser());
+        expect((await assign(standard.packId, key)).status).toBe(409);
+      });
+      it("reports pending checkout and expired month conflicts in Spanish without granting", async () => {
+        mocks.actor = user.id;
+        const payment = await pendingPayment();
+        mocks.actor = admin.id;
+        expect(await assign()).toMatchObject({ status: 409, body: { message: expect.any(String) } });
+        await prisma.payment.update({ where: { id: payment.id }, data: { status: "CANCELED" } });
+        vi.setSystemTime(new Date("2026-11-01T06:00:00Z"));
+        expect(await assign()).toMatchObject({ status: 409, body: { code: "UNLIMITED_NOT_ACTIVE", message: expect.any(String) } });
+        expect(await prisma.packPurchase.count({ where: { userId: user.id } })).toBe(0);
+      });
+      it("validates malformed payloads and missing users/packages", async () => {
+        expect((await json(await assignPack(req("/assign", null), ctx(user.id)))).status).toBe(400);
+        expect((await assign("missing-pack")).status).toBe(404);
+        expect((await json(await assignPack(req("/assign", { packId: pack.id }), ctx("missing-user")))).status).toBe(404);
+      });
+      it("books ahead, prefers unlimited, preserves credits, restores early cancellation, and enforces month/day", async () => {
+        await assign();
+        mocks.actor = user.id;
+        const first = await session();
+        const second = await session("2026-10-10T18:00:00Z");
+        const outside = await session("2026-11-10T18:00:00Z");
+        const booked = await reserve(first.id);
+        expect(booked).toMatchObject({ status: 201, body: { debitedCredits: 0 } });
+        expect((await reserve(second.id)).body.code).toBe("UNLIMITED_DAILY_LIMIT");
+        expect((await reserve(outside.id)).body.code).toBe("UNLIMITED_MONTH_MISMATCH");
+        expect((await cancel(req("/cancel", {}, "PATCH"), ctx(booked.body.bookingId))).status).toBe(200);
+        expect((await reserve(second.id)).status).toBe(201);
+        await credits(3);
+        const nextDay = await session("2026-10-11T18:00:00Z");
+        expect((await reserve(nextDay.id)).body.debitedCredits).toBe(0);
+        expect((await reserve(outside.id)).body.debitedCredits).toBe(1);
+        expect(await prisma.tokenLedger.aggregate({ where: { userId: user.id }, _sum: { delta: true } })).toMatchObject({ _sum: { delta: 2 } });
+      });
+      it("late cancellation keeps the daily allowance consumed", async () => {
+        await assign();
+        mocks.actor = user.id;
+        const first = await session();
+        const second = await session("2026-10-10T18:00:00Z");
+        const booked = await reserve(first.id);
+        vi.setSystemTime(new Date("2026-10-10T10:00:00Z"));
+        expect((await cancel(req("/cancel", {}, "PATCH"), ctx(booked.body.bookingId))).status).toBe(200);
+        expect((await reserve(second.id)).body.code).toBe("UNLIMITED_DAILY_LIMIT");
+      });
+      it("keeps capacity protection when two manually assigned users race for the final seat", async () => {
+        await assign();
+        const other = await createUser();
+        expect((await assignPack(req("/assign", { packId: pack.id }), ctx(other.id))).status).toBe(200);
+        const cls = await session(undefined, 1);
+        const results = await Promise.allSettled([serialReserve(user.id, cls.id), serialReserve(other.id, cls.id)]);
+        expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+        expect(results.find(result => result.status === "rejected")).toMatchObject({ reason: { code: "CLASS_FULL" } });
+        expect(await prisma.booking.count({ where: { classId: cls.id, status: "ACTIVE" } })).toBe(1);
+        expect(await prisma.unlimitedUsage.count({ where: { booking: { classId: cls.id } } })).toBe(1);
+      });
     });
     it("partial standard package edits preserve legacy descriptions and unrelated fields", async () => {
       const standard = await credits(3);

@@ -53,11 +53,17 @@ try {
     "postgres:16-alpine",
   ]);
   started = true;
-  const state = JSON.parse(docker(["inspect", container]))[0];
-  const binding = state.NetworkSettings.Ports["5432/tcp"][0];
+  let state;
+  let binding;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    state = JSON.parse(docker(["inspect", container]))[0];
+    binding = state.NetworkSettings.Ports["5432/tcp"]?.[0];
+    if (binding) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
   if (
     state.Config.Labels["wave.environment"] !== "dev-validation" ||
-    binding.HostIp !== "127.0.0.1"
+    binding?.HostIp !== "127.0.0.1"
   )
     throw new Error("Unsafe disposable test database binding.");
   const url = `postgresql://wave_dev_test:${password}@127.0.0.1:${binding.HostPort}/wave_monthly_dev_validation`;

@@ -4,7 +4,7 @@ import { PackageTypeFields, type PackageCalendarDraft } from "@/components/packa
 import { monthLabel } from "@/lib/unlimited-calendar";
 import useSWR from "swr";
 import Link from "next/link";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FiMessageCircle } from "react-icons/fi";
 import { getWhatsAppHref } from "@/lib/whatsapp";
@@ -375,6 +375,9 @@ type PurchasedPackage = PackageCalendarDraft & {
   user: { name: string | null; email: string; affiliation: Affiliation };
   pack: { name: string; classes: number; price: number };
   amountPaid: number;
+  assignmentSource?: "ADMIN" | null;
+  assignedBy?: string | null;
+  assignedAt?: string | null;
   paymentStatus: "PENDING" | "APPROVED" | "REJECTED" | "REFUNDED" | "CANCELED" | null;
   paymentProvider: "MERCADOPAGO" | "ADMIN" | null;
   paymentReference?: string | null;
@@ -2241,13 +2244,13 @@ function PurchasedPackagesSection() {
                   <td className="py-2">{formatMoneyMXN(item.amountPaid)}</td>
                   <td className="py-2">
                     <span className="font-medium">
-                      {item.paymentStatus ?? "SIN_PAGO"}
+                      {item.assignmentSource === "ADMIN" && !item.paymentStatus ? "Asignación ADMIN · Sin pago" : item.paymentStatus ?? "SIN_PAGO"}
                     </span>
                   </td>
                   <td className="py-2">
                     <div className="flex max-w-[220px] flex-col">
                       <span className="text-xs text-muted-foreground">
-                        {item.paymentProvider ?? "N/A"}
+                        {item.assignmentSource === "ADMIN" ? "Asignado por ADMIN" : item.paymentProvider ?? "N/A"}
                       </span>
                       <span className="truncate" title={item.paymentReference ?? ""}>
                         {item.paymentReference ?? "-"}
@@ -2465,6 +2468,10 @@ function UserInspectorSection() {
 
   const [selectedPackId, setSelectedPackId] = useState("");
   const [buyingPack, setBuyingPack] = useState(false);
+  const [confirmingAssignment, setConfirmingAssignment] = useState(false);
+  const assignmentInFlight = useRef(false);
+  const assignmentRequest = useRef<{ userId: string; packId: string; key: string } | null>(null);
+  const [assignmentFeedback, setAssignmentFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
     text: string;
@@ -2510,6 +2517,45 @@ function UserInspectorSection() {
 
   const list = usersData?.items;
   const userTotalPages = usersData?.totalPages ?? 1;
+  const selectedAssignmentPack = packs?.items.find(pack => pack.id === selectedPackId);
+
+  useEffect(() => {
+    setConfirmingAssignment(false);
+  }, [selectedId, selectedPackId]);
+  useEffect(() => {
+    setAssignmentFeedback(null);
+  }, [selectedId]);
+
+  async function assignSelectedPackage() {
+    if (!selectedId || details?.user.id !== selectedId || !selectedAssignmentPack || assignmentInFlight.current) return;
+    assignmentInFlight.current = true;
+    setBuyingPack(true);
+    setAssignmentFeedback(null);
+    const pack = selectedAssignmentPack;
+    if (assignmentRequest.current?.userId !== selectedId || assignmentRequest.current?.packId !== pack.id) {
+      assignmentRequest.current = { userId: selectedId, packId: pack.id, key: crypto.randomUUID() };
+    }
+    try {
+      const res = await fetch(`/api/admin/users/${selectedId}/packs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": assignmentRequest.current.key },
+        body: JSON.stringify({ packId: pack.id }),
+      });
+      if (!res.ok) throw new Error(await readApiMessage(res, "No se pudo asignar el paquete. Revisa los paquetes del usuario y reintenta."));
+      setAssignmentFeedback({ type: "success", text: pack.type === "MONTHLY_UNLIMITED"
+        ? `${pack.name} asignado correctamente para ${monthLabel(pack.unlimitedYear!, pack.unlimitedMonth!)}. Una clase por día, sin pago ni créditos adicionales.`
+        : `${pack.name} asignado correctamente. Se acreditaron ${pack.classes} clases.` });
+      setSelectedPackId("");
+      setConfirmingAssignment(false);
+      assignmentRequest.current = null;
+      void mutate().catch(() => {});
+    } catch (error) {
+      setAssignmentFeedback({ type: "error", text: error instanceof Error ? error.message : "No se pudo asignar el paquete. Reintenta." });
+    } finally {
+      assignmentInFlight.current = false;
+      setBuyingPack(false);
+    }
+  }
 
   useEffect(() => {
     if (!details?.user) return;
@@ -3182,11 +3228,17 @@ function UserInspectorSection() {
               {/* ASIGNAR PAQUETE */}
               <div className="p-4 border rounded-[var(--radius)] space-y-3">
                 <h3 className="font-semibold">Asignar paquete</h3>
+                {assignmentFeedback && (
+                  <p role={assignmentFeedback.type === "error" ? "alert" : "status"} className={assignmentFeedback.type === "error" ? "text-sm text-red-600" : "text-sm text-green-700"}>
+                    {assignmentFeedback.text}
+                  </p>
+                )}
 
                 <div className="flex gap-2">
                   <select
                     className="input w-full"
                     value={selectedPackId}
+                    disabled={buyingPack}
                     onChange={(e) =>
                       setSelectedPackId(e.target.value)
                     }
@@ -3196,43 +3248,34 @@ function UserInspectorSection() {
                     </option>
                     {(packs?.items ?? []).map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} · {p.classes} clases
+                        {p.name} · {p.type === "MONTHLY_UNLIMITED" ? `Ilimitado · ${monthLabel(p.unlimitedYear!, p.unlimitedMonth!)} · Una clase por día` : `${p.classes} clases`}
                       </option>
                     ))}
                   </select>
 
                   <button
                     className="btn btn-primary"
-                    disabled={!selectedPackId || buyingPack}
-                    onClick={async () => {
-                      setBuyingPack(true);
-                      try {
-                        await fetch(
-                          `/api/admin/users/${selectedId}/packs`,
-                          {
-                            method: "POST",
-                            headers: {
-                              "Content-Type": "application/json",
-                            },
-                            body: JSON.stringify({
-                              packId: selectedPackId,
-                            }),
-                          }
-                        );
-                        setSelectedPackId("");
-                        mutate();
-                      } finally {
-                        setBuyingPack(false);
-                      }
-                    }}
+                    disabled={!selectedPackId || buyingPack || details.user.id !== selectedId}
+                    onClick={() => setConfirmingAssignment(true)}
                   >
                     Asignar
                   </button>
                 </div>
 
-                <p className="text-xs text-muted-foreground">
-                  Crea una compra y acredita tokens automáticamente.
-                </p>
+                {selectedAssignmentPack?.type === "MONTHLY_UNLIMITED" ? (
+                  <p className="text-sm text-muted-foreground">
+                    Ilimitado · {monthLabel(selectedAssignmentPack.unlimitedYear!, selectedAssignmentPack.unlimitedMonth!)} · Una clase por día. Asignación ADMIN sin pago ni créditos adicionales.
+                  </p>
+                ) : <p className="text-xs text-muted-foreground">Los paquetes estándar conservan la compra manual y acreditan sus clases.</p>}
+                {confirmingAssignment && selectedAssignmentPack && (
+                  <div role="alert" className="rounded border p-3 space-y-2">
+                    <p>Confirma la asignación de <strong>{selectedAssignmentPack.name}</strong> a <strong>{details.user.name ?? details.user.email}</strong>.</p>
+                    <button className="btn btn-primary" disabled={buyingPack} onClick={assignSelectedPackage}>
+                      {buyingPack ? "Asignando…" : "Confirmar asignación"}
+                    </button>
+                    <button className="btn btn-outline ml-2" disabled={buyingPack} onClick={() => setConfirmingAssignment(false)}>Cancelar</button>
+                  </div>
+                )}
               </div>
 
               {/* PAQUETES COMPRADOS */}
