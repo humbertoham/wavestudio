@@ -544,7 +544,7 @@ function PackCard({ purchase, idx }: { purchase: PackPurchase; idx: number }) {
         y: 0,
         transition: { delay: 0.04 * idx, ease: EASE },
       }}
-      className={`card p-5 ${expired ? "opacity-70 ring-1 ring-muted" : ""}`}
+      className={`card p-5 ${expired || purchase.revokedAt ? "opacity-70 ring-1 ring-muted" : ""}`}
     >
       <div className="flex justify-between gap-4">
         <div>
@@ -552,7 +552,7 @@ function PackCard({ purchase, idx }: { purchase: PackPurchase; idx: number }) {
             {purchase.pack.name}
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            {unlimited ? "Una clase por dia - un lugar por clase" : <>{purchase.pack.classesLabel ?? <>{purchase.pack.classes} clases</>} - <span className="font-medium">{purchase.classesLeft} clases disponibles</span></>}
+            {unlimited ? (purchase.revokedAt ? "Este paquete ya no está disponible para nuevas reservas." : "Una clase por dia - un lugar por clase") : <>{purchase.pack.classesLabel ?? <>{purchase.pack.classes} clases</>} - <span className="font-medium">{purchase.classesLeft} clases disponibles</span></>}
           </p>
           <div className="mt-2 text-xs text-muted-foreground">
             Comprado: {formatDate(purchase.createdAt)}
@@ -563,7 +563,7 @@ function PackCard({ purchase, idx }: { purchase: PackPurchase; idx: number }) {
 
         <span
           className={`text-xs font-semibold uppercase ${
-            expired ? "text-red-600" : "text-emerald-600"
+            expired || purchase.revokedAt ? "text-red-600" : "text-emerald-600"
           }`}
         >
           {status}

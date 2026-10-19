@@ -81,6 +81,10 @@ import { POST as pausePack } from "@/app/api/admin/users/[id]/packs/[purchaseId]
 import { PUT as updateClass } from "@/app/api/admin/classes/[id]/route";
 import { GET as getUnlimitedSummary } from "@/app/api/users/me/unlimited/route";
 import { GET as purchasedPackages } from "@/app/api/admin/purchased-packages/route";
+import { POST as revokePack } from "@/app/api/admin/users/[id]/packs/[purchaseId]/revoke/route";
+import { GET as userDetails } from "@/app/api/admin/users/[id]/details/route";
+import { revokeAdminUnlimited } from "@/lib/admin-unlimited-revocation";
+import { promoteWaitlistForReleasedSeats } from "@/lib/waitlist-promotion";
 
 const run = `monthly_dev_${randomUUID().replaceAll("-", "")}`;
 const ids = {
@@ -330,6 +334,229 @@ describe.skipIf(!optIn)(
         where: { deliveryId: { in: ids.deliveries } },
       });
       await prisma.$disconnect();
+    });
+
+    const revoke = async (purchaseId: string, reason: unknown = "Solicitud del usuario", ownerId = user.id) => json(await revokePack(
+      req("/revoke", { reason }), { params: Promise.resolve({ id: ownerId, purchaseId }) },
+    ));
+
+    it.each(["manual", "purchased"])("ADMIN revokes %s access with immutable audit and preserves all financial and booking history", async source => {
+      let purchase;
+      if (source === "purchased") {
+        await callback(await pendingPayment(), "approved");
+        purchase = await prisma.packPurchase.findFirstOrThrow({ where: { userId: user.id } });
+      } else {
+        mocks.actor = (await createUser("ADMIN")).id;
+        const grant = await json(await assignPack(req("/assign", { packId: pack.id }), ctx(user.id)));
+        purchase = await prisma.packPurchase.findUniqueOrThrow({ where: { id: grant.body.purchase.id } });
+      }
+      mocks.actor = user.id;
+      const cls = await session();
+      const booking = await reserve(cls.id);
+      expect(booking.status).toBe(201);
+      const beforeBooking = await prisma.booking.findUniqueOrThrow({ where: { id: booking.body.bookingId } });
+      const beforeUsage = await prisma.unlimitedUsage.findUniqueOrThrow({ where: { bookingId: beforeBooking.id } });
+      const regular = await credits(3);
+      const payments = await prisma.payment.findMany({ where: { userId: user.id } });
+      const positiveCredits = await prisma.tokenLedger.findMany({ where: { userId: user.id, delta: { not: 0 } } });
+      const actor = await createUser("ADMIN");
+      mocks.actor = actor.id;
+      expect(await revoke(purchase.id, "  Solicitud explícita  ")).toMatchObject({ status: 200, body: { ok: true, alreadyRevoked: false } });
+      const revoked = await prisma.packPurchase.findUniqueOrThrow({ where: { id: purchase.id } });
+      expect(revoked).toMatchObject({ revokedAt: new Date(), revocationReason: "Solicitud explícita", classesLeft: 0,
+        nameSnapshot: purchase.nameSnapshot, priceSnapshot: purchase.priceSnapshot, paymentId: purchase.paymentId });
+      expect(await prisma.booking.findUnique({ where: { id: beforeBooking.id } })).toEqual(beforeBooking);
+      expect(await prisma.unlimitedUsage.findUnique({ where: { id: beforeUsage.id } })).toEqual(beforeUsage);
+      expect(await prisma.packPurchase.findUnique({ where: { id: regular.id } })).toEqual(regular);
+      expect(await prisma.payment.findMany({ where: { userId: user.id } })).toEqual(payments);
+      expect(await prisma.tokenLedger.findMany({ where: { userId: user.id, delta: { not: 0 } } })).toEqual(positiveCredits);
+      const audit = await prisma.tokenLedger.findUniqueOrThrow({ where: { idempotencyKey: `admin-unlimited-revocation:${purchase.id}` } });
+      expect(audit).toMatchObject({ delta: 0, userId: user.id, packPurchaseId: purchase.id,
+        metadata: { source: "ADMIN", action: "UNLIMITED_REVOCATION", actorUserId: actor.id, reason: "Solicitud explícita", revokedAt: new Date().toISOString() } });
+      const details = await json(await userDetails(req("/details", undefined, "GET"), ctx(user.id)));
+      expect(details.body.purchases.find((p: { id: string }) => p.id === purchase.id)).toMatchObject({
+        canRevoke: false, paidEntitlement: source === "purchased", origin: source === "purchased" ? "MERCADOPAGO" : "ADMIN",
+        revocationAudit: { metadata: { actorUserId: actor.id, reason: "Solicitud explícita" } },
+      });
+      mocks.actor = user.id;
+      expect((await json(await getPacks(req("/packs", undefined, "GET")))).body.items.find((p: { id: string }) => p.id === purchase.id)).toMatchObject({ revokedAt: new Date().toISOString() });
+      expect((await json(await getUnlimitedSummary(req("/summary", undefined, "GET")))).body.purchases).toEqual([
+        expect.objectContaining({ id: purchase.id, available: false }),
+      ]);
+      // A valid regular package remains usable after revocation.
+      expect(await reserve((await session("2026-10-11T13:00:00Z")).id)).toMatchObject({ status: 201, body: { debitedCredits: 1 } });
+    });
+
+    it.each(["USER", "COACH", "anonymous"])("denies %s direct API revocation", async role => {
+      const purchase = await ownUnlimited();
+      mocks.actor = role === "anonymous" ? "" : (await createUser(role as "USER" | "COACH")).id;
+      expect(await revoke(purchase.id)).toMatchObject({ status: role === "anonymous" ? 401 : 403, body: { code: role === "anonymous" ? "UNAUTHORIZED" : "FORBIDDEN" } });
+      expect((await prisma.packPurchase.findUniqueOrThrow({ where: { id: purchase.id } })).revokedAt).toBeNull();
+    });
+
+    it.each([null, "", "  ", "x".repeat(1001), 12])("requires a bounded nonempty reason: %j", async reason => {
+      const purchase = await ownUnlimited();
+      mocks.actor = (await createUser("ADMIN")).id;
+      expect(await revoke(purchase.id, reason)).toMatchObject({ status: 400, body: { code: "INVALID_REVOCATION_REASON" } });
+      expect((await prisma.packPurchase.findUniqueOrThrow({ where: { id: purchase.id } })).revokedAt).toBeNull();
+    });
+
+    it("rejects mismatched ownership, standard entitlements, expired entitlements and client audit injection", async () => {
+      const purchase = await ownUnlimited();
+      const standard = await credits(4);
+      const expired = await ownUnlimited(user, { ...pack, unlimitedMonth: 8 });
+      const other = await createUser();
+      mocks.actor = (await createUser("ADMIN")).id;
+      expect(await revoke(purchase.id, "Reason", other.id)).toMatchObject({ status: 404, body: { code: "ENTITLEMENT_NOT_FOUND" } });
+      expect(await revoke(standard.id)).toMatchObject({ status: 409, body: { code: "NOT_UNLIMITED_ENTITLEMENT" } });
+      expect(await revoke(expired.id)).toMatchObject({ status: 409, body: { code: "UNLIMITED_NOT_ACTIVE" } });
+      expect((await revokePack(req("/revoke", { reason: "Reason", actorUserId: other.id }), { params: Promise.resolve({ id: user.id, purchaseId: purchase.id }) })).status).toBe(400);
+      expect(await prisma.packPurchase.findUnique({ where: { id: standard.id } })).toEqual(standard);
+    });
+
+    it("service independently verifies the persisted ADMIN role", async () => {
+      const purchase = await ownUnlimited();
+      await expect(prisma.$transaction(tx => revokeAdminUnlimited(tx, { userId: user.id, purchaseId: purchase.id, actorUserId: user.id, reason: "Reason" }))).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("serializes duplicate revocations, preserving the first actor, reason and timestamp", async () => {
+      const purchase = await ownUnlimited();
+      mocks.actor = (await createUser("ADMIN")).id;
+      const results = await Promise.all([revoke(purchase.id, "First"), revoke(purchase.id, "Second")]);
+      expect(results.map(r => r.status)).toEqual([200, 200]);
+      expect(results.filter(r => !r.body.alreadyRevoked)).toHaveLength(1);
+      const before = await prisma.packPurchase.findUniqueOrThrow({ where: { id: purchase.id } });
+      expect((await revoke(purchase.id, "Replacement")).body.alreadyRevoked).toBe(true);
+      expect(await prisma.packPurchase.findUnique({ where: { id: purchase.id } })).toEqual(before);
+      expect(await prisma.tokenLedger.count({ where: { idempotencyKey: `admin-unlimited-revocation:${purchase.id}` } })).toBe(1);
+    });
+
+    it("revoked access cannot book, while another month remains eligible", async () => {
+      const october = await ownUnlimited();
+      await ownUnlimited(user, { ...pack, unlimitedMonth: 11 });
+      mocks.actor = (await createUser("ADMIN")).id;
+      expect((await revoke(october.id)).status).toBe(200);
+      mocks.actor = user.id;
+      expect(await reserve((await session()).id)).toMatchObject({ status: 402, body: { code: "UNLIMITED_ENTITLEMENT_REVOKED", error: expect.stringContaining("revocado") } });
+      expect((await reserve((await session("2026-11-10T13:00:00Z")).id)).status).toBe(201);
+    });
+
+    it("same-month remaining grants do not restore consumed daily allowances", async () => {
+      const first = await ownUnlimited();
+      const second = await ownUnlimited();
+      const booking = await reserve((await session()).id);
+      const used = await prisma.unlimitedUsage.findUniqueOrThrow({ where: { bookingId: booking.body.bookingId } });
+      mocks.actor = (await createUser("ADMIN")).id;
+      await revoke(used.purchaseId);
+      mocks.actor = user.id;
+      expect(await reserve((await session("2026-10-10T16:00:00Z")).id)).toMatchObject({ status: 402, body: { code: "UNLIMITED_DAILY_LIMIT" } });
+      const next = await reserve((await session("2026-10-11T16:00:00Z")).id);
+      expect(next.status).toBe(201);
+      expect((await prisma.unlimitedUsage.findUniqueOrThrow({ where: { bookingId: next.body.bookingId } })).purchaseId).toBe(used.purchaseId === first.id ? second.id : first.id);
+    });
+
+    it.each([true, false])("cancellation after revocation retains revocation and early/late usage rules: onTime=%s", async onTime => {
+      const purchase = await ownUnlimited();
+      const cls = await session();
+      const booking = await reserve(cls.id);
+      mocks.actor = (await createUser("ADMIN")).id;
+      await revoke(purchase.id);
+      mocks.actor = user.id;
+      vi.setSystemTime(new Date(cls.date.getTime() - (onTime ? 5 * 3600_000 : 60_000)));
+      expect((await cancel(req("/cancel", undefined, "PATCH"), ctx(booking.body.bookingId))).status).toBe(200);
+      expect((await prisma.packPurchase.findUniqueOrThrow({ where: { id: purchase.id } })).revokedAt).not.toBeNull();
+      const usage = await prisma.unlimitedUsage.findUniqueOrThrow({ where: { bookingId: booking.body.bookingId } });
+      expect(!!usage.releasedAt).toBe(onTime);
+      expect(await reserve((await session("2026-10-11T13:00:00Z")).id)).toMatchObject({ status: 402, body: { code: "UNLIMITED_ENTITLEMENT_REVOKED" } });
+      expect(await prisma.tokenLedger.count({ where: { userId: user.id, delta: { not: 0 } } })).toBe(0);
+    });
+
+    it("waitlist promotion cannot bypass revoked access", async () => {
+      const purchase = await ownUnlimited();
+      const cls = await session();
+      const entry = await prisma.waitlist.create({ data: { userId: user.id, classId: cls.id, position: 1 } });
+      mocks.actor = (await createUser("ADMIN")).id;
+      await revoke(purchase.id);
+      const response = await promote(req("/promote"), { params: Promise.resolve({ id: cls.id, entryId: entry.id }) });
+      expect(response.status).toBe(409);
+      expect(await prisma.booking.count({ where: { userId: user.id, classId: cls.id } })).toBe(0);
+      expect(await prisma.waitlist.findUnique({ where: { id: entry.id } })).not.toBeNull();
+    });
+
+    it("a stale SERIALIZABLE booking cannot commit after revocation completes", async () => {
+      const purchase = await ownUnlimited();
+      const cls = await session();
+      const actor = await createUser("ADMIN");
+      let ready!: () => void;
+      let resume!: () => void;
+      const snapshotReady = new Promise<void>(r => { ready = r; });
+      const resumeBooking = new Promise<void>(r => { resume = r; });
+      const stale = prisma.$transaction(async tx => {
+        await tx.packPurchase.findUniqueOrThrow({ where: { id: purchase.id } });
+        ready();
+        await resumeBooking;
+        return createBookingWithCreditCheck(tx, { userId: user.id, classId: cls.id });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15000 });
+      // Attach rejection before releasing the barrier to avoid unhandled errors.
+      const outcome = stale.then(value => ({ value, error: null }), error => ({ value: null, error }));
+      await snapshotReady;
+      try {
+        await prisma.$transaction(tx => revokeAdminUnlimited(tx, { userId: user.id, purchaseId: purchase.id, actorUserId: actor.id, reason: "Concurrent revocation" }));
+      } finally { resume(); }
+      const result = await outcome;
+      expect(result.value).toBeNull();
+      expect(isBookingTransactionConflict(result.error)).toBe(true);
+      expect(await prisma.booking.count({ where: { userId: user.id, classId: cls.id } })).toBe(0);
+      expect(await prisma.unlimitedUsage.count({ where: { purchaseId: purchase.id } })).toBe(0);
+      expect(await reserve(cls.id)).toMatchObject({ status: 402, body: { code: "UNLIMITED_ENTITLEMENT_REVOKED" } });
+    });
+
+    it("automatic waitlist promotion skips revoked access and promotes the next eligible account", async () => {
+      const purchase = await ownUnlimited();
+      const other = await createUser();
+      await credits(1, other);
+      const cls = await session(undefined, 1);
+      await prisma.waitlist.createMany({ data: [
+        { userId: user.id, classId: cls.id, position: 1 },
+        { userId: other.id, classId: cls.id, position: 2 },
+      ] });
+      mocks.actor = (await createUser("ADMIN")).id;
+      await revoke(purchase.id);
+      expect(await prisma.$transaction(tx => promoteWaitlistForReleasedSeats(tx, { classId: cls.id, seatsReleased: 1 }), {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      })).toBe(1);
+      expect(await prisma.booking.findMany({ where: { classId: cls.id }, select: { userId: true, entitlementType: true } })).toEqual([
+        { userId: other.id, entitlementType: "CREDITS" },
+      ]);
+      expect(await prisma.waitlist.count({ where: { classId: cls.id, userId: user.id } })).toBe(1);
+    });
+
+    it("a booking holds the entitlement row lock through commit and survives subsequent revocation", async () => {
+      const purchase = await ownUnlimited();
+      const cls = await session();
+      const actor = await createUser("ADMIN");
+      let ready!: () => void;
+      let resume!: () => void;
+      const bookingReady = new Promise<void>(r => { ready = r; });
+      const resumeBooking = new Promise<void>(r => { resume = r; });
+      const pendingBooking = prisma.$transaction(async tx => {
+        const booking = await createBookingWithCreditCheck(tx, { userId: user.id, classId: cls.id });
+        ready();
+        await resumeBooking;
+        return booking;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15000 });
+      await bookingReady;
+      try {
+        // NOWAIT proves the booking owns the row lock while uncommitted.
+        await expect(prisma.$transaction(tx => tx.$queryRaw`
+          SELECT "id" FROM "PackPurchase" WHERE "id" = ${purchase.id} FOR UPDATE NOWAIT
+        `)).rejects.toMatchObject({ code: "P2010", meta: { code: "55P03" } });
+      } finally { resume(); }
+      const booking = await pendingBooking;
+      await prisma.$transaction(tx => revokeAdminUnlimited(tx, { userId: user.id, purchaseId: purchase.id, actorUserId: actor.id, reason: "After booking" }));
+      expect(await prisma.booking.findUnique({ where: { id: booking.id } })).toMatchObject({ status: "ACTIVE", packPurchaseId: purchase.id });
+      expect(await prisma.unlimitedUsage.findUnique({ where: { bookingId: booking.id } })).toMatchObject({ releasedAt: null });
+      expect(await reserve((await session("2026-10-11T13:00:00Z")).id)).toMatchObject({ status: 402, body: { code: "UNLIMITED_ENTITLEMENT_REVOKED" } });
     });
 
     it("buys in September, books October ahead, adds no credits, and occupies one seat", async () => {

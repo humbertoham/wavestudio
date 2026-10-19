@@ -135,6 +135,18 @@ export async function createBookingWithCreditCheck(
 
   const entitlementType = unlimited.purchase ? (quantity > 1 ? "MIXED" : "MONTHLY_UNLIMITED") : "CREDITS";
 
+  if (unlimited.purchase) {
+    // Hold until booking commit. Admin revocation locks this exact same row.
+    // A stale SERIALIZABLE snapshot fails here and the caller retries; under
+    // READ COMMITTED the returned state is the latest committed state.
+    const rows = await tx.$queryRaw<{ revokedAt: Date | null }[]>`
+      SELECT "revokedAt" FROM "PackPurchase"
+      WHERE "id" = ${unlimited.purchase.id} AND "userId" = ${params.userId}
+      FOR UPDATE
+    `;
+    if (!rows.length || rows[0].revokedAt) throw { code: "P2034" };
+  }
+
   // Database conflicts must escape this transaction so the caller can retry
   // with a fresh snapshot (especially automatic waitlist promotion).
   const booking = await tx.booking.create({

@@ -326,10 +326,13 @@ export async function revokeUnlimitedPurchase(
 
 export function isBookingTransactionConflict(error: unknown) {
   if (!error || typeof error !== "object") return false;
-  const e = error as { code?: string; meta?: { target?: unknown } };
+  const e = error as { code?: string; meta?: { target?: unknown; code?: string } };
   const target = String(e.meta?.target);
   return (
     e.code === "P2034" ||
+    // PostgreSQL reports conflicts from SELECT ... FOR UPDATE as raw-query
+    // errors. Retry the entire transaction, never just the locking statement.
+    (e.code === "P2010" && ["40001", "40P01"].includes(e.meta?.code ?? "")) ||
     (e.code === "P2002" &&
       (/serviceDate|UnlimitedUsage_one_consumed_day/.test(target) ||
         (/userId/.test(target) && /classId/.test(target))))

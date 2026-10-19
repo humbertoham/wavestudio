@@ -1,7 +1,7 @@
 "use client";
 
 import { PackageTypeFields, type PackageCalendarDraft } from "@/components/packages/PackageTypeFields";
-import { monthLabel } from "@/lib/unlimited-calendar";
+import { monthLabel, monthlyPeriod } from "@/lib/unlimited-calendar";
 import useSWR from "swr";
 import Link from "next/link";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -325,6 +325,11 @@ type UserDetails = {
   tokenBalance: number;
   purchases: Array<PackageCalendarDraft & {
     revokedAt?: string | null;
+    revocationReason?: string | null;
+    revocationAudit?: { createdAt: string; metadata: { actorUserId?: string; reason?: string; revokedAt?: string } } | null;
+    origin: "MERCADOPAGO" | "ADMIN";
+    paidEntitlement: boolean;
+    canRevoke: boolean;
     id: string;
     createdAt: string;
     expiresAt: string;
@@ -2483,6 +2488,12 @@ function UserInspectorSection() {
   const [savingRole, setSavingRole] = useState(false);
   const [pauseDaysById, setPauseDaysById] = useState<Record<string, number>>({});
   const [pausingPackId, setPausingPackId] = useState<string | null>(null);
+  const [revokingPurchase, setRevokingPurchase] = useState<UserDetails["purchases"][number] | null>(null);
+  const [revocationReason, setRevocationReason] = useState("");
+  const [revoking, setRevoking] = useState(false);
+  const revocationInFlight = useRef(false);
+  const revocationDialog = useRef<HTMLDialogElement>(null);
+  const [revocationFeedback, setRevocationFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // 1️⃣ últimos usuarios
   const userParams = new URLSearchParams({
@@ -2524,7 +2535,36 @@ function UserInspectorSection() {
   }, [selectedId, selectedPackId]);
   useEffect(() => {
     setAssignmentFeedback(null);
+    setRevokingPurchase(null);
+    setRevocationFeedback(null);
   }, [selectedId]);
+
+  useEffect(() => {
+    if (revokingPurchase) revocationDialog.current?.showModal();
+    else revocationDialog.current?.close();
+  }, [revokingPurchase]);
+
+  async function confirmRevocation() {
+    if (!selectedId || details?.user.id !== selectedId || !revokingPurchase || !revocationReason.trim() || revocationInFlight.current) return;
+    revocationInFlight.current = true;
+    setRevoking(true);
+    setRevocationFeedback(null);
+    try {
+      const res = await fetch(`/api/admin/users/${selectedId}/packs/${revokingPurchase.id}/revoke`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: revocationReason.trim() }),
+      });
+      if (!res.ok) throw new Error(await readApiMessage(res, "No se pudo revocar el paquete."));
+      setRevokingPurchase(null);
+      setRevocationFeedback({ type: "success", text: "Paquete ilimitado revocado correctamente. Las reservas existentes se conservan." });
+      void mutate().catch(() => {});
+    } catch (error) {
+      setRevocationFeedback({ type: "error", text: error instanceof Error ? error.message : "No se pudo revocar el paquete." });
+    } finally {
+      revocationInFlight.current = false;
+      setRevoking(false);
+    }
+  }
 
   async function assignSelectedPackage() {
     if (!selectedId || details?.user.id !== selectedId || !selectedAssignmentPack || assignmentInFlight.current) return;
@@ -3281,6 +3321,26 @@ function UserInspectorSection() {
               {/* PAQUETES COMPRADOS */}
               <div className="p-4 border rounded-[var(--radius)]">
   <h3 className="font-semibold mb-3">Paquetes</h3>
+  {revocationFeedback && !revokingPurchase && <p className={revocationFeedback.type === "error" ? "text-sm text-red-600 mb-3" : "text-sm text-green-700 mb-3"} role={revocationFeedback.type === "error" ? "alert" : "status"}>{revocationFeedback.text}</p>}
+  <dialog ref={revocationDialog} aria-labelledby="revocation-title" className="m-auto max-w-lg w-[calc(100%-2rem)] rounded-xl border p-6 backdrop:bg-black/50" onCancel={(event) => {
+    event.preventDefault();
+    if (!revocationInFlight.current) setRevokingPurchase(null);
+  }}>
+    {revokingPurchase && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void confirmRevocation(); }}>
+      <h3 id="revocation-title" className="text-lg font-semibold">¿Revocar paquete ilimitado?</h3>
+      <p>Estás a punto de quitar el paquete <strong>{revokingPurchase.pack.name}</strong> a <strong>{details.user.name ?? details.user.email}</strong>.</p>
+      <p>El usuario ya no podrá realizar nuevas reservas utilizando este paquete. Las reservas existentes no se cancelarán automáticamente.</p>
+      {revokingPurchase.paidEntitlement && <p className="rounded border border-amber-400 bg-amber-50 p-3 text-amber-900" role="note">Este paquete tiene un pago registrado. La revocación no emite un reembolso automático. Cualquier reembolso debe tramitarse por separado mediante el proceso autorizado.</p>}
+      <label className="block">Motivo de revocación
+        <textarea autoFocus required maxLength={1000} className="input mt-1 w-full" value={revocationReason} disabled={revoking} onChange={event => setRevocationReason(event.target.value)} />
+      </label>
+      {revocationFeedback?.type === "error" && <p role="alert" className="text-red-600">{revocationFeedback.text}</p>}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="btn btn-outline" disabled={revoking} onClick={() => setRevokingPurchase(null)}>Cancelar</button>
+        <button type="submit" className="btn btn-primary" disabled={revoking || !revocationReason.trim()}>{revoking ? "Revocando…" : "Confirmar revocación"}</button>
+      </div>
+    </form>}
+  </dialog>
 
   <div className="overflow-x-auto">
     <table className="min-w-[900px] w-full text-sm border-collapse">
@@ -3290,7 +3350,7 @@ function UserInspectorSection() {
           <th>Restantes</th>
           <th>Vence</th>
           <th>Estado</th>
-          <th>Pausar</th>
+          <th>Acciones</th>
         </tr>
       </thead>
       <tbody>
@@ -3303,7 +3363,13 @@ function UserInspectorSection() {
 
           return (
             <tr key={p.id} className="border-b border-[var(--color-border)]">
-              <td className="py-2">{p.pack.name}</td>
+              <td className="py-2">{p.pack.name}
+                {p.type === "MONTHLY_UNLIMITED" && <div className="mt-1 text-xs text-muted-foreground">
+                  {monthLabel(p.unlimitedYear!, p.unlimitedMonth!)}<br />
+                  {p.origin === "MERCADOPAGO" ? "Compra Mercado Pago" : "Asignación manual ADMIN"}<br />
+                  {formatAdminDate(p.createdAt)}
+                </div>}
+              </td>
               <td className="py-2">{p.type === "MONTHLY_UNLIMITED" ? "Una clase por dia" : p.classesLeft}</td>
               <td className="py-2">
                 <span className="whitespace-nowrap">
@@ -3321,7 +3387,7 @@ function UserInspectorSection() {
                   </span>
                 ) : (
                   <span className="text-xs font-medium text-green-600">
-                    Activo
+                    {p.type === "MONTHLY_UNLIMITED" && monthlyPeriod(p.unlimitedYear!, p.unlimitedMonth!).startsAt.getTime() > Date.now() ? "Próximamente" : "Activo"}
                   </span>
                 )}
                 {p.pausedDays > 0 && (
@@ -3329,9 +3395,15 @@ function UserInspectorSection() {
                     {p.pausedDays} dia{p.pausedDays === 1 ? "" : "s"} pausados
                   </div>
                 )}
+                {p.revokedAt && <div className="mt-1 max-w-xs break-words text-xs text-muted-foreground">
+                  {formatAdminDate(p.revokedAt)}<br />
+                  {p.revocationAudit ? <>ADMIN: {p.revocationAudit.metadata.actorUserId}<br />{p.revocationAudit.metadata.reason}</> : p.revocationReason}
+                </div>}
               </td>
               <td className="py-2">
-                <div className="flex items-center gap-2">
+                {p.type === "MONTHLY_UNLIMITED" ? (p.canRevoke && <button className="btn btn-outline whitespace-nowrap" disabled={revoking || details.user.id !== selectedId} onClick={() => {
+                  setRevocationReason(""); setRevocationFeedback(null); setRevokingPurchase(p);
+                }}>Revocar ilimitado</button>) : <div className="flex items-center gap-2">
                   <input
                     type="number"
                     min={1}
@@ -3344,18 +3416,18 @@ function UserInspectorSection() {
                         [p.id]: Number(e.target.value),
                       }))
                     }
-                    disabled={pausingPackId === p.id || p.type === "MONTHLY_UNLIMITED"}
+                    disabled={pausingPackId === p.id}
                   />
                   <button
                     className="btn btn-outline whitespace-nowrap"
                     disabled={
-                      pausingPackId === p.id || p.type === "MONTHLY_UNLIMITED" || pauseDays < 1 || pauseDays > 30
+                      pausingPackId === p.id || pauseDays < 1 || pauseDays > 30
                     }
                     onClick={() => pausePurchase(p.id)}
                   >
                     {pausingPackId === p.id ? "Pausando..." : "Pausar paquete"}
                   </button>
-                </div>
+                </div>}
               </td>
             </tr>
           );

@@ -9,7 +9,7 @@ export const unlimitedErrorMessages = {
   UNLIMITED_NOT_ACTIVE:
     "Tu paquete ilimitado ya no está vigente para nuevas reservas.",
   UNLIMITED_ENTITLEMENT_REVOKED:
-    "El acceso de este paquete ilimitado fue revocado.",
+    "Este paquete ilimitado fue revocado y ya no puede utilizarse para reservar clases.",
   UNLIMITED_MONTH_MISMATCH:
     "Tu paquete ilimitado no corresponde al mes de esta clase.",
 } as const;
