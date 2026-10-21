@@ -7,6 +7,7 @@ import {
   requireClassManagerUser,
 } from "../../_utils";
 import { executeClassDeletion } from "@/lib/class-deletion-response";
+import { businessClassDay } from "@/lib/unlimited-calendar";
 import {
   payrollErrorResponse,
   redactClassPayroll,
@@ -25,6 +26,18 @@ function json(status: number, body: unknown) {
 }
 
 function updateError(error: unknown) {
+  const details = error as { message?: string; meta?: { database_error?: string } };
+  if (
+    /CLASS_HAS_UNLIMITED_USAGE/.test(
+      String(details?.meta?.database_error ?? details?.message),
+    )
+  ) {
+    return json(409, {
+      code: "CLASS_HAS_UNLIMITED_USAGE",
+      error: "CLASS_HAS_UNLIMITED_USAGE",
+      message: "Esta clase tiene usos ilimitados registrados y no puede cambiar de día. Crea otra sesión para la nueva fecha.",
+    });
+  }
   const known = payrollErrorResponse(error);
   if (known) return NextResponse.json(known.body, { status: known.status });
 
@@ -33,6 +46,23 @@ function updateError(error: unknown) {
     error: "CLASS_UPDATE_FAILED",
     message: "No se pudo actualizar la clase.",
   });
+}
+
+async function assertUnlimitedClassDay(
+  tx: Prisma.TransactionClient,
+  classId: string,
+  date: Prisma.ClassUncheckedUpdateInput["date"],
+) {
+  if (!(date instanceof Date)) return;
+  const usage = await tx.unlimitedUsage.findFirst({
+    where: {
+      booking: { classId },
+      releasedAt: null,
+      serviceDate: { not: businessClassDay(date).serviceDate },
+    },
+    select: { id: true },
+  });
+  if (usage) throw new Error("CLASS_HAS_UNLIMITED_USAGE");
 }
 
 export async function PUT(req: NextRequest, ctx: Ctx) {
@@ -53,15 +83,16 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       data.date = zonedTimeToUtc(String(date).replace("T", " "), USER_TZ);
     }
 
-    const updated = await runPayrollTransaction((tx) =>
-      updateClassWithPayrollAssignment(tx, {
+    const updated = await runPayrollTransaction(async (tx) => {
+      await assertUnlimitedClassDay(tx, id, data.date);
+      return updateClassWithPayrollAssignment(tx, {
         classId: id,
         data,
         instructorId:
           instructorId === undefined ? undefined : String(instructorId),
         actorUserId: auth.user.id,
-      })
-    );
+      });
+    });
 
     return NextResponse.json(redactClassPayroll(updated));
   } catch (error) {
@@ -132,6 +163,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         }
       }
 
+      await assertUnlimitedClassDay(tx, id, data.date);
       return updateClassWithPayrollAssignment(tx, {
         classId: id,
         data,

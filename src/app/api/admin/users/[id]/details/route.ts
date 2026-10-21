@@ -78,7 +78,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         select: {
           id: true,
           status: true,
+          provider: true,
+          amount: true,
+          mpExternalRef: true,
         },
+      },
+      ledgerEntries: {
+        where: { idempotencyKey: { startsWith: "admin-unlimited-revocation:" } },
+        select: { metadata: true, createdAt: true },
+        take: 1,
       },
     },
   });
@@ -164,7 +172,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     tokenBalance,
 
     purchases: purchases.map((p) => ({
-      id: p.id,
+      id: p.id, type: p.type, unlimitedMonth: p.unlimitedMonth, unlimitedYear: p.unlimitedYear, revokedAt: p.revokedAt,
+      revocationReason: p.revocationReason,
+      revocationAudit: p.ledgerEntries[0] ?? null,
+      origin: p.payment?.provider === "MERCADOPAGO" && p.payment.mpExternalRef !== "ADMIN_MANUAL" ? "MERCADOPAGO" : "ADMIN",
+      paidEntitlement: !!p.payment && p.payment.amount > 0,
+      canRevoke: p.type === "MONTHLY_UNLIMITED" && !p.revokedAt && p.expiresAt > now,
       createdAt: p.createdAt,
       expiresAt: p.expiresAt,
       classesLeft: p.classesLeft,
@@ -172,12 +185,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       pausedUntil: p.pausedUntil,
       isPaused: !!p.pausedUntil && p.pausedUntil > now,
       isExpired: p.expiresAt < now,
-      pack: p.pack,
-      payment: p.payment ?? null,
+      pack: { ...p.pack, name: p.nameSnapshot ?? p.pack.name, price: p.priceSnapshot ?? p.pack.price },
+      payment: p.payment ? { id: p.payment.id, status: p.payment.status } : null,
     })),
 
     bookings: bookings.map((b) => ({
-      id: b.id,
+      id: b.id, entitlementType: b.entitlementType,
       status: b.status,
       quantity: b.quantity,
       createdAt: b.createdAt,

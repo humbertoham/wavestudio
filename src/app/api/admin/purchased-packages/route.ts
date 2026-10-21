@@ -149,7 +149,7 @@ export async function GET(req: NextRequest) {
       select: {
         id: true,
         createdAt: true,
-        classesLeft: true,
+        classesLeft: true, type: true, unlimitedMonth: true, unlimitedYear: true, nameSnapshot: true, priceSnapshot: true, revokedAt: true,
         expiresAt: true,
         user: {
           select: {
@@ -181,12 +181,17 @@ export async function GET(req: NextRequest) {
           },
         },
         ledgerEntries: {
-          where: { delta: { gt: 0 } },
+          where: { OR: [
+            { delta: { gt: 0 } },
+            { reason: "ADMIN_ADJUST", delta: 0, metadata: { path: ["action"], equals: "PACKAGE_ASSIGNMENT" } },
+          ] },
           orderBy: { createdAt: "asc" },
-          take: 1,
+          take: 2,
           select: {
             delta: true,
             reason: true,
+            metadata: true,
+            createdAt: true,
           },
         },
       },
@@ -194,22 +199,29 @@ export async function GET(req: NextRequest) {
   ]);
 
   return NextResponse.json({
-    items: rows.map((row) => ({
-      id: row.id,
+    items: rows.map((row) => {
+      const credit = row.ledgerEntries.find(entry => entry.delta > 0);
+      const audit = row.ledgerEntries.find(entry => entry.delta === 0 && entry.reason === "ADMIN_ADJUST");
+      const metadata = audit?.metadata as Prisma.JsonObject | undefined;
+      return ({
+      id: row.id, type: row.type, unlimitedMonth: row.unlimitedMonth, unlimitedYear: row.unlimitedYear, revokedAt: row.revokedAt,
       createdAt: row.createdAt,
       expiresAt: row.expiresAt,
       classesLeft: row.classesLeft,
-      classesPurchased: row.ledgerEntries[0]?.delta ?? row.pack.classes,
-      creditReason: row.ledgerEntries[0]?.reason ?? null,
+      classesPurchased: row.type === "MONTHLY_UNLIMITED" ? 0 : credit?.delta ?? row.pack.classes,
+      creditReason: credit?.reason ?? null,
       user: row.user,
-      pack: row.pack,
-      amountPaid: row.payment?.amount ?? row.pack.price,
+      pack: { ...row.pack, name: row.nameSnapshot ?? row.pack.name, price: row.priceSnapshot ?? row.pack.price },
+      amountPaid: row.payment?.amount ?? (audit ? 0 : row.priceSnapshot ?? row.pack.price),
+      assignmentSource: audit ? "ADMIN" : null,
+      assignedBy: metadata?.actorUserId ?? null,
+      assignedAt: audit?.createdAt ?? null,
       paymentStatus: row.payment?.status ?? null,
       paymentProvider: row.payment?.provider ?? null,
       paymentReference:
         row.payment?.mpPaymentId ?? row.payment?.mpPreferenceId ?? null,
       checkoutStatus: row.payment?.checkoutLink?.status ?? null,
-    })),
+    }); }),
     page,
     pageSize,
     total,

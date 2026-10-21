@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const tx = {
     class: { findUnique: vi.fn() },
+    unlimitedUsage: { findFirst: vi.fn() },
   };
   return {
     tx,
@@ -49,6 +50,7 @@ const ctx = { params: Promise.resolve({ id: "class_1" }) };
 
 describe("class edit payroll assignment paths", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mocks.requireAdminUser.mockResolvedValue({
       ok: true,
       user: { id: "admin_1", role: "ADMIN" },
@@ -63,6 +65,7 @@ describe("class edit payroll assignment paths", () => {
       deletedAt: null,
       bookings: [],
     });
+    mocks.tx.unlimitedUsage.findFirst.mockResolvedValue(null);
     mocks.updateClassWithPayrollAssignment.mockResolvedValue({
       id: "class_1",
       instructor: { id: "coach_b", name: "Coach B" },
@@ -118,5 +121,18 @@ describe("class edit payroll assignment paths", () => {
     );
 
     expect(response.status).toBe(409);
+  });
+
+  it("preserves payroll assignment when an unlimited claim prevents changing the class day", async () => {
+    mocks.tx.unlimitedUsage.findFirst.mockResolvedValue({ id: "usage_1" });
+
+    const response = await PUT(
+      request("PUT", { date: "2026-09-11T09:30", instructorId: "coach_b" }),
+      ctx,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: "CLASS_HAS_UNLIMITED_USAGE" });
+    expect(mocks.updateClassWithPayrollAssignment).not.toHaveBeenCalled();
   });
 });

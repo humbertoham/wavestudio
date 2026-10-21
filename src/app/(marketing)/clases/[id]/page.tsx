@@ -54,6 +54,7 @@ type ClassApi = {
     id: string;
     quantity: number;
     status?: "ACTIVE" | "CANCELED";
+    entitlementType?: string;
     attended?: boolean;
     canceledAt?: string | null;
     isNewUser?: boolean;
@@ -82,6 +83,7 @@ type ClassApi = {
 
 type AttendeeRow = {
   bookingId: string;
+  entitlementType?: string;
   name: string;
   email?: string;
   phone?: string | null;
@@ -94,6 +96,7 @@ type AttendeeRow = {
 
 type CanceledRow = {
   bookingId: string;
+  entitlementType?: string;
   name: string;
   email?: string;
   phone?: string | null;
@@ -511,6 +514,7 @@ export default function ClassAdminPage() {
         isGuest: !booking.user,
         attended: !!booking.attended,
         quantity: booking.quantity ?? 1,
+        entitlementType: booking.entitlementType,
         affiliation: booking.user?.affiliation ?? "NONE",
         isNewUser: !booking.user
           ? false
@@ -530,6 +534,7 @@ export default function ClassAdminPage() {
         phone: booking.user?.phone ?? null,
         affiliation: booking.user?.affiliation ?? "NONE",
         canceledAt: booking.canceledAt ?? null,
+        entitlementType: booking.entitlementType,
       }));
   }, [cls]);
 
@@ -929,6 +934,11 @@ export default function ClassAdminPage() {
                         </span>
                       )}
                       <AffiliationBadge affiliation={attendee.affiliation} />
+                      {(attendee.entitlementType === "MONTHLY_UNLIMITED" || attendee.entitlementType === "MIXED") && (
+                        <span className="rounded bg-primary/10 px-2 py-0.5 text-xs">
+                          {attendee.entitlementType === "MIXED" ? "Ilimitado + créditos" : "Ilimitado mensual"}
+                        </span>
+                      )}
                     </p>
 
                     <NewUserBadge isNewUser={attendee.isNewUser} />

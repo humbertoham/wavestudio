@@ -86,6 +86,7 @@ describe("POST /api/admin/classes/[id]/add-guest", () => {
       data: {
         classId: "class_1",
         guestName: "Guest Person",
+        entitlementType: "ADMIN_GUEST",
         quantity: 1,
         status: "ACTIVE",
       },

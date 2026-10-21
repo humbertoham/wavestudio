@@ -1,108 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPackageExpirationAt11Pm } from "@/lib/package-expiration";
-import { prisma, requireAdmin } from "../../../_utils";
+import { prisma, getUserFromSession } from "../../../_utils";
+import { adminAssignmentSchema, assignmentKeySchema, assignAdminPackage, assignmentFailure } from "@/lib/admin-package-assignment";
 
 export const runtime = "nodejs";
-
 type Ctx = { params: Promise<{ id: string }> };
 
-function json(status: number, body: any) {
-  return NextResponse.json(body, { status });
-}
-
 export async function POST(req: NextRequest, ctx: Ctx) {
-  // 1️⃣ Validar admin
-  const auth = await requireAdmin(req);
-  if (auth) return auth;
-
+  const actor = await getUserFromSession(req);
+  if (!actor) return NextResponse.json({ ok: false, message: "Inicia sesión para asignar paquetes." }, { status: 401 });
+  if (actor.role !== "ADMIN") return NextResponse.json({ ok: false, message: "Solo un administrador puede asignar paquetes." }, { status: 403 });
+  const body = adminAssignmentSchema.safeParse(await req.json().catch(() => null));
+  const key = assignmentKeySchema.safeParse(req.headers.get("Idempotency-Key"));
+  if (!body.success || !key.success)
+    return NextResponse.json({ ok: false, message: "Selecciona un paquete válido y reintenta la asignación." }, { status: 400 });
   const { id: userId } = await ctx.params;
-
-  // 2️⃣ Leer payload
-  const { packId } = await req.json();
-
-  if (!packId || typeof packId !== "string") {
-    return json(400, {
-      ok: false,
-      message: "packId requerido",
-    });
+  try {
+    const purchase = await prisma.$transaction(tx => assignAdminPackage(tx, {
+      userId, ...body.data, actorUserId: actor.id, requestKey: key.data,
+    }));
+    return NextResponse.json({ ok: true, message: "Paquete asignado correctamente.", purchase: {
+      id: purchase.id, packId: purchase.packId, packName: purchase.nameSnapshot,
+      type: purchase.type, classes: purchase.classesLeft,
+      unlimitedMonth: purchase.unlimitedMonth, unlimitedYear: purchase.unlimitedYear,
+      expiresAt: purchase.expiresAt,
+    } });
+  } catch (error) {
+    const failure = assignmentFailure(error);
+    return NextResponse.json({ ok: false, code: failure.code, message: failure.message }, { status: failure.status });
   }
-
-  // 3️⃣ Verificar usuario
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true },
-  });
-
-  if (!user) {
-    return json(404, {
-      ok: false,
-      message: "Usuario no encontrado",
-    });
-  }
-
-  // 4️⃣ Verificar paquete
-  const pack = await prisma.pack.findUnique({
-    where: { id: packId },
-  });
-
-  if (!pack) {
-    return json(400, {
-      ok: false,
-      message: "Paquete inválido",
-    });
-  }
-
-  // 5️⃣ Calcular vencimiento
-  const expiresAt = getPackageExpirationAt11Pm(new Date(), pack.validityDays);
-
-  // 6️⃣ Transacción (IMPORTANTÍSIMO)
-  const result = await prisma.$transaction(async (tx) => {
-  // 1️⃣ Crear PackPurchase
-  const purchase = await tx.packPurchase.create({
-    data: {
-      userId,
-      packId: pack.id,
-      classesLeft: pack.classes,
-      expiresAt,
-    },
-  });
-
-  // 2️⃣ Acreditar tokens
-  await tx.tokenLedger.create({
-    data: {
-      userId,
-      packPurchaseId: purchase.id,
-      delta: pack.classes,
-      reason: "PURCHASE_CREDIT",
-    },
-  });
-
-  // 3️⃣ 🔥 Crear Payment ADMIN (esto es lo nuevo)
-  await tx.payment.create({
-    data: {
-      provider: "ADMIN",
-      status: "APPROVED",
-      amount: pack.price,
-      currency: "MXN",
-      userId,
-      packPurchase: {
-  connect: { id: purchase.id }
-}
-    },
-  });
-
-  return purchase;
-});
-
-  // 7️⃣ Respuesta
-  return json(200, {
-    ok: true,
-    purchase: {
-      id: result.id,
-      packId: pack.id,
-      packName: pack.name,
-      classes: pack.classes,
-      expiresAt: result.expiresAt,
-    },
-  });
 }

@@ -1,8 +1,10 @@
 "use client";
 
+import { PackageTypeFields, type PackageCalendarDraft } from "@/components/packages/PackageTypeFields";
+import { monthLabel, monthlyPeriod } from "@/lib/unlimited-calendar";
 import useSWR from "swr";
 import Link from "next/link";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FiMessageCircle } from "react-icons/fi";
 import { getWhatsAppHref } from "@/lib/whatsapp";
@@ -274,7 +276,7 @@ type ChallengeLeaderboard = {
   total: number;
   totalPages: number;
 };
-type Pack = {
+type Pack = PackageCalendarDraft & {
   id: string;
   name: string;
   classes: number;
@@ -329,7 +331,13 @@ type UserDetails = {
     createdAt: string;
   };
   tokenBalance: number;
-  purchases: Array<{
+  purchases: Array<PackageCalendarDraft & {
+    revokedAt?: string | null;
+    revocationReason?: string | null;
+    revocationAudit?: { createdAt: string; metadata: { actorUserId?: string; reason?: string; revokedAt?: string } } | null;
+    origin: "MERCADOPAGO" | "ADMIN";
+    paidEntitlement: boolean;
+    canRevoke: boolean;
     id: string;
     createdAt: string;
     expiresAt: string;
@@ -369,7 +377,8 @@ type UserDetails = {
     } | null;
   }>;
 };
-type PurchasedPackage = {
+type PurchasedPackage = PackageCalendarDraft & {
+  revokedAt?: string | null;
   id: string;
   createdAt: string;
   expiresAt: string;
@@ -379,6 +388,9 @@ type PurchasedPackage = {
   user: { name: string | null; email: string; affiliation: Affiliation };
   pack: { name: string; classes: number; price: number };
   amountPaid: number;
+  assignmentSource?: "ADMIN" | null;
+  assignedBy?: string | null;
+  assignedAt?: string | null;
   paymentStatus: "PENDING" | "APPROVED" | "REJECTED" | "REFUNDED" | "CANCELED" | null;
   paymentProvider: "MERCADOPAGO" | "ADMIN" | null;
   paymentReference?: string | null;
@@ -1661,7 +1673,7 @@ function PacksSection() {
   const isHighlight = (v: unknown): v is HighlightOpt => v === "popular" || v === "best";
 
   // Estado del formulario de creación (separado del tipo Pack para no pelear con Json/enum)
-  const [creating, setCreating] = useState<{
+  const [creating, setCreating] = useState<PackageCalendarDraft & {
     name: string;
     classes?: number;
     price?: number;           // entero en pesos; si usas centavos cambia en el API
@@ -1697,10 +1709,11 @@ function PacksSection() {
 
     // Construye payload limpio (sin undefineds)
     const payload: any = {
+  type: creating.type ?? "STANDARD", unlimitedMonth: creating.unlimitedMonth, unlimitedYear: creating.unlimitedYear,
   name: creating.name?.trim(),
-  classes: creating.classes,
+  classes: creating.type === "MONTHLY_UNLIMITED" ? 0 : creating.classes,
   price: creating.price,
-  validityDays: creating.validityDays,
+  validityDays: creating.type === "MONTHLY_UNLIMITED" ? 0 : creating.validityDays,
   isActive: !!creating.isActive,
   oncePerUser: !!creating.oncePerUser, // 👈 NUEVO
   classesLabel: creating.classesLabel?.trim() || undefined,
@@ -1752,6 +1765,7 @@ function PacksSection() {
 
       {/* Crear */}
       <form onSubmit={createPack} className="grid md:grid-cols-5 gap-3 mb-6">
+        <PackageTypeFields value={creating} onChange={change => setCreating(f => ({ ...f, ...change }))} />
         <input
           className="input"
           placeholder="Nombre"
@@ -1760,7 +1774,7 @@ function PacksSection() {
           onChange={(e) => setCreating((f) => ({ ...f, name: e.target.value }))}
         />
 
-        <input
+        {creating.type !== "MONTHLY_UNLIMITED" && (        <input
           className="input"
           type="number"
           placeholder="# clases"
@@ -1774,7 +1788,7 @@ function PacksSection() {
               classes: e.target.value === "" ? undefined : Number(e.target.value),
             }))
           }
-        />
+        />)}
 
         <input
           className="input"
@@ -1792,7 +1806,7 @@ function PacksSection() {
           }
         />
 
-        <input
+        {creating.type !== "MONTHLY_UNLIMITED" && (        <input
           className="input"
           type="number"
           placeholder="Vigencia (días)"
@@ -1806,7 +1820,7 @@ function PacksSection() {
               validityDays: e.target.value === "" ? undefined : Number(e.target.value),
             }))
           }
-        />
+        />)}
      <label className="inline-flex items-center gap-2">
   <input
     type="checkbox"
@@ -1913,7 +1927,7 @@ function EditablePackRow({
     ? (item.description as string[]).join("\n")
     : "";
 
-  const [draft, setDraft] = useState<{
+  const [draft, setDraft] = useState<PackageCalendarDraft & {
     name?: string;
     classes?: number;
     price?: number; // entero (pesos)
@@ -1924,6 +1938,7 @@ function EditablePackRow({
     highlight?: "" | HighlightOpt | null; // "" = sin highlight
     descriptionText?: string; // textarea → string[]
   }>({
+    type: item.type ?? "STANDARD", unlimitedMonth: item.unlimitedMonth, unlimitedYear: item.unlimitedYear,
     name: item.name,
     classes: item.classes,
     price: item.price,
@@ -1958,10 +1973,11 @@ function EditablePackRow({
 
     // Construir payload PATCH (solo lo que cambió o es relevante)
     const payload: any = {
+      type: draft.type ?? "STANDARD", unlimitedMonth: draft.unlimitedMonth, unlimitedYear: draft.unlimitedYear,
       name: draft.name?.trim(),
-      classes: draft.classes,
+      classes: draft.type === "MONTHLY_UNLIMITED" ? 0 : draft.classes,
       price: draft.price, // el backend redondea a int
-      validityDays: draft.validityDays,
+      validityDays: draft.type === "MONTHLY_UNLIMITED" ? 0 : draft.validityDays,
       isActive: draft.isActive,
       oncePerUser: draft.oncePerUser, // 👈 FALTA ESTO
       classesLabel:
@@ -2006,7 +2022,7 @@ function EditablePackRow({
         </td>
 
         <td className="py-2">
-          {editing ? (
+          {(editing ? draft.type : item.type) === "MONTHLY_UNLIMITED" ? "Una clase por dia" : (          editing ? (
             <input
               className="input"
               type="number"
@@ -2023,7 +2039,7 @@ function EditablePackRow({
             />
           ) : (
             item.classes
-          )}
+           ))}
         </td>
 
         <td className="py-2">
@@ -2048,7 +2064,7 @@ function EditablePackRow({
         </td>
 
         <td className="py-2">
-          {editing ? (
+          {(editing ? draft.type : item.type) === "MONTHLY_UNLIMITED" ? (item.unlimitedYear && item.unlimitedMonth ? monthLabel(item.unlimitedYear, item.unlimitedMonth) : "Mes calendario") : (          editing ? (
             <input
               className="input"
               type="number"
@@ -2067,7 +2083,7 @@ function EditablePackRow({
             />
           ) : (
             `${item.validityDays} días`
-          )}
+           ))}
         </td>
 
         <td className="py-2">
@@ -2147,6 +2163,7 @@ function EditablePackRow({
         <tr className="border-b">
           <td colSpan={6} className="py-3">
             <div className="grid md:grid-cols-4 gap-3">
+              <div className="md:col-span-4"><PackageTypeFields value={draft} onChange={change => setDraft(d => ({ ...d, ...change }))} /></div>
               <div className="md:col-span-2">
                 <label className="block text-xs text-gray-500 mb-1">
                   Etiqueta de clases
@@ -2831,18 +2848,18 @@ function PurchasedPackagesSection() {
                     {AFFILIATION_LABELS[item.user.affiliation]}
                   </td>
                   <td className="py-2">{item.pack.name}</td>
-                  <td className="py-2">{item.classesPurchased}</td>
-                  <td className="py-2">{item.classesLeft}</td>
+                  <td className="py-2">{item.type === "MONTHLY_UNLIMITED" ? "Una clase por dia" : item.classesPurchased}</td>
+                  <td className="py-2">{item.type === "MONTHLY_UNLIMITED" ? (item.revokedAt ? "Revocado" : monthLabel(item.unlimitedYear!, item.unlimitedMonth!)) : item.classesLeft}</td>
                   <td className="py-2">{formatMoneyMXN(item.amountPaid)}</td>
                   <td className="py-2">
                     <span className="font-medium">
-                      {item.paymentStatus ?? "SIN_PAGO"}
+                      {item.assignmentSource === "ADMIN" && !item.paymentStatus ? "Asignación ADMIN · Sin pago" : item.paymentStatus ?? "SIN_PAGO"}
                     </span>
                   </td>
                   <td className="py-2">
                     <div className="flex max-w-[220px] flex-col">
                       <span className="text-xs text-muted-foreground">
-                        {item.paymentProvider ?? "N/A"}
+                        {item.assignmentSource === "ADMIN" ? "Asignado por ADMIN" : item.paymentProvider ?? "N/A"}
                       </span>
                       <span className="truncate" title={item.paymentReference ?? ""}>
                         {item.paymentReference ?? "-"}
@@ -3060,6 +3077,10 @@ function UserInspectorSection() {
 
   const [selectedPackId, setSelectedPackId] = useState("");
   const [buyingPack, setBuyingPack] = useState(false);
+  const [confirmingAssignment, setConfirmingAssignment] = useState(false);
+  const assignmentInFlight = useRef(false);
+  const assignmentRequest = useRef<{ userId: string; packId: string; key: string } | null>(null);
+  const [assignmentFeedback, setAssignmentFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
     text: string;
@@ -3071,6 +3092,12 @@ function UserInspectorSection() {
   const [savingRole, setSavingRole] = useState(false);
   const [pauseDaysById, setPauseDaysById] = useState<Record<string, number>>({});
   const [pausingPackId, setPausingPackId] = useState<string | null>(null);
+  const [revokingPurchase, setRevokingPurchase] = useState<UserDetails["purchases"][number] | null>(null);
+  const [revocationReason, setRevocationReason] = useState("");
+  const [revoking, setRevoking] = useState(false);
+  const revocationInFlight = useRef(false);
+  const revocationDialog = useRef<HTMLDialogElement>(null);
+  const [revocationFeedback, setRevocationFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // 1️⃣ últimos usuarios
   const userParams = new URLSearchParams({
@@ -3105,6 +3132,74 @@ function UserInspectorSection() {
 
   const list = usersData?.items;
   const userTotalPages = usersData?.totalPages ?? 1;
+  const selectedAssignmentPack = packs?.items.find(pack => pack.id === selectedPackId);
+
+  useEffect(() => {
+    setConfirmingAssignment(false);
+  }, [selectedId, selectedPackId]);
+  useEffect(() => {
+    setAssignmentFeedback(null);
+    setRevokingPurchase(null);
+    setRevocationFeedback(null);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (revokingPurchase) revocationDialog.current?.showModal();
+    else revocationDialog.current?.close();
+  }, [revokingPurchase]);
+
+  async function confirmRevocation() {
+    if (!selectedId || details?.user.id !== selectedId || !revokingPurchase || !revocationReason.trim() || revocationInFlight.current) return;
+    revocationInFlight.current = true;
+    setRevoking(true);
+    setRevocationFeedback(null);
+    try {
+      const res = await fetch(`/api/admin/users/${selectedId}/packs/${revokingPurchase.id}/revoke`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: revocationReason.trim() }),
+      });
+      if (!res.ok) throw new Error(await readApiMessage(res, "No se pudo revocar el paquete."));
+      setRevokingPurchase(null);
+      setRevocationFeedback({ type: "success", text: "Paquete ilimitado revocado correctamente. Las reservas existentes se conservan." });
+      void mutate().catch(() => {});
+    } catch (error) {
+      setRevocationFeedback({ type: "error", text: error instanceof Error ? error.message : "No se pudo revocar el paquete." });
+    } finally {
+      revocationInFlight.current = false;
+      setRevoking(false);
+    }
+  }
+
+  async function assignSelectedPackage() {
+    if (!selectedId || details?.user.id !== selectedId || !selectedAssignmentPack || assignmentInFlight.current) return;
+    assignmentInFlight.current = true;
+    setBuyingPack(true);
+    setAssignmentFeedback(null);
+    const pack = selectedAssignmentPack;
+    if (assignmentRequest.current?.userId !== selectedId || assignmentRequest.current?.packId !== pack.id) {
+      assignmentRequest.current = { userId: selectedId, packId: pack.id, key: crypto.randomUUID() };
+    }
+    try {
+      const res = await fetch(`/api/admin/users/${selectedId}/packs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": assignmentRequest.current.key },
+        body: JSON.stringify({ packId: pack.id }),
+      });
+      if (!res.ok) throw new Error(await readApiMessage(res, "No se pudo asignar el paquete. Revisa los paquetes del usuario y reintenta."));
+      setAssignmentFeedback({ type: "success", text: pack.type === "MONTHLY_UNLIMITED"
+        ? `${pack.name} asignado correctamente para ${monthLabel(pack.unlimitedYear!, pack.unlimitedMonth!)}. Una clase por día, sin pago ni créditos adicionales.`
+        : `${pack.name} asignado correctamente. Se acreditaron ${pack.classes} clases.` });
+      setSelectedPackId("");
+      setConfirmingAssignment(false);
+      assignmentRequest.current = null;
+      void mutate().catch(() => {});
+    } catch (error) {
+      setAssignmentFeedback({ type: "error", text: error instanceof Error ? error.message : "No se pudo asignar el paquete. Reintenta." });
+    } finally {
+      assignmentInFlight.current = false;
+      setBuyingPack(false);
+    }
+  }
 
   useEffect(() => {
     if (!details?.user) return;
@@ -3777,11 +3872,17 @@ function UserInspectorSection() {
               {/* ASIGNAR PAQUETE */}
               <div className="p-4 border rounded-[var(--radius)] space-y-3">
                 <h3 className="font-semibold">Asignar paquete</h3>
+                {assignmentFeedback && (
+                  <p role={assignmentFeedback.type === "error" ? "alert" : "status"} className={assignmentFeedback.type === "error" ? "text-sm text-red-600" : "text-sm text-green-700"}>
+                    {assignmentFeedback.text}
+                  </p>
+                )}
 
                 <div className="flex gap-2">
                   <select
                     className="input w-full"
                     value={selectedPackId}
+                    disabled={buyingPack}
                     onChange={(e) =>
                       setSelectedPackId(e.target.value)
                     }
@@ -3791,48 +3892,59 @@ function UserInspectorSection() {
                     </option>
                     {(packs?.items ?? []).map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} · {p.classes} clases
+                        {p.name} · {p.type === "MONTHLY_UNLIMITED" ? `Ilimitado · ${monthLabel(p.unlimitedYear!, p.unlimitedMonth!)} · Una clase por día` : `${p.classes} clases`}
                       </option>
                     ))}
                   </select>
 
                   <button
                     className="btn btn-primary"
-                    disabled={!selectedPackId || buyingPack}
-                    onClick={async () => {
-                      setBuyingPack(true);
-                      try {
-                        await fetch(
-                          `/api/admin/users/${selectedId}/packs`,
-                          {
-                            method: "POST",
-                            headers: {
-                              "Content-Type": "application/json",
-                            },
-                            body: JSON.stringify({
-                              packId: selectedPackId,
-                            }),
-                          }
-                        );
-                        setSelectedPackId("");
-                        mutate();
-                      } finally {
-                        setBuyingPack(false);
-                      }
-                    }}
+                    disabled={!selectedPackId || buyingPack || details.user.id !== selectedId}
+                    onClick={() => setConfirmingAssignment(true)}
                   >
                     Asignar
                   </button>
                 </div>
 
-                <p className="text-xs text-muted-foreground">
-                  Crea una compra y acredita tokens automáticamente.
-                </p>
+                {selectedAssignmentPack?.type === "MONTHLY_UNLIMITED" ? (
+                  <p className="text-sm text-muted-foreground">
+                    Ilimitado · {monthLabel(selectedAssignmentPack.unlimitedYear!, selectedAssignmentPack.unlimitedMonth!)} · Una clase por día. Asignación ADMIN sin pago ni créditos adicionales.
+                  </p>
+                ) : <p className="text-xs text-muted-foreground">Los paquetes estándar conservan la compra manual y acreditan sus clases.</p>}
+                {confirmingAssignment && selectedAssignmentPack && (
+                  <div role="alert" className="rounded border p-3 space-y-2">
+                    <p>Confirma la asignación de <strong>{selectedAssignmentPack.name}</strong> a <strong>{details.user.name ?? details.user.email}</strong>.</p>
+                    <button className="btn btn-primary" disabled={buyingPack} onClick={assignSelectedPackage}>
+                      {buyingPack ? "Asignando…" : "Confirmar asignación"}
+                    </button>
+                    <button className="btn btn-outline ml-2" disabled={buyingPack} onClick={() => setConfirmingAssignment(false)}>Cancelar</button>
+                  </div>
+                )}
               </div>
 
               {/* PAQUETES COMPRADOS */}
               <div className="p-4 border rounded-[var(--radius)]">
   <h3 className="font-semibold mb-3">Paquetes</h3>
+  {revocationFeedback && !revokingPurchase && <p className={revocationFeedback.type === "error" ? "text-sm text-red-600 mb-3" : "text-sm text-green-700 mb-3"} role={revocationFeedback.type === "error" ? "alert" : "status"}>{revocationFeedback.text}</p>}
+  <dialog ref={revocationDialog} aria-labelledby="revocation-title" className="m-auto max-w-lg w-[calc(100%-2rem)] rounded-xl border p-6 backdrop:bg-black/50" onCancel={(event) => {
+    event.preventDefault();
+    if (!revocationInFlight.current) setRevokingPurchase(null);
+  }}>
+    {revokingPurchase && <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void confirmRevocation(); }}>
+      <h3 id="revocation-title" className="text-lg font-semibold">¿Revocar paquete ilimitado?</h3>
+      <p>Estás a punto de quitar el paquete <strong>{revokingPurchase.pack.name}</strong> a <strong>{details.user.name ?? details.user.email}</strong>.</p>
+      <p>El usuario ya no podrá realizar nuevas reservas utilizando este paquete. Las reservas existentes no se cancelarán automáticamente.</p>
+      {revokingPurchase.paidEntitlement && <p className="rounded border border-amber-400 bg-amber-50 p-3 text-amber-900" role="note">Este paquete tiene un pago registrado. La revocación no emite un reembolso automático. Cualquier reembolso debe tramitarse por separado mediante el proceso autorizado.</p>}
+      <label className="block">Motivo de revocación
+        <textarea autoFocus required maxLength={1000} className="input mt-1 w-full" value={revocationReason} disabled={revoking} onChange={event => setRevocationReason(event.target.value)} />
+      </label>
+      {revocationFeedback?.type === "error" && <p role="alert" className="text-red-600">{revocationFeedback.text}</p>}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="btn btn-outline" disabled={revoking} onClick={() => setRevokingPurchase(null)}>Cancelar</button>
+        <button type="submit" className="btn btn-primary" disabled={revoking || !revocationReason.trim()}>{revoking ? "Revocando…" : "Confirmar revocación"}</button>
+      </div>
+    </form>}
+  </dialog>
 
   <div className="overflow-x-auto">
     <table className="min-w-[900px] w-full text-sm border-collapse">
@@ -3842,7 +3954,7 @@ function UserInspectorSection() {
           <th>Restantes</th>
           <th>Vence</th>
           <th>Estado</th>
-          <th>Pausar</th>
+          <th>Acciones</th>
         </tr>
       </thead>
       <tbody>
@@ -3855,15 +3967,21 @@ function UserInspectorSection() {
 
           return (
             <tr key={p.id} className="border-b border-[var(--color-border)]">
-              <td className="py-2">{p.pack.name}</td>
-              <td className="py-2">{p.classesLeft}</td>
+              <td className="py-2">{p.pack.name}
+                {p.type === "MONTHLY_UNLIMITED" && <div className="mt-1 text-xs text-muted-foreground">
+                  {monthLabel(p.unlimitedYear!, p.unlimitedMonth!)}<br />
+                  {p.origin === "MERCADOPAGO" ? "Compra Mercado Pago" : "Asignación manual ADMIN"}<br />
+                  {formatAdminDate(p.createdAt)}
+                </div>}
+              </td>
+              <td className="py-2">{p.type === "MONTHLY_UNLIMITED" ? "Una clase por dia" : p.classesLeft}</td>
               <td className="py-2">
                 <span className="whitespace-nowrap">
                   {new Date(p.expiresAt).toLocaleDateString()}
                 </span>
               </td>
               <td className="py-2">
-                {isPaused ? (
+                {p.revokedAt ? <span className="text-xs font-medium text-red-600">Revocado</span> : isPaused ? (
                   <span className="rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">
                     Pausado hasta {pausedUntilDate?.toLocaleDateString()}
                   </span>
@@ -3873,7 +3991,7 @@ function UserInspectorSection() {
                   </span>
                 ) : (
                   <span className="text-xs font-medium text-green-600">
-                    Activo
+                    {p.type === "MONTHLY_UNLIMITED" && monthlyPeriod(p.unlimitedYear!, p.unlimitedMonth!).startsAt.getTime() > Date.now() ? "Próximamente" : "Activo"}
                   </span>
                 )}
                 {p.pausedDays > 0 && (
@@ -3881,9 +3999,15 @@ function UserInspectorSection() {
                     {p.pausedDays} dia{p.pausedDays === 1 ? "" : "s"} pausados
                   </div>
                 )}
+                {p.revokedAt && <div className="mt-1 max-w-xs break-words text-xs text-muted-foreground">
+                  {formatAdminDate(p.revokedAt)}<br />
+                  {p.revocationAudit ? <>ADMIN: {p.revocationAudit.metadata.actorUserId}<br />{p.revocationAudit.metadata.reason}</> : p.revocationReason}
+                </div>}
               </td>
               <td className="py-2">
-                <div className="flex items-center gap-2">
+                {p.type === "MONTHLY_UNLIMITED" ? (p.canRevoke && <button className="btn btn-outline whitespace-nowrap" disabled={revoking || details.user.id !== selectedId} onClick={() => {
+                  setRevocationReason(""); setRevocationFeedback(null); setRevokingPurchase(p);
+                }}>Revocar ilimitado</button>) : <div className="flex items-center gap-2">
                   <input
                     type="number"
                     min={1}
@@ -3907,7 +4031,7 @@ function UserInspectorSection() {
                   >
                     {pausingPackId === p.id ? "Pausando..." : "Pausar paquete"}
                   </button>
-                </div>
+                </div>}
               </td>
             </tr>
           );

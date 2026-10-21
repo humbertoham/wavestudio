@@ -16,7 +16,8 @@
     "env:check": "node scripts/check-env.mjs",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
-    "db:migrate:deploy": "prisma migrate deploy",
+    "db:migrate:deploy": "node scripts/check-monthly-migration-lineage.mjs && prisma migrate deploy",
+    "db:lineage": "node scripts/check-monthly-migration-lineage.mjs",
     "db:status:dev": "node scripts/branch-db.mjs dev status",
     "db:status:uat": "node scripts/branch-db.mjs uat status",
     "db:migrate:dev": "node scripts/branch-db.mjs dev migrate",
@@ -24,7 +25,8 @@
     "db:seed:dev-uat": "node prisma/seed.dev-uat.mjs",
     "postinstall": "prisma generate",
     "test": "vitest run",
-    "build": "prisma generate && next build",
+    "test:monthly:production": "node scripts/test-monthly-production.mjs",
+    "build": "node scripts/check-monthly-migration-lineage.mjs && prisma generate && next build",
     "start": "next start"
   },
   "dependencies": {

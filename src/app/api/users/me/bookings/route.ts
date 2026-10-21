@@ -18,6 +18,7 @@ type BookingRow = {
   status: string;
   createdAt: Date;
   canceledAt: Date | null;
+  entitlementType?: string;
   quantity: number;
   classId: string;
   classTitle: string;
@@ -31,6 +32,7 @@ type BookingRow = {
 };
 
 type BookingResponse = {
+  entitlementType?: string;
   id: string;
   status: string;
   createdAt: string;
@@ -77,6 +79,7 @@ function serializeBooking(row: BookingRow): BookingResponse {
     createdAt: row.createdAt.toISOString(),
     canceledAt: row.canceledAt?.toISOString() ?? null,
     quantity: row.quantity ?? 1,
+    entitlementType: row.entitlementType ?? "CREDITS",
     class: {
       id: row.classId,
       title: row.classTitle,
@@ -132,6 +135,7 @@ export async function GET(req: NextRequest) {
           b."createdAt",
           b."canceledAt",
           b."quantity",
+          b."entitlementType"::text AS "entitlementType",
           c."id" AS "classId",
           c."title" AS "classTitle",
           c."focus" AS "classFocus",

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isBookingTransactionConflict } from "@/lib/monthly-unlimited";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
@@ -38,8 +39,7 @@ function methodNotAllowed() {
 
 function isRetryableTransactionError(error: unknown) {
   return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === "P2034"
+    isBookingTransactionConflict(error)
   );
 }
 
@@ -140,6 +140,7 @@ export async function POST(req: NextRequest) {
         ? (error as { code?: unknown }).code
         : null;
 
+    if (typeof code === "string" && code.startsWith("UNLIMITED_")) return json(409, { error: code, code, message: (error as { message?: string }).message });
     switch (code) {
       case "CLASS_NOT_FOUND":
         return json(404, { error: "CLASS_NOT_FOUND" });

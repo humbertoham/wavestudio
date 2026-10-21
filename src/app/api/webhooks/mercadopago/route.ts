@@ -4,6 +4,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getOptionalServerEnv } from "@/lib/env";
+import { grantPackagePurchase, readPackageSnapshot, revokeUnlimitedPurchase, isBookingTransactionConflict } from "@/lib/monthly-unlimited";
+import { promoteWaitlistForReleasedSeats } from "@/lib/waitlist-promotion";
 import { getPackageExpirationAt11Pm } from "@/lib/package-expiration";
 import { prisma } from "@/lib/prisma";
 import {
@@ -542,7 +544,7 @@ export async function POST(req: Request) {
       return j(500, { error: "INTERNAL_ERROR" });
     }
 
-    const newStatus = mapStatus(mp?.status);
+    let newStatus = mapStatus(mp?.status);
     const mpExtRef = mp?.external_reference ?? payload.data?.external_reference;
     const mpPrefId =
       mp?.preference_id ?? payload.data?.preference_id ?? prefIdFromMO;
@@ -577,6 +579,11 @@ export async function POST(req: Request) {
       return j(500, { error: "INTERNAL_ERROR" });
     }
 
+    const storedSnapshot = readPackageSnapshot(local.packSnapshot);
+    if (local.packSnapshot && !storedSnapshot) throw new Error("INVALID_PAYMENT_SNAPSHOT");
+    if (storedSnapshot?.type === "MONTHLY_UNLIMITED" && (Number(mp?.transaction_amount_refunded) > 0 || mp?.status?.toLowerCase() === "charged_back")) newStatus = "REFUNDED";
+    if (storedSnapshot?.type === "MONTHLY_UNLIMITED" && local.status === "REFUNDED" && newStatus !== "REFUNDED") return j(200, { ok: true });
+
     if (newStatus === "APPROVED") {
       const alreadyProcessed =
         !!local.packPurchase ||
@@ -596,6 +603,30 @@ export async function POST(req: Request) {
           requestId: signatureCheck.requestId,
         });
         return j(200, { ok: true });
+      }
+    }
+
+    if (storedSnapshot?.type === "MONTHLY_UNLIMITED" && newStatus === "APPROVED") {
+      if (local.status === "REFUNDED") return j(200, { ok: true });
+      if (Number(mp?.transaction_amount) !== storedSnapshot.price || mp?.currency_id !== "MXN" || local.amount !== storedSnapshot.price || !local.userId || !local.checkoutLink?.packId || !local.mpExternalRef || mpExtRef !== local.mpExternalRef) {
+        await updateWebhookLog(log?.id, false, "UNLIMITED_PAYMENT_TERMS_MISMATCH");
+        return j(409, { error: "PAYMENT_TERMS_MISMATCH" });
+      }
+    }
+    if (newStatus === "REFUNDED" && (local.packPurchase?.type === "MONTHLY_UNLIMITED" || storedSnapshot?.type === "MONTHLY_UNLIMITED")) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const reversal = await prisma.$transaction(async tx => {
+            await tx.payment.update({ where: { id: local!.id }, data: { status: "REFUNDED", mpPaymentId: paymentId, mpRaw: mp } });
+            const purchase = await tx.packPurchase.findUnique({ where: { paymentId: local!.id } });
+            const result = purchase ? await revokeUnlimitedPurchase(tx, purchase.id, String(mp?.status).toLowerCase() === "charged_back" ? "CHARGEBACK" : "REFUND") : { debt: false, released: [] };
+            for (const release of result.released) await promoteWaitlistForReleasedSeats(tx, release);
+            await tx.checkoutLink.updateMany({ where: { paymentId: local!.id }, data: { status: "CANCELED" } });
+            return result;
+          }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+          await updateWebhookLog(log?.id, true, "UNLIMITED_REVERSAL_APPLIED");
+          return j(200, { ok: true, debt: reversal.debt });
+        } catch (error) { if (isBookingTransactionConflict(error) && attempt < 2) continue; throw error; }
       }
     }
 
@@ -727,6 +758,10 @@ export async function POST(req: Request) {
 
     try {
       await prisma.$transaction(async (tx) => {
+        if (storedSnapshot?.type === "MONTHLY_UNLIMITED" && newStatus === "APPROVED") {
+          const claim = await tx.payment.updateMany({ where: { id: local!.id, status: { not: "REFUNDED" } }, data: { status: "APPROVED" } });
+          if (!claim.count) return;
+        }
         const updated = await tx.payment.update({
           where: { id: local!.id },
           data: {
@@ -774,7 +809,7 @@ export async function POST(req: Request) {
         }
 
         let beneficiaryUserId: string | null =
-          (extUserId && extUserId !== "anon" ? extUserId : null) ??
+          (storedSnapshot ? local!.userId : (extUserId && extUserId !== "anon" ? extUserId : null)) ??
           link?.userId ??
           null;
 
@@ -814,7 +849,7 @@ export async function POST(req: Request) {
         const pack = await tx.pack.findUnique({
           where: { id: packId },
           select: {
-            id: true,
+            id: true, type: true,
             classes: true,
             validityDays: true,
           },
@@ -831,6 +866,10 @@ export async function POST(req: Request) {
           readPositiveInt(mp?.metadata?.packValidityDays) ??
           Math.max(1, pack.validityDays);
 
+        if (storedSnapshot) {
+          await grantPackagePurchase(tx, { userId: beneficiaryUserId, packId: pack.id, snapshot: storedSnapshot, paymentId: updated.id });
+        } else {
+          if (pack.type === "MONTHLY_UNLIMITED" && (!readPositiveInt(mp?.metadata?.packClasses) || !readPositiveInt(mp?.metadata?.packValidityDays))) throw new Error("LEGACY_PAYMENT_TERMS_MISSING");
         const purchase = await tx.packPurchase.create({
           data: {
             userId: beneficiaryUserId,
@@ -852,6 +891,8 @@ export async function POST(req: Request) {
             reason: "PURCHASE_CREDIT",
           },
         });
+
+        }
 
         if (link && link.status !== "COMPLETED") {
           await tx.checkoutLink.update({
@@ -901,7 +942,7 @@ export async function POST(req: Request) {
       return j(500, { error: "INTERNAL_ERROR" });
     }
 
-    if ((mp?.status || "").toLowerCase() === "refunded") {
+    if (newStatus === "REFUNDED") {
       try {
         await prisma.$transaction(async (tx) => {
           const payment = await tx.payment.findUnique({

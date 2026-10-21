@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isBookingTransactionConflict } from "@/lib/monthly-unlimited";
 import { Prisma } from "@prisma/client";
 
 import { createBookingWithCreditCheck, isManagedBookingError } from "@/lib/class-booking";
@@ -29,6 +30,7 @@ function errorResponse(error: unknown) {
   }
 
   if (isManagedBookingError(error)) {
+    if (error.code.startsWith("UNLIMITED_")) return j(409, { error: error.code, code: error.code, message: error.message });
     switch (error.code) {
       case "CLASS_NOT_FOUND":
         return j(404, {
@@ -75,8 +77,7 @@ function errorResponse(error: unknown) {
   }
 
   if (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === "P2034"
+    isBookingTransactionConflict(error)
   ) {
     return j(409, {
       error: "CONCURRENT_MODIFICATION",
@@ -143,8 +144,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         });
       } catch (error) {
         const retryable =
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === "P2034";
+          isBookingTransactionConflict(error);
 
         if (!retryable || attempt === MAX_SERIALIZABLE_RETRIES) {
           throw error;

@@ -37,6 +37,19 @@ enum BookingStatus {
   CANCELED
 }
 
+enum PackType {
+  STANDARD
+  MONTHLY_UNLIMITED
+}
+
+enum BookingEntitlement {
+  CREDITS
+  MONTHLY_UNLIMITED
+  MIXED
+  WELLHUB
+  ADMIN_GUEST
+}
+
 enum TokenReason {
   PURCHASE_CREDIT // alta inicial al comprar paquete
   BOOKING_DEBIT // consumo por reserva
@@ -108,6 +121,7 @@ model User {
   // relaciones
   bookings                      Booking[]
   packs                         PackPurchase[]
+  unlimitedUsages               UnlimitedUsage[]
   tokenLedger                   TokenLedger[]
   waitlists                     Waitlist[]
   payments                      Payment[]
@@ -268,8 +282,10 @@ model Booking {
   class   Class  @relation(fields: [classId], references: [id])
   classId String
 
-  status    BookingStatus @default(ACTIVE)
-  createdAt DateTime      @default(now())
+  entitlementType BookingEntitlement @default(CREDITS)
+  unlimitedUsage  UnlimitedUsage?
+  status          BookingStatus      @default(ACTIVE)
+  createdAt       DateTime           @default(now())
 
   quantity Int @default(1)
 
@@ -417,14 +433,17 @@ model ChallengePointAdjustment {
  * =========================
  */
 model Pack {
-  id           String         @id @default(cuid())
-  name         String
-  classes      Int
-  price        Int // MXN
-  validityDays Int
-  isActive     Boolean        @default(true)
-  createdAt    DateTime       @default(now())
-  purchases    PackPurchase[]
+  type           PackType       @default(STANDARD)
+  unlimitedMonth Int?
+  unlimitedYear  Int?
+  id             String         @id @default(cuid())
+  name           String
+  classes        Int
+  price          Int // MXN
+  validityDays   Int
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  purchases      PackPurchase[]
 
   isVisible Boolean @default(true)
 
@@ -444,12 +463,20 @@ model PackPurchase {
   pack   Pack   @relation(fields: [packId], references: [id])
   packId String
 
-  classesLeft Int
-  expiresAt   DateTime
-  pausedDays  Int       @default(0)
-  pausedUntil DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  type             PackType         @default(STANDARD)
+  unlimitedMonth   Int?
+  unlimitedYear    Int?
+  nameSnapshot     String?
+  priceSnapshot    Int?
+  revokedAt        DateTime?
+  revocationReason String?
+  unlimitedUsages  UnlimitedUsage[]
+  classesLeft      Int
+  expiresAt        DateTime
+  pausedDays       Int              @default(0)
+  pausedUntil      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   // relaciones derivadas
   bookings      Booking[]
@@ -460,6 +487,26 @@ model PackPurchase {
   paymentId String?  @unique // <- necesario para 1–1
 
   @@index([userId, expiresAt])
+  @@index([userId, type, unlimitedYear, unlimitedMonth])
+}
+
+// One row per reservation preserves released and spent daily usage history.
+// SQL adds a partial unique index on (userId, serviceDate) while releasedAt IS NULL.
+model UnlimitedUsage {
+  id            String       @id @default(cuid())
+  user          User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userId        String
+  purchase      PackPurchase @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  purchaseId    String
+  booking       Booking      @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  bookingId     String       @unique
+  serviceDate   DateTime     @db.Date
+  createdAt     DateTime     @default(now())
+  releasedAt    DateTime?
+  releaseReason String?
+
+  @@index([purchaseId, serviceDate])
+  @@index([userId, serviceDate])
 }
 
 model BookingBlockLog {
@@ -539,6 +586,7 @@ model Payment {
   mpExternalRef  String? // external_reference
   mpPayerEmail   String?
   mpRaw          Json? // snapshot del payload (preference/payment)
+  packSnapshot   Json? // immutable server-created package terms
 
   // Relación 1–1 con PackPurchase (opcional)
   packPurchase PackPurchase? @relation("PaymentToPackPurchase")

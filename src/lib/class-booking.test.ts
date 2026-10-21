@@ -5,6 +5,7 @@ import {
   createBookingWithCreditCheck,
   getAvailableBookingCredits,
 } from "./class-booking";
+import { businessClassDay } from "./unlimited-calendar";
 
 const futureClassDate = () => new Date(Date.now() + 60 * 60 * 1000);
 
@@ -74,7 +75,7 @@ describe("createBookingWithCreditCheck", () => {
         classId: "class_1",
         userId: "user_1",
       })
-    ).resolves.toEqual({ id: "booking_1" });
+    ).resolves.toEqual({ id: "booking_1", debitedCredits: 1, creditCost: 1, entitlementType: "CREDITS" });
 
     expect(tx.class.findUnique).toHaveBeenCalledWith({
       where: { id: "class_1" },
@@ -91,6 +92,7 @@ describe("createBookingWithCreditCheck", () => {
         classId: "class_1",
         quantity: 1,
         status: BookingStatus.ACTIVE,
+        entitlementType: "CREDITS",
         packPurchaseId: "purchase_1",
       },
       select: { id: true },
@@ -258,5 +260,140 @@ describe("createBookingWithCreditCheck", () => {
       data: { classesLeft: { decrement: 1 } },
     });
     expect(tx.tokenLedger.create).not.toHaveBeenCalled();
+  });
+});
+
+function makeUnlimitedTx(
+  options: {
+    credits?: number;
+    used?: boolean;
+    revoked?: boolean;
+    monthMismatch?: boolean;
+  } = {},
+) {
+  const day = businessClassDay(futureClassDate());
+  const unlimited = {
+    id: "unlimited_purchase",
+    type: "MONTHLY_UNLIMITED",
+    unlimitedMonth: options.monthMismatch ? (day.month % 12) + 1 : day.month,
+    unlimitedYear: day.year,
+    revokedAt: options.revoked ? new Date() : null,
+    expiresAt: new Date(Date.now() + 90 * 86_400_000),
+    pausedUntil: null,
+  };
+  const tx = makeTx();
+  tx.packPurchase.findMany.mockImplementation(async (query: any) =>
+    query.where.type === "MONTHLY_UNLIMITED"
+      ? [unlimited]
+      : options.credits
+        ? [{ id: "credit_purchase", classesLeft: options.credits }]
+        : [],
+  );
+  return Object.assign(tx, {
+    $queryRaw: vi.fn().mockResolvedValue([{ revokedAt: null }]),
+    unlimitedUsage: {
+      findFirst: vi.fn().mockResolvedValue(options.used ? { id: "used_day" } : null),
+      create: vi.fn().mockResolvedValue({ id: "usage_1" }),
+    },
+  });
+}
+
+describe("monthly unlimited booking entitlement", () => {
+  it("funds one seat without credit or ledger mutations and records the class day", async () => {
+    const tx = makeUnlimitedTx();
+
+    const result = await createBookingWithCreditCheck(tx as any, {
+      classId: "class_1",
+      userId: "user_1",
+    });
+
+    expect(result).toMatchObject({ debitedCredits: 0, entitlementType: "MONTHLY_UNLIMITED" });
+    expect(tx.booking.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        packPurchaseId: "unlimited_purchase",
+        entitlementType: "MONTHLY_UNLIMITED",
+      }),
+    }));
+    expect(tx.unlimitedUsage.create).toHaveBeenCalledWith({ data: {
+      userId: "user_1", purchaseId: "unlimited_purchase", bookingId: "booking_1",
+      serviceDate: businessClassDay(futureClassDate()).serviceDate,
+    } });
+    expect(tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(tx.packPurchase.updateMany).not.toHaveBeenCalled();
+    expect(tx.tokenLedger.create).not.toHaveBeenCalled();
+  });
+
+  it("retains the daily claim and rejects a second unlimited class that day", async () => {
+    const tx = makeUnlimitedTx({ used: true });
+
+    await expect(createBookingWithCreditCheck(tx as any, {
+      classId: "class_1", userId: "user_1",
+    })).rejects.toMatchObject({ code: "UNLIMITED_DAILY_LIMIT" });
+
+    expect(tx.booking.create).not.toHaveBeenCalled();
+    expect(tx.unlimitedUsage.create).not.toHaveBeenCalled();
+  });
+
+  it.each([{ used: true }, { revoked: true }, { monthMismatch: true }])(
+    "uses standard credits when unlimited is unavailable: %j", async (options) => {
+      const tx = makeUnlimitedTx({ ...options, credits: 3 });
+
+      const result = await createBookingWithCreditCheck(tx as any, {
+        classId: "class_1", userId: "user_1",
+      });
+
+      expect(result).toMatchObject({ debitedCredits: 1, entitlementType: "CREDITS" });
+      expect(tx.booking.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ packPurchaseId: "credit_purchase" }),
+      }));
+      expect(tx.packPurchase.updateMany).toHaveBeenCalledOnce();
+      expect(tx.unlimitedUsage.create).not.toHaveBeenCalled();
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [{ revoked: true }, "UNLIMITED_ENTITLEMENT_REVOKED"],
+    [{ monthMismatch: true }, "UNLIMITED_MONTH_MISMATCH"],
+  ] as const)("explains an unavailable entitlement without credits: %j", async (options, code) => {
+    const tx = makeUnlimitedTx(options);
+
+    await expect(createBookingWithCreditCheck(tx as any, {
+      classId: "class_1", userId: "user_1",
+    })).rejects.toMatchObject({ code });
+    expect(tx.booking.create).not.toHaveBeenCalled();
+  });
+
+  it("requires standard credits for additional seats and attributes a mixed booking", async () => {
+    const tx = makeUnlimitedTx({ credits: 2 });
+    const result = await createBookingWithCreditCheck(tx as any, {
+      classId: "class_1", userId: "user_1", quantity: 3,
+    });
+
+    expect(result).toMatchObject({ debitedCredits: 2, entitlementType: "MIXED" });
+    expect(tx.tokenLedger.create).toHaveBeenCalledWith({ data: {
+      userId: "user_1", bookingId: "booking_1", packPurchaseId: "credit_purchase",
+      delta: -2, reason: TokenReason.BOOKING_DEBIT,
+    } });
+    expect(tx.unlimitedUsage.create).toHaveBeenCalledOnce();
+  });
+
+  it("does not fund extra seats with the unlimited entitlement", async () => {
+    const tx = makeUnlimitedTx();
+    await expect(createBookingWithCreditCheck(tx as any, {
+      classId: "class_1", userId: "user_1", quantity: 2,
+    })).rejects.toMatchObject({ code: "UNLIMITED_SEAT_LIMIT" });
+    expect(tx.booking.create).not.toHaveBeenCalled();
+  });
+
+  it("forces a fresh transaction when revocation wins the entitlement row lock", async () => {
+    const tx = makeUnlimitedTx();
+    tx.$queryRaw.mockResolvedValue([{ revokedAt: new Date() }]);
+
+    await expect(createBookingWithCreditCheck(tx as any, {
+      classId: "class_1", userId: "user_1",
+    })).rejects.toMatchObject({ code: "P2034" });
+    expect(tx.booking.create).not.toHaveBeenCalled();
+    expect(tx.unlimitedUsage.create).not.toHaveBeenCalled();
   });
 });

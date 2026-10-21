@@ -10,6 +10,7 @@ const EASE = cubicBezier(0.22, 1, 0.36, 1);
 
 type ApiPack = {
   id: string;
+  type?: "STANDARD" | "MONTHLY_UNLIMITED";
   name: string;
   classesLabel?: string | null;
   classesCount?: number | null;
@@ -22,6 +23,7 @@ type ApiPack = {
 };
 
 type Pack = {
+  type?: "STANDARD" | "MONTHLY_UNLIMITED";
   id: string;
   name: string;
   classesLabel: string;
@@ -57,7 +59,7 @@ function toPack(p: ApiPack): Pack {
       : "Vigencia variable");
 
   return {
-    id: p.id,
+    id: p.id, type: p.type,
     name: p.name,
     classesLabel,
     price: p.price,
@@ -201,8 +203,7 @@ export default function PricingPage() {
         } catch {}
 
         if (!res.ok) {
-          console.error(data ?? raw);
-          throw new Error();
+          throw new Error(typeof data?.message === "string" ? data.message : "No se pudo iniciar la compra. Intenta de nuevo.");
         }
 
         const checkoutUrl: string | undefined =
@@ -213,8 +214,8 @@ export default function PricingPage() {
         }
 
         window.location.href = checkoutUrl;
-      } catch {
-        alert("No se pudo iniciar la compra. Inténtalo de nuevo.");
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "No se pudo iniciar la compra. Inténtalo de nuevo.");
       } finally {
         setPendingPackId(null);
       }
@@ -275,6 +276,7 @@ export default function PricingPage() {
                     </p>
                   </div>
 
+                  {p.type === "MONTHLY_UNLIMITED" && <p className="mt-3 text-sm text-muted-foreground">Ilimitado mensual: un lugar por dia. Puedes comprarlo anticipadamente y reservar clases del mes indicado.</p>}
                   {p.description && (
                     <ul className="mt-4 space-y-2 text-sm">
                       {p.description.map((d, i) => (

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdmin } from "../_utils";
-import { z } from "zod";
-import { Prisma, PackHighlight } from "@prisma/client";
+import { packConfigurationSchema } from "@/lib/package-config";
+import { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
 
@@ -9,72 +9,7 @@ export const runtime = "nodejs";
    Helpers
 ------------------------- */
 
-function normalizeDescription(input: unknown): string[] | undefined {
-  if (input == null) return undefined;
-  if (Array.isArray(input))
-    return input
-      .map((v) => (typeof v === "string" ? v.trim() : ""))
-      .filter(Boolean);
-  if (typeof input === "string")
-    return input
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-  return undefined;
-}
-
-// acepta "popular" | "best" (minúsculas) o enum; convierte a enum
-const highlightSchema = z.preprocess(
-  (v) => (typeof v === "string" ? v.toUpperCase() : v),
-  z.nativeEnum(PackHighlight).nullable().optional()
-);
-
-/* -------------------------
-   Zod schema
-------------------------- */
-
-const packCreateSchema = z
-  .object({
-    name: z.string().min(1, "name requerido"),
-
-    classes: z.coerce.number().int().positive().optional(),
-    classesCount: z.coerce.number().int().positive().optional(),
-
-    price: z
-      .coerce
-      .number()
-      .nonnegative("price inválido")
-      .transform((v) => Math.round(v)),
-
-    validityDays: z
-      .coerce
-      .number()
-      .int()
-      .positive("validityDays debe ser > 0"),
-
-    isActive: z.coerce.boolean().default(true),
-
-    // ✅ NUEVO
-    oncePerUser: z.coerce.boolean().default(false),
-
-    classesLabel: z.string().trim().min(1).optional(),
-    highlight: highlightSchema,
-    description: z.any().optional(),
-  })
-  .refine(
-    (v) =>
-      typeof v.classes === "number" ||
-      typeof v.classesCount === "number",
-    {
-      message: "Debes enviar classes o classesCount",
-      path: ["classesCount"],
-    }
-  )
-  .transform((v) => ({
-    ...v,
-    classes: (v.classes ?? v.classesCount) as number,
-    description: normalizeDescription(v.description),
-  }));
+const packCreateSchema = packConfigurationSchema;
 
 /* -------------------------
    GET /admin/packs
@@ -127,6 +62,7 @@ export async function POST(req: NextRequest) {
     }
 
     const {
+      type, unlimitedMonth, unlimitedYear, isVisible,
       name,
       classes,
       price,
@@ -140,6 +76,7 @@ export async function POST(req: NextRequest) {
 
     const created = await prisma.pack.create({
       data: {
+        type, unlimitedMonth, unlimitedYear, isVisible,
         name,
         classes,
         price,

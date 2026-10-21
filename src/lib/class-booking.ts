@@ -1,4 +1,9 @@
 import { BookingStatus, Prisma, TokenReason } from "@prisma/client";
+import {
+  getUnlimitedEligibility,
+  type UnlimitedErrorCode,
+  unlimitedErrorMessages,
+} from "@/lib/monthly-unlimited";
 
 export type ManagedBookingErrorCode =
   | "CLASS_NOT_FOUND"
@@ -8,10 +13,12 @@ export type ManagedBookingErrorCode =
   | "USER_NOT_FOUND"
   | "BOOKING_BLOCKED"
   | "USER_ALREADY_BOOKED"
-  | "NO_CREDITS_AVAILABLE";
+  | "NO_CREDITS_AVAILABLE"
+  | UnlimitedErrorCode;
 
 export type ManagedBookingError = {
   code: ManagedBookingErrorCode;
+  message?: string;
 };
 
 function fail(code: ManagedBookingErrorCode): never {
@@ -122,34 +129,60 @@ export async function createBookingWithCreditCheck(
     0
   );
 
-  const totalCost = creditCost * quantity;
+  const unlimited = await getUnlimitedEligibility(tx, params.userId, cls.date, now);
+  const totalCost = creditCost * (quantity - (unlimited.purchase ? 1 : 0));
   if (packBalance < totalCost) {
+    if (unlimited.purchase && quantity > 1)
+      throw {
+        code: "UNLIMITED_SEAT_LIMIT",
+        message: unlimitedErrorMessages.UNLIMITED_SEAT_LIMIT,
+      };
+    if (unlimited.reason)
+      throw { code: unlimited.reason, message: unlimited.message };
     fail("NO_CREDITS_AVAILABLE");
   }
 
-  let booking: { id: string };
+  const entitlementType = unlimited.purchase
+    ? quantity > 1
+      ? "MIXED"
+      : "MONTHLY_UNLIMITED"
+    : "CREDITS";
 
-  try {
-    booking = await tx.booking.create({
+  if (unlimited.purchase) {
+    // Hold until booking commit. Admin revocation locks this exact same row.
+    // A stale SERIALIZABLE snapshot fails here and the caller retries; under
+    // READ COMMITTED the returned state is the latest committed state.
+    const rows = await tx.$queryRaw<{ revokedAt: Date | null }[]>`
+      SELECT "revokedAt" FROM "PackPurchase"
+      WHERE "id" = ${unlimited.purchase.id} AND "userId" = ${params.userId}
+      FOR UPDATE
+    `;
+    if (!rows.length || rows[0].revokedAt) throw { code: "P2034" };
+  }
+
+  // Database conflicts must escape this transaction so the caller can retry
+  // with a fresh snapshot (especially automatic waitlist promotion).
+  const booking = await tx.booking.create({
+    data: {
+      userId: params.userId,
+      classId: params.classId,
+      quantity,
+      status: BookingStatus.ACTIVE,
+      entitlementType,
+      packPurchaseId: unlimited.purchase?.id ?? packs[0]?.id ?? null,
+    },
+    select: { id: true },
+  });
+
+  if (unlimited.purchase)
+    await tx.unlimitedUsage.create({
       data: {
         userId: params.userId,
-        classId: params.classId,
-        quantity,
-        status: BookingStatus.ACTIVE,
-        packPurchaseId: packs[0]?.id ?? null,
+        purchaseId: unlimited.purchase.id,
+        bookingId: booking.id,
+        serviceDate: unlimited.day.serviceDate,
       },
-      select: { id: true },
     });
-  } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
-      fail("USER_ALREADY_BOOKED");
-    }
-
-    throw error;
-  }
 
   let remaining = totalCost;
 
@@ -189,7 +222,7 @@ export async function createBookingWithCreditCheck(
     fail("NO_CREDITS_AVAILABLE");
   }
 
-  return booking;
+  return { ...booking, debitedCredits: totalCost, creditCost, entitlementType };
 }
 
 export async function createSingleSeatBookingWithDebit(

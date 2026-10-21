@@ -1,4 +1,6 @@
 // src/app/api/checkout-links/route.ts
+import { assertNoMonthlyDuplicate } from "@/lib/package-checkout";
+import { packageSnapshot } from "@/lib/monthly-unlimited";
 import { NextResponse } from "next/server";
 import { getAuthFromRequest } from "@/lib/auth";
 import { getOptionalServerEnv } from "@/lib/env";
@@ -66,7 +68,7 @@ export async function POST(req: Request) {
       where: { id: packId },
       select: {
         id: true,
-        name: true,
+        name: true, type: true, unlimitedMonth: true, unlimitedYear: true,
         classes: true,
         price: true,
         validityDays: true,
@@ -126,10 +128,14 @@ export async function POST(req: Request) {
     };
 
     // ── Registros locales
-    const link = await prisma.checkoutLink.create({
+    const snapshot = packageSnapshot(pack);
+    const { link, payment } = await prisma.$transaction(async tx => {
+      await assertNoMonthlyDuplicate(tx, auth.sub, snapshot);
+    const link = await tx.checkoutLink.create({
       data: {
         code: crypto.randomUUID().slice(0, 8),
         status: "CREATED",
+        expiresAt: snapshot.type === "MONTHLY_UNLIMITED" ? new Date(Date.now() + 30 * 60 * 1000) : undefined,
         packId,
         userId: auth.sub,
         successUrl: backUrls.success,
@@ -138,15 +144,19 @@ export async function POST(req: Request) {
       },
     });
 
-    const payment = await prisma.payment.create({
+    const payment = await tx.payment.create({
       data: {
         provider: "MERCADOPAGO",
         status: "PENDING",
         amount: pack.price,
         currency: "MXN",
+        packSnapshot: snapshot,
         userId: auth.sub,
         checkoutLink: { connect: { id: link.id } },
       },
+    });
+
+      return { link, payment };
     });
 
     // ── Mercado Pago
@@ -200,6 +210,10 @@ export async function POST(req: Request) {
     try {
       pref = await preference.create({ body: prefBody });
     } catch (mpErr: any) {
+      if (snapshot.type === "MONTHLY_UNLIMITED") {
+        await prisma.payment.update({ where: { id: payment.id }, data: { status: "CANCELED" } });
+        await prisma.checkoutLink.update({ where: { id: link.id }, data: { status: "CANCELED" } });
+      }
       const detail = {
         message: mpErr?.message,
         status: mpErr?.status,
@@ -300,6 +314,7 @@ export async function POST(req: Request) {
 
     return j(200, { checkoutUrl: initPoint!, code: link.code });
   } catch (e: any) {
+    if (e?.code === "UNLIMITED_MONTH_ALREADY_PURCHASED" || e?.code === "UNLIMITED_NOT_ACTIVE") return j(409, { error: e.code, code: e.code, message: e.code === "UNLIMITED_NOT_ACTIVE" ? "El mes de este paquete ya finalizo." : "Ya tienes un ilimitado para este mes o una compra en proceso. Revisa Mis clases o termina tu pago pendiente." });
     console.error("CHECKOUT_LINKS_POST_FATAL:", e);
     return j(500, { error: "INTERNAL_ERROR", detail: e?.message ?? String(e) });
   }
