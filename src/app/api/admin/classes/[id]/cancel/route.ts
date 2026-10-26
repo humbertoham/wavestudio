@@ -3,6 +3,9 @@ import { requireClassManager } from "../../../_utils";
 import { runChallengeTransaction } from "@/lib/challenge";
 import { redactClassPayroll } from "@/lib/payroll";
 
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
+import { withoutWellhubClassIdentifiers } from "@/lib/wellhub/booking/serialize";
+
 export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -65,5 +68,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   }
 
   // 2️⃣ Cancelar clase (soft cancel)
-  return NextResponse.json(redactClassPayroll(result.updated));
+  await syncWellhubClassSafely(id);
+  return NextResponse.json(withoutWellhubClassIdentifiers(redactClassPayroll(result.updated)));
 }

@@ -36,7 +36,11 @@ const monthlyProduction = {
 };
 
 const devBase = "20261011000000_add_monthly_unlimited_packages";
-const expected = { ...mainBaseline, ...monthlyProduction };
+const wellhubProduction = {
+  "20261026000000_add_wellhub_checkin_production": "10c4747ea92b33dd29331de2c5199e21544084b66d61da6a2bcca421f17201aa",
+  "20261026010000_add_wellhub_booking_production": "242ac38cf37529b869a6a93a914e2f8f81b5965a6f5910b54947ee1f15ba21b0"
+};
+const expected = { ...mainBaseline, ...monthlyProduction, ...wellhubProduction };
 const lockHash = "99836963713b4f5b269ad49af0ed3d7b0b2e336115c2f92dc9ac683d139d0900";
 const defaultDirectory = fileURLToPath(new URL("../prisma/migrations/", import.meta.url));
 
@@ -102,6 +106,7 @@ export function checkMonthlyMigrationLineage(migrationsDirectory = defaultDirect
     ok: errors.length === 0,
     baselineCount: Object.keys(mainBaseline).length,
     monthlyCount: Object.keys(monthlyProduction).length,
+    wellhubCount: Object.keys(wellhubProduction).length,
     errors,
   };
 }

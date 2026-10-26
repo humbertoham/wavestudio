@@ -29,7 +29,7 @@ afterEach(() => {
 describe("production monthly migration lineage", () => {
   it("accepts the reviewed main baseline and only the production monthly sequence", () => {
     expect(checkMonthlyMigrationLineage(sourceDirectory)).toEqual({
-      ok: true, baselineCount: 21, monthlyCount: 3, errors: [],
+      ok: true, baselineCount: 21, monthlyCount: 3, wellhubCount: 2, errors: [],
     });
   });
 
@@ -57,6 +57,8 @@ describe("production monthly migration lineage", () => {
     "20261011010000_guard_unlimited_purchase_history",
     "20261011020000_snapshot_existing_purchase_labels",
     "20260905010000_add_accounting_payroll",
+    "20261026000000_add_wellhub_checkin_production",
+    "20261026010000_add_wellhub_booking_production",
   ])("detects source changes to %s", (name) => {
     const directory = fixture();
     const sql = path.join(directory, name, "migration.sql");

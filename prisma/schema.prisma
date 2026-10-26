@@ -50,6 +50,47 @@ enum BookingEntitlement {
   ADMIN_GUEST
 }
 
+enum BookingSource {
+  WAVE
+  WELLHUB
+}
+
+enum WellhubBookingState {
+  PENDING_CONFIRMATION
+  RESERVED
+  CONFIRMATION_ERROR
+  CANCELED
+  LATE_CANCELED
+  CANCELED_BY_WAVE
+}
+
+enum WellhubBookingEventType {
+  REQUESTED
+  CANCELED
+  LATE_CANCELED
+}
+
+enum WellhubBookingEventResult {
+  PROCESSING
+  ACCEPTED
+  REJECTED
+  CANCELED
+  ERROR
+}
+
+enum WellhubClassSyncStatus {
+  PENDING
+  SYNCED
+  ERROR
+}
+
+enum WellhubCheckinStatus {
+  RECEIVED
+  AUTHORIZED
+  REJECTED
+  ERROR
+}
+
 enum TokenReason {
   PURCHASE_CREDIT // alta inicial al comprar paquete
   BOOKING_DEBIT // consumo por reserva
@@ -155,6 +196,7 @@ model User {
   wellhubPlanConfirmedAt             DateTime?
   wellhubPlanConfirmationCampaign    String?
   wellhubPlanConfirmations           WellhubPlanConfirmation[]
+  wellhubCheckins                    WellhubCheckin[]
 
   @@index([affiliation, wellhubPlan])
 }
@@ -188,6 +230,28 @@ model WellhubPlanConfirmation {
   @@index([userId, status, sessionRecoveryExpiresAt], map: "WellhubPlanConfirmation_userId_status_sessionRecoveryExpiresAt_")
 }
 
+model WellhubCheckin {
+  id                String               @id @default(cuid())
+  externalEventId   String               @unique
+  externalUserId    String
+  externalGymId     String
+  externalProductId String
+  eventTimestamp    String
+  matchedUser       User?                @relation(fields: [matchedUserId], references: [id], onDelete: SetNull)
+  matchedUserId     String?
+  status            WellhubCheckinStatus @default(RECEIVED)
+  receivedAt        DateTime             @default(now())
+  validatedAt       DateTime?
+  failureCode       String?
+  failureReason     String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@index([externalUserId, receivedAt])
+  @@index([matchedUserId, receivedAt])
+  @@index([status, receivedAt])
+}
+
 model Instructor {
   id          String   @id @default(cuid())
   name        String
@@ -216,6 +280,14 @@ model Class {
   instructor   Instructor @relation(fields: [instructorId], references: [id])
   instructorId String
   bookings     Booking[]
+
+  // Provider mappings are additive and remain unused while Booking is disabled.
+  wellhubClassId      String? @unique @db.VarChar(64)
+  wellhubSlotId       String? @unique @db.VarChar(64)
+  wellhubSyncStatus   WellhubClassSyncStatus?
+  wellhubLastSyncedAt DateTime?
+  wellhubSyncError    String? @db.VarChar(300)
+  wellhubEvents      WellhubBookingEvent[]
 
   // Immutable for the current instructor assignment. Reassignment replaces
   // this snapshot with the new instructor's current rate.
@@ -282,6 +354,7 @@ model Booking {
   class   Class  @relation(fields: [classId], references: [id])
   classId String
 
+  source BookingSource @default(WAVE)
   entitlementType BookingEntitlement @default(CREDITS)
   unlimitedUsage  UnlimitedUsage?
   status          BookingStatus      @default(ACTIVE)
@@ -298,6 +371,14 @@ model Booking {
   canceledAt  DateTime?
   refundToken Boolean?
 
+  wellhubBookingNumber String? @unique @db.VarChar(120)
+  wellhubUserId String? @db.VarChar(64)
+  wellhubSlotId String? @db.VarChar(64)
+  wellhubState WellhubBookingState?
+  wellhubLastEventAt DateTime?
+  wellhubLateCanceledAt DateTime?
+  wellhubEvents WellhubBookingEvent[]
+
   ledgerEntries        TokenLedger[]
   challengeAwards      ChallengeBookingAward[]
   challengePointLedger ChallengePointLedger[]
@@ -311,6 +392,8 @@ model Booking {
   // ("userId", "classId") WHERE "status" = 'ACTIVE' AND "userId" IS NOT NULL
   @@index([classId])
   @@index([userId])
+  @@index([source, classId, status])
+  @@index([wellhubUserId, classId])
 }
 
 /**
@@ -432,6 +515,32 @@ model ChallengePointAdjustment {
  * Paquetes y Compras
  * =========================
  */
+model WellhubBookingEvent {
+  id              String                    @id @default(cuid())
+  externalEventId String                    @unique @db.VarChar(120)
+  eventType       WellhubBookingEventType
+  result          WellhubBookingEventResult @default(PROCESSING)
+  bookingNumber   String                    @db.VarChar(120)
+  externalUserId  String                    @db.VarChar(64)
+  externalSlotId  String                    @db.VarChar(64)
+  externalClassId String                    @db.VarChar(64)
+  externalGymId   String                    @db.VarChar(64)
+  eventTimestamp  String                    @db.VarChar(32)
+  failureCode     String?                   @db.VarChar(120)
+  receivedAt      DateTime                  @default(now())
+  processedAt     DateTime?
+
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  bookingId String?
+  class     Class?   @relation(fields: [classId], references: [id], onDelete: SetNull)
+  classId   String?
+
+  @@unique([eventType, bookingNumber])
+  @@index([bookingNumber, receivedAt])
+  @@index([classId, receivedAt])
+  @@index([result, receivedAt])
+}
+
 model Pack {
   type           PackType       @default(STANDARD)
   unlimitedMonth Int?

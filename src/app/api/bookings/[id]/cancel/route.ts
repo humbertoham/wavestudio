@@ -5,6 +5,8 @@ import { Prisma } from "@prisma/client";
 import { getAuth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { promoteWaitlistForReleasedSeats } from "@/lib/waitlist-promotion";
+import { notifyWellhubBookingCanceledByWaveSafely } from "@/lib/wellhub/booking/service";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,6 +73,8 @@ export async function PATCH(
     if (!booking) return j(404, { code: "NOT_FOUND" });
     if (booking.userId !== auth.sub) return j(403, { code: "FORBIDDEN" });
     if (booking.status !== "ACTIVE") {
+      await notifyWellhubBookingCanceledByWaveSafely(booking.id);
+      await syncWellhubClassSafely(booking.classId);
       return j(409, { code: "ALREADY_CANCELED" });
     }
 
@@ -199,6 +203,8 @@ export async function PATCH(
       });
     }
 
+    await notifyWellhubBookingCanceledByWaveSafely(booking.id);
+    await syncWellhubClassSafely(booking.classId);
 
     return j(200, {
       id: result.id,

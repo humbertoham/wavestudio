@@ -15,6 +15,9 @@ import {
   updateClassWithPayrollAssignment,
 } from "@/lib/payroll";
 
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
+import { withoutWellhubClassIdentifiers } from "@/lib/wellhub/booking/serialize";
+
 export const runtime = "nodejs";
 
 const USER_TZ = "America/Monterrey";
@@ -94,7 +97,8 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       });
     });
 
-    return NextResponse.json(redactClassPayroll(updated));
+    await syncWellhubClassSafely(id);
+    return NextResponse.json(withoutWellhubClassIdentifiers(redactClassPayroll(updated)));
   } catch (error) {
     return updateError(error);
   }
@@ -174,7 +178,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       });
     });
 
-    return NextResponse.json(redactClassPayroll(updated));
+    await syncWellhubClassSafely(id);
+    return NextResponse.json(withoutWellhubClassIdentifiers(redactClassPayroll(updated)));
   } catch (error) {
     if (error instanceof CapacityTooSmallError) {
       return json(400, {

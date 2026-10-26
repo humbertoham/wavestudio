@@ -78,7 +78,12 @@ export async function deleteClassFromCalendar(
 
           const cls = await tx.class.findUnique({
             where: { id: classId },
-            select: { id: true, deletedAt: true },
+            select: {
+              id: true,
+              deletedAt: true,
+              wellhubClassId: true,
+              wellhubSlotId: true,
+            },
           });
 
           if (!cls || cls.deletedAt) return { outcome: "not_found" };
@@ -95,7 +100,11 @@ export async function deleteClassFromCalendar(
             where: inactiveBookingWhere(classId),
           });
 
-          if (inactiveBookingCount > 0) {
+          if (
+            inactiveBookingCount > 0 ||
+            cls.wellhubClassId ||
+            cls.wellhubSlotId
+          ) {
             await tx.class.update({
               where: { id: classId },
               data: { deletedAt: new Date() },

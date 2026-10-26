@@ -4,6 +4,8 @@ import { getNewUserBookingIds } from "@/lib/new-user";
 import { executeClassDeletion } from "@/lib/class-deletion-response";
 import { redactClassPayroll } from "@/lib/payroll";
 
+import { withoutWellhubClassIdentifiers, withoutWellhubBookingIdentifiers } from "@/lib/wellhub/booking/serialize";
+
 type Ctx = {
   params: Promise<{ id: string }>;
 };
@@ -69,12 +71,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   );
 
   return NextResponse.json({
-    ...redactClassPayroll(cls),
+    ...withoutWellhubClassIdentifiers(redactClassPayroll(cls)),
     bookings: cls.bookings.map((booking) => {
       const isNewUser = newUserBookingIds.has(booking.id);
 
       return {
-        ...booking,
+        ...withoutWellhubBookingIdentifiers(booking),
         isNewUser,
         // Backward-compatible alias for existing class-management clients.
         isFirstBooking: isNewUser,

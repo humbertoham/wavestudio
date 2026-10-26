@@ -6,6 +6,8 @@ import {
   refundBookingCredits,
   releaseUnlimitedUsage,
 } from "@/lib/monthly-unlimited";
+import { notifyWellhubBookingCanceledByWaveSafely } from "@/lib/wellhub/booking/service";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
 
 export const runtime = "nodejs";
 type Ctx = { params: Promise<{ id: string }> };
@@ -55,6 +57,8 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
             { error: "BOOKING_NOT_FOUND" },
             { status: 404 },
           );
+        await notifyWellhubBookingCanceledByWaveSafely(id);
+        await syncWellhubClassSafely(result.classId);
         return NextResponse.json({
           ok: true,
           alreadyCanceled: result.alreadyCanceled,
