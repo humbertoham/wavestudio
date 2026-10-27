@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 // Source-only check. No environment files, credentials, database or HTTP access.
-export const BASELINE = "ead810c9d80c7d09d82e5236c927e5e2c65cbdd4";
+export const BASELINE = "55ae5d9344a82796d27d809ac419109a99920f29";
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const original = file => JSON.parse(git("show", `${BASELINE}:${file}`));
 const current = file => JSON.parse(readFileSync(file, "utf8"));

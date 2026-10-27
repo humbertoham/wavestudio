@@ -1,4 +1,4 @@
-# Dependency security hotfix ? October 27, 2026
+# Dependency security hotfix - October 27, 2026
 
 MAIN baseline: 15915ddb4fc9453b671ba7772a2924acbfa91503. Security branch: security/main-dependency-hardening. No Wellhub feature implementation, schema change, Prisma migration, production environment edit, live record change or activation is included.
 
@@ -11,13 +11,13 @@ The previous locked tree reported 24 affected packages: 2 critical, 15 high, 7 m
 | @prisma/config | high | 6.16.2 | 6.16.2 | Prisma CLI config loading; unchanged parent version with scoped dependency fixes |
 | browserslist | high | 4.26.2 | 4.29.5 | Autoprefixer CSS build tooling; compatible-major transitive refresh |
 | deepmerge-ts | high | 7.1.5 | 8.0.0 | Prisma config/c12 merge; scoped major override, exercised through actual config loader |
-| defu | high | 6.1.4 | 6.1.7 | Prisma config ? c12/giget/rc9; compatible patch |
+| defu | high | 6.1.4 | 6.1.7 | Prisma config -> c12/giget/rc9; compatible patch |
 | effect | high | 3.16.12 | 3.20.0 | Prisma config/schema decoding; scoped compatible-major override |
-| linkify-it | high | 5.0.0 | Removed | Resend ? mailparser; entire obsolete mailparser chain removed |
+| linkify-it | high | 5.0.0 | Removed | Resend -> mailparser; entire obsolete mailparser chain removed |
 | mailparser | high | 3.9.1 | Removed | Resend runtime import chain; replaced by upstream Resend minor update |
 | nanoid | high | 3.3.11 | 3.3.20 | PostCSS identifiers in CSS build tooling; retained major 3 |
 | next | critical | 16.0.10 | 16.4.3 | Application runtime and build; direct dependency |
-| nodemailer | high | 7.0.11 | Removed | Resend ? mailparser; entire obsolete chain removed |
+| nodemailer | high | 7.0.11 | Removed | Resend -> mailparser; entire obsolete chain removed |
 | postcss | high | 8.5.13; Next nested 8.4.31 | 8.5.23, 8.5.32 | Next build/CSS runtime dependency plus dev PostCSS; compatible 8.x patches |
 | prisma | high | 6.16.2 | 6.16.2 | Prisma CLI/build/migration tooling; inherited findings through config; CLI/client remain 6.16.2 |
 | sharp | high | 0.34.4 | 0.35.5 | Next image optimization runtime; patched native library, SVG?AVIF exercised |
@@ -30,7 +30,7 @@ PostCSS and its source-map/nanoid consumers are patched in both application/buil
 
 ## Targeted updates and justified overrides
 
-Direct updates: Next 16.0.10 ? 16.4.3; Resend 6.9.1 ? 6.12.3; Zod 4.1.11 ? 4.6.6; PostCSS 8.5.13 ? 8.5.23; Vitest 4.1.5 ? 4.1.12. Only named vulnerable transitive families and their required dependency closure were refreshed using npm. No blanket dependency update or major Prisma/Mercado Pago upgrade was performed.
+Direct updates: Next 16.0.10 -> 16.4.3; Resend 6.9.1 -> 6.12.3; Zod 4.1.11 -> 4.6.6; PostCSS 8.5.13 -> 8.5.23; Vitest 4.1.5 -> 4.1.12. Only named vulnerable transitive families and their required dependency closure were refreshed using npm. No blanket dependency update or major Prisma/Mercado Pago upgrade was performed.
 
 Prisma 6.16.2 pins vulnerable deepmerge-ts 7.1.5 and Effect 3.16.12. A version-scoped @prisma/config@6.16.2 override selects deepmerge-ts 8.0.0 and Effect 3.20.0, preserving the current datasource/schema/client/engine architecture. Real Prisma config-loader, generation/validation, populated migration rehearsal, regression and build checks validate this exception. Review/remove these overrides when a future parent release supplies patched dependencies; do not assume they apply to a different Prisma version.
 
@@ -42,11 +42,11 @@ The full before inventory with advisory titles, affected ranges and ancestry is 
 
 A deterministic npm ci --ignore-scripts completed. npm ls exits 0 with no invalid/missing required dependency; on Windows it labels two locked optional Sharp WASM fallback entries extraneous because their FreeBSD/WebContainers parents are platform-filtered. They are present in the integrity-locked optional graph, not untracked dependency additions. They do not change the successful native image probe or clean audit.
 
-Fresh MAIN validation: 594 passed, zero failed/skipped; includes four new meaningful third-party compatibility checks. Prisma generate/validate, TypeScript --noEmit, all existing unit/PostgreSQL integration tests, populated historical migration/dump-restore rehearsal and Production build with synthetic fixture credentials passed. No mutating test was pointed at Production. Baseline 24 historical migration SQL files, schema and application src files are unchanged. Existing Monthly Unlimited, auth/session, packages, credits, bookings, payroll/accounting, Mercado Pago, TotalPass and inert Wellhub stub behavior remain protected by the existing full suite.
+Initial local MAIN validation: 594 passed, zero failed/skipped, including four new third-party compatibility checks. The first Linux push run exposed one intermittent final-seat rejection assertion; its exact transaction rejection was not recorded by the old object matcher. The test now prints the exact rejected code and exercises five independent concurrent schedules without weakening capacity/entitlement assertions. Both subsequent Linux push and PR runs passed 598 tests, zero failed/skipped, audit, typecheck, Prisma and build. No application logic was changed to obtain a passing result; the earlier intermittent failure remains disclosed as validation history, not claimed diagnosed. Prisma generate/validate, TypeScript --noEmit, all existing unit/PostgreSQL integration tests, populated historical migration/dump-restore rehearsal and Production build with synthetic fixture credentials passed. No mutating test was pointed at Production. Baseline 24 historical migration SQL files, schema and application src files are unchanged. Existing Monthly Unlimited, auth/session, packages, credits, bookings, payroll/accounting, Mercado Pago, TotalPass and inert Wellhub stub behavior remain protected by the existing full suite.
 
 The monthly validation harness now verifies approved baseline ancestry rather than a branch-name list (supports detached CI), generates/validates Prisma and typechecks before tests, and supports an explicit --build phase. Its existing default test selection and migration manifest remain intact. The shared test:security:release entry point chooses the Wellhub harness only when that reviewed implementation is present, otherwise the MAIN harness; both create their own labeled disposable localhost PostgreSQL database and scrub inherited service/database configuration.
 
-The new GitHub Actions workflow has contents:read permissions, full history for lineage checks, pinned action commits, Node 22, deterministic installation without lifecycle scripts, unsuppressed npm audit and the complete isolated regression/typecheck/Prisma/build command. It consumes no Production secrets or datasource. Remote CI is pending until the branch is published and the run completes; local tests do not count as remote CI.
+The new GitHub Actions workflow has contents:read permissions, full history for lineage checks, pinned action commits, Node 22, deterministic installation without lifecycle scripts, unsuppressed npm audit and the complete isolated regression/typecheck/Prisma/build command. It consumes no Production secrets or datasource. The latest published hotfix push and PR CI runs passed the complete pipeline; final commit status must be rechecked after any further edit. Local tests are recorded separately from remote CI.
 
 vercel.json adds deploymentEnabled=false only for security/main-dependency-hardening and release/wellhub-production-security, preventing automatic Vercel deployments while these two branches are reviewed. MAIN remains unspecified/default-enabled; cron and other settings are unchanged. This is source-level review-branch protection, not a production provider setting/environment mutation. [Supported Vercel Git branch controls](https://vercel.com/docs/project-configuration/git-configuration).
 

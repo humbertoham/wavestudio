@@ -1,3 +1,15 @@
+# Patched Wellhub candidate — security integration addendum
+
+This review branch release/wellhub-production-security preserves original candidate 353dfa84f250af01374a585e17b963c9493ac933 and includes security hotfix 55ae5d9344a82796d27d809ac419109a99920f29 as an ancestor. The original release/wellhub-production-isolated branch remains unchanged.
+
+The dependency/source guard and isolated rehearsal now compare against that reviewed security baseline, preserving its 257 existing locked entries and adding only the original tsx/esbuild tooling. All original Wellhub implementation changes, Production-host support, default-disabled flag behavior and the exact two forward migration SQL files are retained. No historical SQL checksum or production source/schema/env/data was changed.
+
+Security corrections, full critical/high inventory, scoped overrides, compatibility probes and CI/review-branch deployment protection are documented in [the security audit](../security/dependency-remediation-2026-10-27.md). Full independent validation and CI must pass for this new tree. The historical report below describes the original 353dfa84 candidate and its original 714-test evidence; its pre-security dependency/baseline/status statements are historical, not claims about current readiness.
+
+Production flag values and deployed Vercel→Neon mapping remain UNVERIFIED because supported metadata cannot disclose Sensitive values. Off-host encrypted recovery remains PENDING without an approved destination and separate key recovery. Neither this merge nor a draft PR authorizes Production deployment/migration or activation.
+
+---
+
 # Isolated Wellhub production candidate ? October 26, 2026
 
 ## Status and identity

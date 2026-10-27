@@ -6,7 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 // This harness can only address its own labeled, localhost-only disposable DB.
-const BASELINE = "ead810c9d80c7d09d82e5236c927e5e2c65cbdd4";
+const BASELINE = "55ae5d9344a82796d27d809ac419109a99920f29";
 const APPROVED = [
   "20261026000000_add_wellhub_checkin_production",
   "20261026010000_add_wellhub_booking_production",

@@ -687,7 +687,7 @@ describe.skipIf(!optIn)(
         }),
       ).toBe(1);
     });
-    it("prevents concurrent final-seat overselling between two unlimited users", async () => {
+    it.each([1, 2, 3, 4, 5])("prevents concurrent final-seat overselling between two unlimited users (schedule %i)", async () => {
       const other = await createUser();
       await ownUnlimited();
       await ownUnlimited(other);
@@ -697,9 +697,7 @@ describe.skipIf(!optIn)(
         serialReserve(other.id, cls.id),
       ]);
       expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
-      expect(results.find((r) => r.status === "rejected")).toMatchObject({
-        reason: { code: "CLASS_FULL" },
-      });
+      expect(results.find((r) => r.status === "rejected")?.reason?.code).toBe("CLASS_FULL");
       expect(
         (
           await prisma.booking.aggregate({
