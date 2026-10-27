@@ -54,6 +54,7 @@ type ClassApi = {
     id: string;
     quantity: number;
     status?: "ACTIVE" | "CANCELED";
+    source?: "WAVE" | "WELLHUB";
     entitlementType?: string;
     attended?: boolean;
     canceledAt?: string | null;
@@ -82,6 +83,7 @@ type ClassApi = {
 };
 
 type AttendeeRow = {
+  source: "WAVE" | "WELLHUB";
   bookingId: string;
   entitlementType?: string;
   name: string;
@@ -95,6 +97,7 @@ type AttendeeRow = {
 };
 
 type CanceledRow = {
+  source: "WAVE" | "WELLHUB";
   bookingId: string;
   entitlementType?: string;
   name: string;
@@ -511,7 +514,8 @@ export default function ClassAdminPage() {
         name: booking.user?.name ?? booking.guestName ?? "Invitado",
         email: booking.user?.email,
         phone: booking.user?.phone ?? null,
-        isGuest: !booking.user,
+        isGuest: !booking.user && booking.source !== "WELLHUB",
+        source: booking.source ?? "WAVE",
         attended: !!booking.attended,
         quantity: booking.quantity ?? 1,
         entitlementType: booking.entitlementType,
@@ -534,6 +538,7 @@ export default function ClassAdminPage() {
         phone: booking.user?.phone ?? null,
         affiliation: booking.user?.affiliation ?? "NONE",
         canceledAt: booking.canceledAt ?? null,
+        source: booking.source ?? "WAVE",
         entitlementType: booking.entitlementType,
       }));
   }, [cls]);
@@ -933,6 +938,7 @@ export default function ClassAdminPage() {
                           Invitado
                         </span>
                       )}
+                      {attendee.source === "WELLHUB" && <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800">Wellhub</span>}
                       <AffiliationBadge affiliation={attendee.affiliation} />
                       {(attendee.entitlementType === "MONTHLY_UNLIMITED" || attendee.entitlementType === "MIXED") && (
                         <span className="rounded bg-primary/10 px-2 py-0.5 text-xs">
@@ -1021,6 +1027,7 @@ export default function ClassAdminPage() {
             {canceledBookings.map((booking) => {
               const whatsappHref = toWhatsAppHref(booking.phone);
               const hasPenalty =
+                booking.source !== "WELLHUB" &&
                 (booking.affiliation === "WELLHUB" ||
                   booking.affiliation === "TOTALPASS") &&
                 isLateCanceledBooking(cls.date, booking.canceledAt);
@@ -1033,6 +1040,7 @@ export default function ClassAdminPage() {
                   <div className="min-w-0">
                     <p className="flex flex-wrap items-center gap-2 font-semibold">
                       <span className="truncate">{booking.name}</span>
+                      {booking.source === "WELLHUB" && <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800">Wellhub</span>}
                       <AffiliationBadge affiliation={booking.affiliation} />
                     </p>
 

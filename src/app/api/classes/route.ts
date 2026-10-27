@@ -13,6 +13,9 @@ import {
   payrollErrorResponse,
 } from "@/lib/payroll";
 
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
+import { withoutWellhubClassIdentifiers } from "@/lib/wellhub/booking/serialize";
+
 export const runtime = "nodejs";
 
 /**
@@ -166,7 +169,8 @@ export async function POST(req: Request) {
       });
     });
 
-    return NextResponse.json(cls, { status: 201 });
+    await syncWellhubClassSafely(cls.id);
+    return NextResponse.json(withoutWellhubClassIdentifiers(cls), { status: 201 });
   } catch (e: unknown) {
     const known = payrollErrorResponse(e);
     if (known) return NextResponse.json(known.body, { status: known.status });

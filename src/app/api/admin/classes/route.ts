@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, requireAdminUser } from "../_utils";
 import { zonedTimeToUtc, utcToZonedTime } from "date-fns-tz";
@@ -10,6 +11,9 @@ import {
   getInstructorPayrollSnapshot,
   payrollErrorResponse,
 } from "@/lib/payroll";
+
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
+import { withoutWellhubClassIdentifiers } from "@/lib/wellhub/booking/serialize";
 
 export const runtime = "nodejs";
 
@@ -71,7 +75,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     items: items.map((item) => ({
-      ...item,
+      ...withoutWellhubClassIdentifiers(item),
       challengePointsLocked: item._count.challengeAwards > 0,
       _count: undefined,
     })),
@@ -115,6 +119,7 @@ export async function POST(req: NextRequest) {
       });
 
       let duplicated = 0;
+      const duplicatedIds: string[] = [];
       if (body.repeatNextMonth) {
         const offsets = [7, 14, 21, 28];
         const datesUtc = offsets.map((d) =>
@@ -122,6 +127,8 @@ export async function POST(req: NextRequest) {
         );
 
         const data = datesUtc.map((date) => ({
+          ...(process.env.WELLHUB_BOOKING_ENABLED?.trim().toLowerCase() === "true"
+            ? { id: `wave_${randomUUID().replaceAll("-", "")}` } : {}),
           title: body.title,
           focus: safeFocus,
           date,
@@ -134,14 +141,16 @@ export async function POST(req: NextRequest) {
         }));
 
         await tx.class.createMany({ data });
+        duplicatedIds.push(...data.flatMap((item) => item.id ? [item.id] : []));
         duplicated = datesUtc.length;
       }
 
-      return { created, duplicated };
+      return { created, duplicated, duplicatedIds };
     });
 
+    await Promise.all([result.created.id, ...result.duplicatedIds].map((id) => syncWellhubClassSafely(id)));
     return NextResponse.json(
-      { item: result.created, duplicated: result.duplicated },
+      { item: withoutWellhubClassIdentifiers(result.created), duplicated: result.duplicated },
       { status: 201 }
     );
   } catch (error) {

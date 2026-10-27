@@ -7,6 +7,7 @@ import { getUnlimitedEligibility, isBookingTransactionConflict, unlimitedErrorMe
 
 import { getAuthFromRequest } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -251,6 +252,8 @@ export async function POST(req: NextRequest) {
       });
     }
 
+
+    await syncWellhubClassSafely(classId);
 
     return j(201, {
       ok: true,

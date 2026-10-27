@@ -687,7 +687,7 @@ describe.skipIf(!optIn)(
         }),
       ).toBe(1);
     });
-    it("prevents concurrent final-seat overselling between two unlimited users", async () => {
+    it.each([1, 2, 3, 4, 5])("prevents concurrent final-seat overselling between two unlimited users (schedule %i)", async () => {
       const other = await createUser();
       await ownUnlimited();
       await ownUnlimited(other);
@@ -697,9 +697,7 @@ describe.skipIf(!optIn)(
         serialReserve(other.id, cls.id),
       ]);
       expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
-      expect(results.find((r) => r.status === "rejected")).toMatchObject({
-        reason: { code: "CLASS_FULL" },
-      });
+      expect(results.find((r) => r.status === "rejected")?.reason?.code).toBe("CLASS_FULL");
       expect(
         (
           await prisma.booking.aggregate({
@@ -1481,9 +1479,9 @@ describe.skipIf(!optIn)(
         expect((await reserve((await session()).id)).status).toBe(402);
       },
     );
-    it("the existing Wellhub webhook remains an inert production stub", async () => {
-      const response = await json(wellhubStub(req("/api/integrations/wellhub/webhook", { event: "booking" })));
-      expect(response).toMatchObject({ status: 503, body: { ok: false, code: "WELLHUB_NOT_CONFIGURED" } });
+    it("the Wellhub webhook stays inert with both feature flags disabled", async () => {
+      const response = await json(await wellhubStub(req("/api/integrations/wellhub/webhook", { event: "booking" })));
+      expect(response).toMatchObject({ status: 200, body: { ok: true, result: "DISABLED" } });
       expect(await prisma.booking.count({ where: { userId: user.id } })).toBe(0);
       expect(await prisma.packPurchase.count({ where: { userId: user.id } })).toBe(0);
       expect(await prisma.payment.count({ where: { userId: user.id } })).toBe(0);

@@ -5,6 +5,7 @@ import {
   classDeletionErrorCode,
   deleteClassFromCalendar,
 } from "@/lib/class-deletion";
+import { syncWellhubClassSafely } from "@/lib/wellhub/booking/sync";
 
 function noStore(status: number, body: Record<string, unknown>) {
   return NextResponse.json(body, {
@@ -56,6 +57,7 @@ export async function executeClassDeletion(classId: string) {
     }
 
     invalidateClassCalendarPaths(classId);
+    await syncWellhubClassSafely(classId);
 
     if (result.outcome === "archived") {
       return noStore(200, {
