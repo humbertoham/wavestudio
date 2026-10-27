@@ -4,5 +4,11 @@
       "path": "/api/internal/monthly-renewal",
       "schedule": "0 5 1 1,2,4,6,8,9,11 *"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "security/main-dependency-hardening": false,
+      "release/wellhub-production-security": false
+    }
+  }
 }

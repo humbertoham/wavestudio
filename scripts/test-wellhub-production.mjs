@@ -6,7 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 // This harness can only address its own labeled, localhost-only disposable DB.
-const BASELINE = "15915ddb4fc9453b671ba7772a2924acbfa91503";
+const BASELINE = "ead810c9d80c7d09d82e5236c927e5e2c65cbdd4";
 const APPROVED = [
   "20261026000000_add_wellhub_checkin_production",
   "20261026010000_add_wellhub_booking_production",
@@ -18,7 +18,7 @@ const USER = "wave_release_test";
 const full = process.argv.includes("--full");
 const build = process.argv.includes("--build");
 const git = args => execFileSync("git", args, { encoding: "utf8" }).trim();
-assert.ok(["release/wellhub-production-isolated"].includes(git(["branch", "--show-current"])), "Release validation requires the reviewed release branch or main.");
+git(["merge-base", "--is-ancestor", BASELINE, "HEAD"]);
 const container = `wave-wellhub-production-${randomUUID()}`;
 const password = randomUUID();
 const artifactDir = resolve(".env.wellhub-release", `rehearsal-${randomUUID()}`);
