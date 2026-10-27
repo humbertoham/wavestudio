@@ -16,8 +16,9 @@ const RECOVERY = "wave_monthly_production_recovery";
 const LABEL = "monthly-production-validation";
 const USER = "wave_release_test";
 const full = process.argv.includes("--full");
+const build = process.argv.includes("--build");
 const git = args => execFileSync("git", args, { encoding: "utf8" }).trim();
-assert.ok(["release/monthly-unlimited-production", "main"].includes(git(["branch", "--show-current"])), "Release validation requires the reviewed release branch or main.");
+git(["merge-base", "--is-ancestor", BASELINE, "HEAD"]);
 const container = `wave-monthly-production-${randomUUID()}`;
 const password = randomUUID();
 const artifactDir = resolve(".env.production-release", `rehearsal-${randomUUID()}`);
@@ -189,6 +190,9 @@ try {
   if (full) Object.assign(env, { RUN_CHALLENGE_INTEGRATION: "1", RUN_CLASS_DELETION_INTEGRATION: "1", RUN_NEW_USER_INTEGRATION: "1", RUN_WELLHUB_CONFIRMATION_DB_TESTS: "1" });
   const report = resolve(artifactDir, full ? "full-tests.json" : "focused-tests.json");
   const tests = full ? [] : ["src/lib/monthly-unlimited.test.ts", "src/lib/monthly-unlimited.database.test.ts", "src/lib/monthly-payment-reversal.test.ts", "src/app/api/webhooks/mercadopago/route.test.ts", "src/lib/class-booking.test.ts", "src/app/api/bookings/[id]/cancel/route.test.ts", "src/app/api/admin/classes/[id]/route.payroll.test.ts"];
+  prisma(["generate"], env);
+  prisma(["validate"], env);
+  command("TypeScript", process.execPath, [resolve("node_modules/typescript/bin/tsc"), "--noEmit"], env);
   let testFailure;
   try {
     command("Isolated release tests", process.execPath, [resolve("node_modules/vitest/vitest.mjs"), "run", ...tests, "--fileParallelism=false", "--silent", "--reporter=json", `--outputFile=${report}`], env);
@@ -205,6 +209,11 @@ try {
   assert.equal(result.success, true);
   assert.equal(result.numFailedTests, 0);
   assert.equal(result.numPendingTests, 0, "Release certification must execute every selected test.");
+  if (build) {
+    command("Production migration lineage", process.execPath, [resolve("scripts/check-monthly-migration-lineage.mjs")], env);
+    command("Production build", process.execPath, [resolve("node_modules/next/dist/bin/next"), "build"], { ...env, NODE_ENV: "production", APP_ENV: "production", NEXT_TELEMETRY_DISABLED: "1" });
+    console.log("Production build passed with synthetic fixture credentials.");
+  }
   console.log(`Synthetic validation report: ${resolve(artifactDir, "migration-rehearsal.json")}`);
 } finally {
   if (started) {

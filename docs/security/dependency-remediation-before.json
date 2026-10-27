@@ -1,0 +1,1106 @@
+[
+  {
+    "name": "@prisma/config",
+    "severity": "high",
+    "version": "6.16.2",
+    "nodes": [
+      "node_modules/@prisma/config"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/prisma",
+        "specifier": "6.16.2",
+        "dev": false
+      }
+    ],
+    "advisories": [],
+    "fixAvailable": {
+      "name": "prisma",
+      "version": "7.10.1",
+      "isSemVerMajor": true
+    }
+  },
+  {
+    "name": "@vitest/mocker",
+    "severity": "moderate",
+    "version": "4.1.5",
+    "nodes": [
+      "node_modules/@vitest/mocker"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/vitest",
+        "specifier": "4.1.5",
+        "dev": true
+      }
+    ],
+    "advisories": [
+      {
+        "title": "Vitest: Path Traversal / Arbitrary File Read via @vitest/mocker Redirect Mock",
+        "url": "https://github.com/advisories/GHSA-82fw-gwwq-j7x9",
+        "severity": "moderate",
+        "range": ">=2.1.0 <4.1.11"
+      },
+      {
+        "title": "Vitest: Code injection via unauthenticated manual mock registration",
+        "url": "https://github.com/advisories/GHSA-qxg6-89mg-rqv8",
+        "severity": "moderate",
+        "range": ">=2.1.0-beta.7 <4.1.12"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "baseline-browser-mapping",
+    "severity": "moderate",
+    "version": "2.8.8",
+    "nodes": [
+      "node_modules/baseline-browser-mapping"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/browserslist",
+        "specifier": "^2.8.3",
+        "dev": true
+      }
+    ],
+    "advisories": [
+      {
+        "title": "baseline-browser-mapping process termination on invalid input causes denial of service",
+        "url": "https://github.com/advisories/GHSA-w5vr-8v7q-w6rv",
+        "severity": "moderate",
+        "range": ">=2.0.0 <2.11.0"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "browserslist",
+    "severity": "high",
+    "version": "4.26.2",
+    "nodes": [
+      "node_modules/browserslist"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/autoprefixer",
+        "specifier": "^4.24.4",
+        "dev": true
+      }
+    ],
+    "advisories": [
+      {
+        "title": "Browserslist: Unbounded memory growth (no cache eviction) via distinct query results, leading to eventual OOM",
+        "url": "https://github.com/advisories/GHSA-c83g-rgw3-j3cx",
+        "severity": "high",
+        "range": "<=4.28.6"
+      },
+      {
+        "title": "Browserslist: Uncaught crash / prototype write via untrusted browserslist-stats.json custom stats (normalizeStats)",
+        "url": "https://github.com/advisories/GHSA-73wf-gq98-2v4g",
+        "severity": "high",
+        "range": "<=4.28.6"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "deepmerge-ts",
+    "severity": "high",
+    "version": "7.1.5",
+    "nodes": [
+      "node_modules/deepmerge-ts"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/@prisma/config",
+        "specifier": "7.1.5",
+        "dev": false
+      }
+    ],
+    "advisories": [
+      {
+        "title": "DeepmergeTS has stack exhaustion when merging recursive object graphs",
+        "url": "https://github.com/advisories/GHSA-ggr8-5vv4-36mx",
+        "severity": "high",
+        "range": "<8.0.0"
+      }
+    ],
+    "fixAvailable": {
+      "name": "prisma",
+      "version": "7.10.1",
+      "isSemVerMajor": true
+    }
+  },
+  {
+    "name": "defu",
+    "severity": "high",
+    "version": "6.1.4",
+    "nodes": [
+      "node_modules/defu"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/c12",
+        "specifier": "^6.1.4",
+        "dev": false
+      },
+      {
+        "parent": "node_modules/giget",
+        "specifier": "^6.1.4",
+        "dev": false
+      },
+      {
+        "parent": "node_modules/rc9",
+        "specifier": "^6.1.4",
+        "dev": false
+      }
+    ],
+    "advisories": [
+      {
+        "title": "defu: Prototype pollution via `__proto__` key in defaults argument",
+        "url": "https://github.com/advisories/GHSA-737v-mqg7-c878",
+        "severity": "high",
+        "range": "<=6.1.4"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "effect",
+    "severity": "high",
+    "version": "3.16.12",
+    "nodes": [
+      "node_modules/effect"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/@prisma/config",
+        "specifier": "3.16.12",
+        "dev": false
+      }
+    ],
+    "advisories": [
+      {
+        "title": "Effect `AsyncLocalStorage` context lost/contaminated inside Effect fibers under concurrent load with RPC",
+        "url": "https://github.com/advisories/GHSA-38f7-945m-qr2g",
+        "severity": "high",
+        "range": "<3.20.0"
+      }
+    ],
+    "fixAvailable": {
+      "name": "prisma",
+      "version": "7.10.1",
+      "isSemVerMajor": true
+    }
+  },
+  {
+    "name": "linkify-it",
+    "severity": "high",
+    "version": "5.0.0",
+    "nodes": [
+      "node_modules/linkify-it"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/mailparser",
+        "specifier": "5.0.0",
+        "dev": false
+      }
+    ],
+    "advisories": [
+      {
+        "title": "LinkifyIt#match scan loop has quadratic algorithmic complexity",
+        "url": "https://github.com/advisories/GHSA-22p9-wv53-3rq4",
+        "severity": "high",
+        "range": "<=5.0.0"
+      },
+      {
+        "title": "linkify-it: Quadratic-complexity DoS via the `mailto:` validator scan-loop on attacker text",
+        "url": "https://github.com/advisories/GHSA-v245-v573-v5vm",
+        "severity": "high",
+        "range": "<=5.0.1"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "mailparser",
+    "severity": "high",
+    "version": "3.9.1",
+    "nodes": [
+      "node_modules/mailparser"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/resend",
+        "specifier": "3.9.1",
+        "dev": false
+      }
+    ],
+    "advisories": [
+      {
+        "title": "mailparser vulnerable to Cross-site Scripting",
+        "url": "https://github.com/advisories/GHSA-7gmj-h9xc-mcxc",
+        "severity": "low",
+        "range": "<3.9.3"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "mercadopago",
+    "severity": "moderate",
+    "version": "2.9.0",
+    "nodes": [
+      "node_modules/mercadopago"
+    ],
+    "parents": [
+      {
+        "parent": "project",
+        "specifier": "^2.9.0",
+        "dev": false
+      }
+    ],
+    "advisories": [],
+    "fixAvailable": {
+      "name": "mercadopago",
+      "version": "3.6.1",
+      "isSemVerMajor": true
+    }
+  },
+  {
+    "name": "nanoid",
+    "severity": "high",
+    "version": "3.3.11",
+    "nodes": [
+      "node_modules/nanoid"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/next/node_modules/postcss",
+        "specifier": "^3.3.6",
+        "dev": false
+      },
+      {
+        "parent": "node_modules/postcss",
+        "specifier": "^3.3.11",
+        "dev": true
+      }
+    ],
+    "advisories": [
+      {
+        "title": "nanoid: non-secure generators can loop indefinitely with negative size",
+        "url": "https://github.com/advisories/GHSA-28wg-ghj8-5hjv",
+        "severity": "high",
+        "range": "<3.3.16"
+      },
+      {
+        "title": "nanoid: custom generators can loop indefinitely when size is zero",
+        "url": "https://github.com/advisories/GHSA-2v37-7h3g-55p8",
+        "severity": "high",
+        "range": "<3.3.18"
+      },
+      {
+        "title": "nanoid: Integer Overflow or Wraparound",
+        "url": "https://github.com/advisories/GHSA-xwg4-73v4-xw9w",
+        "severity": "high",
+        "range": "<3.3.12"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "next",
+    "severity": "critical",
+    "version": "16.0.10",
+    "nodes": [
+      "node_modules/next"
+    ],
+    "parents": [
+      {
+        "parent": "project",
+        "specifier": "16.0.10",
+        "dev": false
+      }
+    ],
+    "advisories": [
+      {
+        "title": "Next.js self-hosted applications vulnerable to DoS via Image Optimizer remotePatterns configuration",
+        "url": "https://github.com/advisories/GHSA-9g9p-9gw9-jx7f",
+        "severity": "moderate",
+        "range": ">=15.6.0-canary.0 <16.1.5"
+      },
+      {
+        "title": "Next.js HTTP request deserialization can lead to DoS when using insecure React Server Components",
+        "url": "https://github.com/advisories/GHSA-h25m-26qc-wcjf",
+        "severity": "high",
+        "range": ">=16.0.0-beta.0 <16.0.11"
+      },
+      {
+        "title": "Next.js: HTTP request smuggling in rewrites",
+        "url": "https://github.com/advisories/GHSA-ggv3-7p47-pfv8",
+        "severity": "moderate",
+        "range": ">=16.0.0-beta.0 <16.1.7"
+      },
+      {
+        "title": "Next.js: Unbounded next/image disk cache growth can exhaust storage",
+        "url": "https://github.com/advisories/GHSA-3x4c-7xq6-9pq8",
+        "severity": "moderate",
+        "range": ">=16.0.0-beta.0 <16.1.7"
+      },
+      {
+        "title": "Next.js: Unbounded postponed resume buffering can lead to DoS",
+        "url": "https://github.com/advisories/GHSA-h27x-g6w4-24gq",
+        "severity": "moderate",
+        "range": ">=16.0.1 <16.1.7"
+      },
+      {
+        "title": "Next.js: null origin can bypass Server Actions CSRF checks",
+        "url": "https://github.com/advisories/GHSA-mq59-m269-xvcx",
+        "severity": "moderate",
+        "range": ">=16.0.1 <16.1.7"
+      },
+      {
+        "title": "Next.js: null origin can bypass dev HMR websocket CSRF checks",
+        "url": "https://github.com/advisories/GHSA-jcc7-9wpm-mj36",
+        "severity": "low",
+        "range": ">=16.0.1 <16.1.7"
+      },
+      {
+        "title": "Next.js has Unbounded Memory Consumption via PPR Resume Endpoint ",
+        "url": "https://github.com/advisories/GHSA-5f7q-jpqc-wp7h",
+        "severity": "moderate",
+        "range": ">=16.0.0-beta.0 <16.1.5"
+      },
+      {
+        "title": "Next.js has a Denial of Service with Server Components",
+        "url": "https://github.com/advisories/GHSA-q4gf-8mx6-v5v3",
+        "severity": "high",
+        "range": ">=16.0.0-beta.0 <16.2.3"
+      },
+      {
+        "title": "Next.js Vulnerable to Denial of Service with Server Components",
+        "url": "https://github.com/advisories/GHSA-8h8q-6873-q5fj",
+        "severity": "high",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js has a Middleware / Proxy bypass in App Router applications via segment-prefetch routes - Incomplete Fix Follow-Up",
+        "url": "https://github.com/advisories/GHSA-26hh-7cqf-hhc6",
+        "severity": "high",
+        "range": ">=16.0.0 <16.2.6"
+      },
+      {
+        "title": "Next.js's Middleware / Proxy redirects can be cache-poisoned",
+        "url": "https://github.com/advisories/GHSA-3g8h-86w9-wvmq",
+        "severity": "low",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js vulnerable to cross-site scripting in App Router applications using CSP nonces",
+        "url": "https://github.com/advisories/GHSA-ffhc-5mcf-pf4q",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js vulnerable to cache poisoning via collisions in React Server Component cache-busting",
+        "url": "https://github.com/advisories/GHSA-vfv6-92ff-j949",
+        "severity": "low",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js has cross-site scripting in beforeInteractive scripts with untrusted input",
+        "url": "https://github.com/advisories/GHSA-gx5p-jg67-6x7h",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js vulnerable to Denial of Service via connection exhaustion in applications using Cache Components",
+        "url": "https://github.com/advisories/GHSA-mg66-mrh9-m8jx",
+        "severity": "high",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js has a Denial of Service in the Image Optimization API",
+        "url": "https://github.com/advisories/GHSA-h64f-5h5j-jqjh",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js vulnerable to server-side request forgery in applications using WebSocket upgrades",
+        "url": "https://github.com/advisories/GHSA-c4j6-fc7j-m34r",
+        "severity": "high",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js has a Middleware / Proxy bypass through dynamic route parameter injection",
+        "url": "https://github.com/advisories/GHSA-492v-c6pp-mqqv",
+        "severity": "high",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js vulnerable to cache poisoning in React Server Component responses",
+        "url": "https://github.com/advisories/GHSA-wfc6-r584-vfw7",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js has a Middleware / Proxy bypass in App Router applications via segment-prefetch routes",
+        "url": "https://github.com/advisories/GHSA-267c-6grr-h53f",
+        "severity": "high",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js has a Middleware / Proxy bypass in Pages Router applications using i18n",
+        "url": "https://github.com/advisories/GHSA-36qx-fr4f-26g5",
+        "severity": "high",
+        "range": ">=16.0.0 <16.2.5"
+      },
+      {
+        "title": "Next.js: Middleware / Proxy bypass in App Router applications using Turbopack and single locale",
+        "url": "https://github.com/advisories/GHSA-6gpp-xcg3-4w24",
+        "severity": "high",
+        "range": ">=16.0.0 <16.2.11"
+      },
+      {
+        "title": "Next.js: Denial of Service in App Router using Server Actions",
+        "url": "https://github.com/advisories/GHSA-m99w-x7hq-7vfj",
+        "severity": "high",
+        "range": ">=16.0.0 <16.2.11"
+      },
+      {
+        "title": "Next.js: Server-Side Request Forgery in Server Actions on custom servers",
+        "url": "https://github.com/advisories/GHSA-89xv-2m56-2m9x",
+        "severity": "high",
+        "range": ">=16.0.0 <16.2.11"
+      },
+      {
+        "title": "Next.js: Cache confusion of response bodies for requests with bodies",
+        "url": "https://github.com/advisories/GHSA-68g3-v927-f742",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.2.11"
+      },
+      {
+        "title": "Next.js: Cache confusion of response bodies for requests with bodies containing invalid UTF-8 byte sequences",
+        "url": "https://github.com/advisories/GHSA-4633-3j49-mh5q",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.2.11"
+      },
+      {
+        "title": "Next.js: Unbounded Server Action payload in Edge runtime",
+        "url": "https://github.com/advisories/GHSA-4c39-4ccg-62r3",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.2.11"
+      },
+      {
+        "title": "Next.js: Server-Side Request Forgery in rewrites via attacker-controlled destination hostname",
+        "url": "https://github.com/advisories/GHSA-p9j2-gv94-2wf4",
+        "severity": "high",
+        "range": ">=16.0.0 <16.2.11"
+      },
+      {
+        "title": "Next.js: Denial of Service in the Image Optimization API using SVGs",
+        "url": "https://github.com/advisories/GHSA-q8wf-6r8g-63ch",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.2.11"
+      },
+      {
+        "title": "Next.js: Unauthenticated disclosure of internal Server Function endpoints",
+        "url": "https://github.com/advisories/GHSA-955p-x3mx-jcvp",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.2.11"
+      },
+      {
+        "title": "Next.js: Unauthenticated Remote Code Execution on windows-hosted servers",
+        "url": "https://github.com/advisories/GHSA-p293-qw3h-jr36",
+        "severity": "critical",
+        "range": ">=16.0.0 <16.3.3"
+      },
+      {
+        "title": "Next.js: Unauthenticated Remote Code Execution in Image Optimization API when AVIF files are used",
+        "url": "https://github.com/advisories/GHSA-2xp9-vwfh-vxw4",
+        "severity": "critical",
+        "range": ">=16.0.0 <16.3.3"
+      },
+      {
+        "title": "Next.js has cache poisoning of SSG and ISR pages in self-hosted applications",
+        "url": "https://github.com/advisories/GHSA-4jqv-mc3x-m676",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.3.8"
+      },
+      {
+        "title": "Next.js has information disclosure in development server's Model Context Protocol endpoint",
+        "url": "https://github.com/advisories/GHSA-39w2-rjm5-chcv",
+        "severity": "low",
+        "range": ">=16.0.0 <16.3.8"
+      },
+      {
+        "title": "Next.js has information disclosure in App Router metadata image routes via dynamicParams bypass",
+        "url": "https://github.com/advisories/GHSA-f87g-xv8r-7p7x",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.3.8"
+      },
+      {
+        "title": "Next.js has cache poisoning in SSG/ISR rendering that leads to cross-user content substitution and persistent denial of service",
+        "url": "https://github.com/advisories/GHSA-mcj8-r9mp-w47p",
+        "severity": "moderate",
+        "range": ">=16.0.0 <16.3.8"
+      },
+      {
+        "title": "Next.js has Server-Side Request Forgery in Image Optimization",
+        "url": "https://github.com/advisories/GHSA-cjq9-62q9-8jv4",
+        "severity": "high",
+        "range": ">=16.0.0 <16.3.8"
+      },
+      {
+        "title": "Next.js: Unauthenticated Remote Code Execution in Image Optimization API when SVG files are used",
+        "url": "https://github.com/advisories/GHSA-2464-fhr4-w9xw",
+        "severity": "critical",
+        "range": ">=16.0.0 <=16.4.0"
+      },
+      {
+        "title": "Next.js: Denial of Service in App Router using Server Actions",
+        "url": "https://github.com/advisories/GHSA-p3m5-59mp-jv5r",
+        "severity": "high",
+        "range": ">=16.0.0 <=16.4.0"
+      },
+      {
+        "title": "Next.js: Unauthenticated Remote Code Execution in `use cache` functions returning typed arrays",
+        "url": "https://github.com/advisories/GHSA-673q-mjm6-r5xr",
+        "severity": "critical",
+        "range": ">=16.0.0 <=16.4.0"
+      }
+    ],
+    "fixAvailable": {
+      "name": "next",
+      "version": "16.4.3",
+      "isSemVerMajor": false
+    }
+  },
+  {
+    "name": "nodemailer",
+    "severity": "high",
+    "version": "7.0.11",
+    "nodes": [
+      "node_modules/nodemailer"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/mailparser",
+        "specifier": "7.0.11",
+        "dev": false
+      }
+    ],
+    "advisories": [
+      {
+        "title": "Nodemailer has SMTP command injection due to unsanitized `envelope.size` parameter",
+        "url": "https://github.com/advisories/GHSA-c7w3-x93f-qmm8",
+        "severity": "low",
+        "range": "<8.0.4"
+      },
+      {
+        "title": "Nodemailer Vulnerable to SMTP Command Injection via CRLF in Transport name Option (EHLO/HELO) ",
+        "url": "https://github.com/advisories/GHSA-vvjj-xcjg-gr5g",
+        "severity": "moderate",
+        "range": "<=8.0.4"
+      },
+      {
+        "title": "Nodemailer: CRLF injection in Nodemailer List-* header comments allows arbitrary message header injection",
+        "url": "https://github.com/advisories/GHSA-268h-hp4c-crq3",
+        "severity": "moderate",
+        "range": "<=8.0.8"
+      },
+      {
+        "title": "Nodemailer jsonTransport bypasses disableFileAccess and disableUrlAccess during message normalization",
+        "url": "https://github.com/advisories/GHSA-wqvq-jvpq-h66f",
+        "severity": "moderate",
+        "range": "<=8.0.8"
+      },
+      {
+        "title": "Nodemailer: Message-level raw option bypasses disableFileAccess/disableUrlAccess, enabling arbitrary file read and full-response SSRF in the delivered message",
+        "url": "https://github.com/advisories/GHSA-p6gq-j5cr-w38f",
+        "severity": "high",
+        "range": "<=9.0.0"
+      },
+      {
+        "title": "Nodemailer: resolveContent() on a MailMessage bypasses disableFileAccess/disableUrlAccess when called with the legacy signature",
+        "url": "https://github.com/advisories/GHSA-8m3c-c648-2xjj",
+        "severity": "moderate",
+        "range": "<=9.1.0"
+      },
+      {
+        "title": "Nodemailer: IDN/Punycode domain allow-list bypass leads to email delivery to an attacker-controlled domain",
+        "url": "https://github.com/advisories/GHSA-wmmp-3585-3rmp",
+        "severity": "moderate",
+        "range": "<9.1.0"
+      },
+      {
+        "title": "Nodemailer: Quadratic (O(n²)) time complexity in addressparser allows remote denial of service via a crafted address list",
+        "url": "https://github.com/advisories/GHSA-2x7j-588g-ccc2",
+        "severity": "high",
+        "range": "<9.1.0"
+      },
+      {
+        "title": "Nodemailer: Recipient-domain validation bypass via RFC 5322 comment mis-parsing leads to email delivery to an attacker-controlled domain",
+        "url": "https://github.com/advisories/GHSA-cc9r-2j5m-2m83",
+        "severity": "moderate",
+        "range": ">=6.9.16 <9.1.0"
+      },
+      {
+        "title": "Nodemailer: Process-global DNS cache reuses TLS `servername` across transports, enabling cross-tenant SMTP credential disclosure",
+        "url": "https://github.com/advisories/GHSA-6vj9-mwq6-2f5v",
+        "severity": "moderate",
+        "range": ">=5.0.0 <10.0.2"
+      },
+      {
+        "title": "Nodemailer: Nested structured recipient arrays bypass the parser depth limit and cause stack exhaustion DoS",
+        "url": "https://github.com/advisories/GHSA-8vvx-rff5-p5rq",
+        "severity": "moderate",
+        "range": "<10.0.2"
+      },
+      {
+        "title": "Nodemailer: Quadratic backtracking in the addressparser free-text fallback allows remote denial of service",
+        "url": "https://github.com/advisories/GHSA-v53p-9fqp-m79j",
+        "severity": "high",
+        "range": "<=10.0.5"
+      },
+      {
+        "title": "Nodemailer: Improper TLS Certificate Validation in OAuth2 Token Fetch Enables Credential Interception",
+        "url": "https://github.com/advisories/GHSA-r7g4-qg5f-qqm2",
+        "severity": "high",
+        "range": "<=8.0.7"
+      },
+      {
+        "title": "Nodemailer: Quadratic (O(n^2)) DKIM header unfolding lets a large folded header cause remote denial of service during signing",
+        "url": "https://github.com/advisories/GHSA-39m8-27wv-hr27",
+        "severity": "moderate",
+        "range": ">=3.0.0 <=10.0.9"
+      },
+      {
+        "title": "Nodemailer: A nested comment ends early in addressparser, releasing the rest of the comment as a recipient",
+        "url": "https://github.com/advisories/GHSA-8c8m-p3m8-cjg8",
+        "severity": "moderate",
+        "range": ">=3.0.0 <10.1.4"
+      },
+      {
+        "title": "Nodemailer: A \";\" inside a quoted string or comment ends an address group early in addressparser, turning display text into a recipient",
+        "url": "https://github.com/advisories/GHSA-m943-m63m-w62w",
+        "severity": "moderate",
+        "range": ">=3.0.0 <10.1.4"
+      },
+      {
+        "title": "Nodemailer: A \">\" inside a quoted local part ends an angle-addr early in addressparser, delivering to a domain the header does not name",
+        "url": "https://github.com/advisories/GHSA-85x2-q946-cp5h",
+        "severity": "moderate",
+        "range": ">=3.0.0 <10.1.4"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "postcss",
+    "severity": "high",
+    "version": "8.5.13",
+    "nodes": [
+      "node_modules/next/node_modules/postcss",
+      "node_modules/postcss"
+    ],
+    "parents": [
+      {
+        "parent": "project",
+        "specifier": "^8.5.6",
+        "dev": false
+      },
+      {
+        "parent": "node_modules/@tailwindcss/postcss",
+        "specifier": "^8.4.41",
+        "dev": true
+      },
+      {
+        "parent": "node_modules/next",
+        "specifier": "8.4.31",
+        "dev": false
+      },
+      {
+        "parent": "node_modules/vite",
+        "specifier": "^8.5.10",
+        "dev": true
+      }
+    ],
+    "advisories": [
+      {
+        "title": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
+        "url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+        "severity": "moderate",
+        "range": "<8.5.10"
+      },
+      {
+        "title": "PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments",
+        "url": "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+        "severity": "high",
+        "range": "<=8.5.11"
+      },
+      {
+        "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q — attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+        "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+        "severity": "moderate",
+        "range": "<=8.5.22"
+      },
+      {
+        "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+        "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+        "severity": "high",
+        "range": "<=8.5.17"
+      }
+    ],
+    "fixAvailable": {
+      "name": "next",
+      "version": "16.4.3",
+      "isSemVerMajor": false
+    }
+  },
+  {
+    "name": "prisma",
+    "severity": "high",
+    "version": "6.16.2",
+    "nodes": [
+      "node_modules/prisma"
+    ],
+    "parents": [
+      {
+        "parent": "project",
+        "specifier": "^6.16.2",
+        "dev": false
+      }
+    ],
+    "advisories": [],
+    "fixAvailable": {
+      "name": "prisma",
+      "version": "7.10.1",
+      "isSemVerMajor": true
+    }
+  },
+  {
+    "name": "resend",
+    "severity": "moderate",
+    "version": "6.9.1",
+    "nodes": [
+      "node_modules/resend"
+    ],
+    "parents": [
+      {
+        "parent": "project",
+        "specifier": "^6.9.1",
+        "dev": false
+      }
+    ],
+    "advisories": [],
+    "fixAvailable": true
+  },
+  {
+    "name": "sharp",
+    "severity": "high",
+    "version": "0.34.4",
+    "nodes": [
+      "node_modules/sharp"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/next",
+        "specifier": "^0.34.4",
+        "dev": false
+      }
+    ],
+    "advisories": [
+      {
+        "title": "sharp inherited vulnerabilities in libvips: CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591",
+        "url": "https://github.com/advisories/GHSA-f88m-g3jw-g9cj",
+        "severity": "high",
+        "range": "<0.35.0"
+      },
+      {
+        "title": "sharp: Vulnerabilities in libheif: GHSA-g89c-p67h-r497 and GHSA-2jg2-4ch7-h545",
+        "url": "https://github.com/advisories/GHSA-rgj7-g3m4-5g8c",
+        "severity": "high",
+        "range": "<0.35.4"
+      },
+      {
+        "title": "sharp : Vulnerability in librsvg dependency CVE-2026-96889",
+        "url": "https://github.com/advisories/GHSA-wq5f-xc86-pv6w",
+        "severity": "high",
+        "range": "<0.35.5"
+      }
+    ],
+    "fixAvailable": {
+      "name": "next",
+      "version": "16.4.3",
+      "isSemVerMajor": false
+    }
+  },
+  {
+    "name": "source-map-js",
+    "severity": "high",
+    "version": "1.2.1",
+    "nodes": [
+      "node_modules/source-map-js"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/@tailwindcss/node",
+        "specifier": "^1.2.1",
+        "dev": true
+      },
+      {
+        "parent": "node_modules/next/node_modules/postcss",
+        "specifier": "^1.0.2",
+        "dev": false
+      },
+      {
+        "parent": "node_modules/postcss",
+        "specifier": "^1.2.1",
+        "dev": true
+      }
+    ],
+    "advisories": [
+      {
+        "title": "source-map-js allows event-loop denial of service through indexed source-map section offsets",
+        "url": "https://github.com/advisories/GHSA-68fv-2mgg-jv7q",
+        "severity": "high",
+        "range": ">=1.0.0 <1.2.2"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "svix",
+    "severity": "moderate",
+    "version": "1.84.1",
+    "nodes": [
+      "node_modules/svix"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/resend",
+        "specifier": "1.84.1",
+        "dev": false
+      }
+    ],
+    "advisories": [],
+    "fixAvailable": true
+  },
+  {
+    "name": "tar",
+    "severity": "critical",
+    "version": "7.5.7",
+    "nodes": [
+      "node_modules/tar"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/@tailwindcss/oxide",
+        "specifier": "^7.4.3",
+        "dev": true
+      }
+    ],
+    "advisories": [
+      {
+        "title": "Arbitrary File Read/Write via Hardlink Target Escape Through Symlink Chain in node-tar Extraction",
+        "url": "https://github.com/advisories/GHSA-83g3-92jg-28cx",
+        "severity": "high",
+        "range": "<7.5.8"
+      },
+      {
+        "title": "tar has Hardlink Path Traversal via Drive-Relative Linkpath",
+        "url": "https://github.com/advisories/GHSA-qffp-2rhf-9h96",
+        "severity": "high",
+        "range": "<=7.5.9"
+      },
+      {
+        "title": "node-tar Symlink Path Traversal via Drive-Relative Linkpath",
+        "url": "https://github.com/advisories/GHSA-9ppj-qmqm-q256",
+        "severity": "high",
+        "range": "<=7.5.10"
+      },
+      {
+        "title": "node-tar applies PAX size override to intermediary GNU long-name/long-link headers, causing tar parser interpretation differential (file smuggling)",
+        "url": "https://github.com/advisories/GHSA-vmf3-w455-68vh",
+        "severity": "moderate",
+        "range": "<=7.5.15"
+      },
+      {
+        "title": "node-tar: Process crash via PAX numeric path type confusion",
+        "url": "https://github.com/advisories/GHSA-w8wr-v893-vjvp",
+        "severity": "moderate",
+        "range": "<=7.5.17"
+      },
+      {
+        "title": "node-tar: Decompression/parse DoS via unlimited input",
+        "url": "https://github.com/advisories/GHSA-23hp-3jrh-7fpw",
+        "severity": "critical",
+        "range": "<=7.5.18"
+      },
+      {
+        "title": "node-tar: Negative tar entry size causes infinite loop in archive replace",
+        "url": "https://github.com/advisories/GHSA-8x88-c5mf-7j5w",
+        "severity": "high",
+        "range": "<=7.5.17"
+      },
+      {
+        "title": "node-tar: Uncaught Exception DoS via NUL byte in PAX path/linkpath records",
+        "url": "https://github.com/advisories/GHSA-gvwx-54wh-qm9j",
+        "severity": "moderate",
+        "range": "<=7.5.16"
+      },
+      {
+        "title": "node-tar: Uncontrolled recursion in mapHas/filesFilter allows uncatchable stack-overflow DoS via crafted long-path tar with member selection",
+        "url": "https://github.com/advisories/GHSA-r292-9mhp-454m",
+        "severity": "high",
+        "range": "<=7.5.20"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "uuid",
+    "severity": "moderate",
+    "version": "9.0.1",
+    "nodes": [
+      "node_modules/svix/node_modules/uuid",
+      "node_modules/uuid"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/mercadopago",
+        "specifier": "^9.0.0",
+        "dev": false
+      },
+      {
+        "parent": "node_modules/svix",
+        "specifier": "^10.0.0",
+        "dev": false
+      }
+    ],
+    "advisories": [
+      {
+        "title": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+        "url": "https://github.com/advisories/GHSA-w5hq-g745-h8pq",
+        "severity": "moderate",
+        "range": "<11.1.1"
+      }
+    ],
+    "fixAvailable": {
+      "name": "mercadopago",
+      "version": "3.6.1",
+      "isSemVerMajor": true
+    }
+  },
+  {
+    "name": "vite",
+    "severity": "high",
+    "version": "8.0.10",
+    "nodes": [
+      "node_modules/vite"
+    ],
+    "parents": [
+      {
+        "parent": "node_modules/vitest",
+        "specifier": "^6.0.0 || ^7.0.0 || ^8.0.0",
+        "dev": true
+      }
+    ],
+    "advisories": [
+      {
+        "title": "launch-editor: NTLMv2 hash disclosure via UNC path handling on Windows",
+        "url": "https://github.com/advisories/GHSA-v6wh-96g9-6wx3",
+        "severity": "moderate",
+        "range": ">=8.0.0 <=8.0.15"
+      },
+      {
+        "title": "vite: `server.fs.deny` bypass on Windows alternate paths",
+        "url": "https://github.com/advisories/GHSA-fx2h-pf6j-xcff",
+        "severity": "high",
+        "range": ">=8.0.0 <=8.0.15"
+      },
+      {
+        "title": "launch-editor: escapeCmdArgs() omits % escaping on Windows",
+        "url": "https://github.com/advisories/GHSA-698v-4r3x-3vcv",
+        "severity": "moderate",
+        "range": ">=8.0.0 <=8.1.5"
+      },
+      {
+        "title": "launch-editor: Editor CLI flag misinterpretation causing arbitrary command execution for some editors",
+        "url": "https://github.com/advisories/GHSA-r825-w8mm-5pxw",
+        "severity": "moderate",
+        "range": ">=8.0.0 <=8.1.5"
+      },
+      {
+        "title": "launch-editor: `fs.existsSync()` existence check can be bypassed on Windows",
+        "url": "https://github.com/advisories/GHSA-587h-7wmj-h5pm",
+        "severity": "high",
+        "range": ">=8.0.0 <=8.1.5"
+      },
+      {
+        "title": "Vite: Cross origin script execution through Vite custom middleware",
+        "url": "https://github.com/advisories/GHSA-9jrq-w75r-8gcw",
+        "severity": "low",
+        "range": ">=8.0.0 <=8.1.5"
+      },
+      {
+        "title": "Vite: Files outside `server.fs.allow` could be served when project paths match system paths on non-Windows machine",
+        "url": "https://github.com/advisories/GHSA-rq7h-c2jc-7f22",
+        "severity": "moderate",
+        "range": ">=8.0.0 <=8.1.5"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "vitest",
+    "severity": "moderate",
+    "version": "4.1.5",
+    "nodes": [
+      "node_modules/vitest"
+    ],
+    "parents": [
+      {
+        "parent": "project",
+        "specifier": "^4.1.5",
+        "dev": false
+      }
+    ],
+    "advisories": [
+      {
+        "title": "Vitest: Path Traversal / Arbitrary File Read via @vitest/mocker Redirect Mock",
+        "url": "https://github.com/advisories/GHSA-82fw-gwwq-j7x9",
+        "severity": "moderate",
+        "range": ">=2.1.0 <4.1.11"
+      }
+    ],
+    "fixAvailable": true
+  },
+  {
+    "name": "zod",
+    "severity": "high",
+    "version": "4.1.11",
+    "nodes": [
+      "node_modules/zod"
+    ],
+    "parents": [
+      {
+        "parent": "project",
+        "specifier": "^4.1.9",
+        "dev": false
+      }
+    ],
+    "advisories": [
+      {
+        "title": "Zod can exhaust memory while validating oversized constrained collections",
+        "url": "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5",
+        "severity": "high",
+        "range": "<4.6.6"
+      }
+    ],
+    "fixAvailable": true
+  }
+]
