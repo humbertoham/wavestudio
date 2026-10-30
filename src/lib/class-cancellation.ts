@@ -50,7 +50,8 @@ export function formatBookingCancellation(
 
 export function isLateCanceledBooking(
   classDateIso: string,
-  canceledAt?: string | null
+  canceledAt?: string | null,
+  refundToken?: boolean | null
 ) {
   if (!canceledAt) return false;
 
@@ -59,6 +60,12 @@ export function isLateCanceledBooking(
 
   if (Number.isNaN(classTime) || Number.isNaN(canceledTime)) return false;
 
-  const minutesBeforeClass = Math.floor((classTime - canceledTime) / 60000);
-  return minutesBeforeClass < 240;
+  // User cancellations persist their on-time/late decision, including the policy
+  // in effect then. Never reclassify history using today's cancellation window.
+  if (typeof refundToken === "boolean") return !refundToken;
+
+  // Legacy and manager cancellations may have no saved decision. Preserve their
+  // existing four-hour display rule; this is not used for new user decisions.
+  const legacyCutoffMs = 4 * 60 * 60 * 1000;
+  return classTime - canceledTime < legacyCutoffMs;
 }

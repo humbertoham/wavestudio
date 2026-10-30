@@ -32,7 +32,7 @@ describe("class cancellation display", () => {
     ).toBeNull();
   });
 
-  it("keeps the existing late-cancellation calculation unchanged", () => {
+  it("preserves the legacy display rule for records without a saved decision", () => {
     const classDate = "2026-07-20T20:00:00.000Z";
 
     expect(isLateCanceledBooking(classDate, "2026-07-20T17:00:00.000Z")).toBe(
@@ -42,5 +42,25 @@ describe("class cancellation display", () => {
       false
     );
     expect(isLateCanceledBooking(classDate, null)).toBe(false);
+  });
+
+  it("does not reclassify historical on-time cancellations between four and six hours", () => {
+    const classDate = "2026-07-20T20:00:00.000Z";
+    const canceledAt = "2026-07-20T15:00:00.000Z";
+    expect(isLateCanceledBooking(classDate, canceledAt, true)).toBe(false);
+    expect(isLateCanceledBooking(classDate, canceledAt, null)).toBe(false);
+    expect(isLateCanceledBooking(classDate, "2026-07-20T16:00:00.000Z")).toBe(false);
+    expect(isLateCanceledBooking(classDate, "2026-07-20T16:00:00.001Z")).toBe(true);
+  });
+
+  it("displays a new late cancellation inside six hours using its persisted decision", () => {
+    expect(isLateCanceledBooking("2026-10-30T20:00:00Z", "2026-10-30T15:00:00Z", false)).toBe(true);
+    expect(isLateCanceledBooking("2026-10-30T20:00:00Z", "2026-10-30T14:00:00Z", true)).toBe(false);
+  });
+
+  it("does not fabricate cancellation metadata when a saved decision lacks a valid timestamp", () => {
+    expect(isLateCanceledBooking("2026-10-30T20:00:00Z", null, false)).toBe(false);
+    expect(isLateCanceledBooking("invalid", "2026-10-30T15:00:00Z", false)).toBe(false);
+    expect(isLateCanceledBooking("2026-10-30T20:00:00Z", "invalid", false)).toBe(false);
   });
 });

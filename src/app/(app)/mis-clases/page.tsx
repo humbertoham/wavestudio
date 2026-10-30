@@ -22,10 +22,13 @@ import {
   updatePaginationSearchParams,
 } from "@/lib/my-classes-pagination";
 import { useSession } from "@/lib/useSession";
+import {
+  isLateCancellation,
+  LATE_CANCELLATION_WARNING,
+} from "@/lib/cancellation-policy";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
-const CANCEL_WINDOW_MIN = 240;
 
 type BookingStatus = "ACTIVE" | "CANCELED";
 type Affiliation = "NONE" | "WELLHUB" | "TOTALPASS";
@@ -592,10 +595,10 @@ function BookingCard({
   const spots = booking.quantity ?? 1;
   const cost = classItem.creditCost ?? 1;
   const refundTokens = spots * cost;
-  const minutesUntilStart = Math.floor(
-    (new Date(classItem.date).getTime() - Date.now()) / 60_000
+  const lateCancel = isLateCancellation(
+    new Date(classItem.date),
+    new Date()
   );
-  const lateCancel = minutesUntilStart < CANCEL_WINDOW_MIN;
   const hasPenalty = affiliation === "WELLHUB" || affiliation === "TOTALPASS";
 
   return (
@@ -707,7 +710,7 @@ function LateCancelModal({
         </p>
 
         <p className="mt-4 text-sm text-red-600">
-          Faltan menos de 4 horas para la clase.
+          {LATE_CANCELLATION_WARNING}
           <br />
           {hasPenalty ? (
             <>

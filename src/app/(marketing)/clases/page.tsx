@@ -10,6 +10,10 @@ import {
   shouldLoadClassesPrivateData,
 } from "@/components/booking/ClassesAccountSummary";
 import { useSession } from "@/lib/useSession";
+import {
+  isLateCancellation,
+  LATE_CANCELLATION_WARNING,
+} from "@/lib/cancellation-policy";
 
 const EASE = cubicBezier(0.22, 1, 0.36, 1);
 const MX_TZ = "America/Mexico_City";
@@ -977,10 +981,7 @@ export default function ClassesPage() {
   async function handleCancel(session: Session) {
     if (cancelBusyId === session.id) return;
 
-    const start = new Date(session.startsAtISO);
-    const minutesUntil = Math.floor((start.getTime() - Date.now()) / 60000);
-
-    if (minutesUntil < 240) {
+    if (isLateCancellation(new Date(session.startsAtISO), new Date())) {
       setLateCancelSession(session);
       return;
     }
@@ -1482,7 +1483,7 @@ function LateCancelModalLegacy({
         <p className="mt-4 text-sm text-red-600">
           {hasPenalty ? (
             <>
-              Faltan menos de 4 horas para la clase.
+              {LATE_CANCELLATION_WARNING}
               <br />
               Esta cancelación podría generar un cargo de $100 MXN por cancelación tardía.
               <br />
@@ -1494,7 +1495,7 @@ function LateCancelModalLegacy({
             </>
           ) : (
             <>
-              Faltan menos de 4 horas para la clase.
+              {LATE_CANCELLATION_WARNING}
               <br />
               Este crédito no podrá recuperarse debido a la cancelación tardía.
               <br />
@@ -1551,7 +1552,7 @@ function LateCancelModal({
         <p className="mt-4 text-sm text-red-600">
           {hasPenalty ? (
             <>
-              Faltan menos de 4 horas para la clase.
+              {LATE_CANCELLATION_WARNING}
               <br />
               Esta cancelación podría generar un cargo de $100 MXN por cancelación tardía.
               <br />
@@ -1563,7 +1564,7 @@ function LateCancelModal({
             </>
           ) : (
             <>
-              Faltan menos de 4 horas para la clase.
+              {LATE_CANCELLATION_WARNING}
               <br />
               Este crédito no podrá recuperarse debido a la cancelación tardía.
               <br />

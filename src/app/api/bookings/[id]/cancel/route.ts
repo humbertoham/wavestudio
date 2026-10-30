@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 
 import { getAuth } from "@/lib/auth";
+import { isLateCancellation } from "@/lib/cancellation-policy";
 import {
   createSingleSeatBookingWithDebit,
   isManagedBookingError,
@@ -10,8 +11,6 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const CANCEL_WINDOW_MIN = 240;
 
 function j(status: number, body: unknown) {
   return NextResponse.json(body, { status });
@@ -77,17 +76,15 @@ export async function PATCH(
       return j(409, { code: "ALREADY_CANCELED" });
     }
 
-    if (booking.class.date.getTime() <= Date.now()) {
+    const canceledAt = new Date();
+    if (booking.class.date.getTime() <= canceledAt.getTime()) {
       return j(409, {
         code: "CLASS_ALREADY_STARTED",
         message: "La clase ya comenzo y no puede cancelarse.",
       });
     }
 
-    const minutesUntilStart = Math.floor(
-      (booking.class.date.getTime() - Date.now()) / 60000
-    );
-    const isLateCancel = minutesUntilStart < CANCEL_WINDOW_MIN;
+    const isLateCancel = isLateCancellation(booking.class.date, canceledAt);
     const seatsReleased = booking.quantity ?? 1;
 
     let result: CancelResult | null = null;
@@ -100,7 +97,7 @@ export async function PATCH(
               where: { id: booking.id },
               data: {
                 status: "CANCELED",
-                canceledAt: new Date(),
+                canceledAt,
                 refundToken: !isLateCancel,
               },
               include: {

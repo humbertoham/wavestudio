@@ -56,6 +56,7 @@ type ClassApi = {
     status?: "ACTIVE" | "CANCELED";
     attended?: boolean;
     canceledAt?: string | null;
+    refundToken?: boolean | null;
     isNewUser?: boolean;
     isFirstBooking?: boolean;
     user: {
@@ -99,6 +100,7 @@ type CanceledRow = {
   phone?: string | null;
   affiliation: Affiliation;
   canceledAt?: string | null;
+  refundToken?: boolean | null;
 };
 
 type WaitlistRow = {
@@ -530,6 +532,7 @@ export default function ClassAdminPage() {
         phone: booking.user?.phone ?? null,
         affiliation: booking.user?.affiliation ?? "NONE",
         canceledAt: booking.canceledAt ?? null,
+        refundToken: booking.refundToken,
       }));
   }, [cls]);
 
@@ -1013,7 +1016,11 @@ export default function ClassAdminPage() {
               const hasPenalty =
                 (booking.affiliation === "WELLHUB" ||
                   booking.affiliation === "TOTALPASS") &&
-                isLateCanceledBooking(cls.date, booking.canceledAt);
+                isLateCanceledBooking(
+                  cls.date,
+                  booking.canceledAt,
+                  booking.refundToken
+                );
 
               return (
                 <div
